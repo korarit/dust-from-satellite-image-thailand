@@ -346,6 +346,11 @@ class GroundTruthLoader:
             return df.copy(), df.copy()
 
         cutoff = pd.to_datetime(split_date)
+        if getattr(df["timestamp_utc"].dt, "tz", None) is not None and cutoff.tzinfo is None:
+            cutoff = cutoff.tz_localize("UTC")
+        elif getattr(df["timestamp_utc"].dt, "tz", None) is None and cutoff.tzinfo is not None:
+            cutoff = cutoff.tz_localize(None)
+
         train_df = df[df["timestamp_utc"] < cutoff].copy()
         test_df = df[df["timestamp_utc"] >= cutoff].copy()
 

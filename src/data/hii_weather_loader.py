@@ -65,7 +65,12 @@ class HIIWeatherLoader:
             return self._metadata_df
 
         if not self.metadata_path.exists():
-            raise FileNotFoundError(f"HII master metadata not found at {self.metadata_path}")
+            from src.config.paths import PROJECT_ROOT
+            fallback_meta = PROJECT_ROOT / "data" / "metadata" / "hii_stations_master_metadata.csv"
+            if fallback_meta.exists():
+                self.metadata_path = fallback_meta
+            else:
+                raise FileNotFoundError(f"HII master metadata not found at {self.metadata_path}")
 
         df = pd.read_csv(self.metadata_path)
         # Ensure standard column naming and coordinate validity
@@ -279,8 +284,22 @@ class HIIWeatherLoader:
             return pd.DataFrame()
 
         combined = pd.concat(month_dfs, ignore_index=True)
-        # Filter exact date range
-        mask = (combined["timestamp_utc"] >= start_dt) & (combined["timestamp_utc"] <= end_dt)
+        # Harmonize timezone between timestamp_utc and start_dt/end_dt
+        ts_series = combined["timestamp_utc"]
+        s_dt = start_dt
+        e_dt = end_dt
+        if getattr(ts_series.dt, "tz", None) is not None:
+            if s_dt.tzinfo is None:
+                s_dt = s_dt.tz_localize("UTC")
+            if e_dt.tzinfo is None:
+                e_dt = e_dt.tz_localize("UTC")
+        else:
+            if s_dt.tzinfo is not None:
+                s_dt = s_dt.tz_localize(None)
+            if e_dt.tzinfo is not None:
+                e_dt = e_dt.tz_localize(None)
+
+        mask = (ts_series >= s_dt) & (ts_series <= e_dt)
         filtered = combined[mask].drop_duplicates(subset=["station_code", "timestamp_utc"]).copy()
         return filtered.sort_values(["station_code", "timestamp_utc"]).reset_index(drop=True)
 
@@ -297,6 +316,11 @@ class HIIWeatherLoader:
             return df.copy(), df.copy()
 
         cutoff = pd.to_datetime(split_date)
+        if getattr(df["timestamp_utc"].dt, "tz", None) is not None and cutoff.tzinfo is None:
+            cutoff = cutoff.tz_localize("UTC")
+        elif getattr(df["timestamp_utc"].dt, "tz", None) is None and cutoff.tzinfo is not None:
+            cutoff = cutoff.tz_localize(None)
+
         train_df = df[df["timestamp_utc"] < cutoff].copy()
         test_df = df[df["timestamp_utc"] >= cutoff].copy()
 

@@ -98,10 +98,18 @@ class OpenAQLoader:
         if self._stations_df is None:
             parquet_path = self.metadata_dir / "openaq_thailand_stations.parquet"
             csv_path = self.metadata_dir / "openaq_thailand_stations.csv"
+            from src.config.paths import PROJECT_ROOT
+            fallback_parquet = PROJECT_ROOT / "data" / "metadata" / "openaq_thailand_stations.parquet"
+            fallback_csv = PROJECT_ROOT / "data" / "metadata" / "openaq_thailand_stations.csv"
+
             if parquet_path.exists():
                 self._stations_df = pd.read_parquet(parquet_path)
             elif csv_path.exists():
                 self._stations_df = pd.read_csv(csv_path)
+            elif fallback_parquet.exists():
+                self._stations_df = pd.read_parquet(fallback_parquet)
+            elif fallback_csv.exists():
+                self._stations_df = pd.read_csv(fallback_csv)
             else:
                 records = [
                     {
