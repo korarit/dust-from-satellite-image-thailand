@@ -161,8 +161,9 @@ ALL_FEATURE_COLUMNS = (
 )
 
 FULL_MULTIMODAL_COLUMNS = ALL_FEATURE_COLUMNS
-
 TARGET_COLUMN = "observed_pm25"
+TARGET_COLUMN_PM25 = "observed_pm25"
+TARGET_COLUMN_PM10 = "observed_pm10"
 
 # Physical Climatology Fallback Constants for Thailand (Deterministic)
 CLIMATOLOGY_PRESSURE_HPA = 1013.25
@@ -282,14 +283,23 @@ class SpatialAntiLeakageValidator:
         return True
 
     @staticmethod
-    def verify_target_feature_isolation(feature_columns: List[str], target_col: str = TARGET_COLUMN) -> bool:
+    def verify_target_feature_isolation(
+        feature_columns: List[str],
+        target_col: Union[str, List[str]] = TARGET_COLUMN
+    ) -> bool:
         """
-        Verifies that target variable is NEVER included in feature column list.
+        Verifies that target variable(s) are NEVER included in feature column list.
         """
-        if target_col in feature_columns:
-            msg = f"🚨 TARGET ISOLATION BREACH: '{target_col}' detected in feature columns!"
-            logger.error(msg)
-            raise TargetFeatureIsolationError(msg)
+        targets = [target_col] if isinstance(target_col, str) else list(target_col)
+        for t in ["observed_pm25", "observed_pm10"]:
+            if t not in targets:
+                targets.append(t)
+
+        for t in targets:
+            if t in feature_columns:
+                msg = f"🚨 TARGET ISOLATION BREACH: '{t}' detected in feature columns!"
+                logger.error(msg)
+                raise TargetFeatureIsolationError(msg)
         return True
 
 
@@ -571,15 +581,17 @@ class TargetMatcher:
     def filter_training_cells(
         self,
         grid_df: pd.DataFrame,
-        target_val_col: str = TARGET_COLUMN
+        target_val_col: str = TARGET_COLUMN,
+        target_col: Optional[str] = None,
     ) -> pd.DataFrame:
         """
-        Filters the matrix to only include rows that have a valid ground truth PM2.5 label
+        Filters the matrix to only include rows that have a valid ground truth PM2.5/PM10 label
         (for training and evaluation splits).
         """
-        if target_val_col not in grid_df.columns:
-            raise KeyError(f"Target column '{target_val_col}' not found in DataFrame")
-        return grid_df.dropna(subset=[target_val_col]).reset_index(drop=True)
+        eff_col = target_col or target_val_col
+        if eff_col not in grid_df.columns:
+            raise KeyError(f"Target column '{eff_col}' not found in DataFrame")
+        return grid_df.dropna(subset=[eff_col]).reset_index(drop=True)
 
 
 # ==============================================================================
@@ -650,6 +662,7 @@ class FeatureMatrixBuilder:
         exclusion_radius_km: Optional[float] = None,
         impute_missing: bool = True,
         training_only: bool = False,
+        target_col: str = TARGET_COLUMN,
     ) -> pd.DataFrame:
         """
         Builds a single-timestamp unified feature matrix across grid cells.
@@ -669,7 +682,7 @@ class FeatureMatrixBuilder:
             )
         if ground_truth_df is not None and "timestamp_utc" in ground_truth_df.columns:
             TemporalAntiLeakageValidator.validate_dataframe(
-                ground_truth_df, run_dt, timestamp_col="timestamp_utc", source_name="Ground PM2.5 Target"
+                ground_truth_df, run_dt, timestamp_col="timestamp_utc", source_name="Ground Target"
             )
 
         # 2. Prepare Base Spatial Grid with Topography
@@ -710,20 +723,28 @@ class FeatureMatrixBuilder:
 
         # 6. Attach Ground Truth Target if provided
         if ground_truth_df is not None and not ground_truth_df.empty:
-            matrix = self.target_matcher.attach_ground_truth(
-                matrix,
-                ground_truth_df,
-                max_distance_km=exclusion_km,
-                lat_col="lat",
-                lon_col="lon",
-                target_dt=run_dt,
-            )
+            targets_to_attach = [target_col]
+            for candidate in ["observed_pm25", "observed_pm10"]:
+                if candidate in ground_truth_df.columns and candidate not in targets_to_attach:
+                    targets_to_attach.append(candidate)
+
+            for tc in targets_to_attach:
+                if tc in ground_truth_df.columns:
+                    matrix = self.target_matcher.attach_ground_truth(
+                        matrix,
+                        ground_truth_df,
+                        max_distance_km=exclusion_km,
+                        lat_col="lat",
+                        lon_col="lon",
+                        target_val_col=tc,
+                        target_dt=run_dt,
+                    )
             if training_only:
-                matrix = self.target_matcher.filter_training_cells(matrix)
+                matrix = self.target_matcher.filter_training_cells(matrix, target_val_col=target_col)
 
         # 7. Spatial Anti-Leakage & Target Isolation Verification
         SpatialAntiLeakageValidator.verify_target_feature_isolation(
-            feature_columns=ALL_FEATURE_COLUMNS, target_col=TARGET_COLUMN
+            feature_columns=ALL_FEATURE_COLUMNS, target_col=[TARGET_COLUMN, TARGET_COLUMN_PM10]
         )
 
         # 8. Deterministic Physics Fallback Imputer
@@ -736,8 +757,9 @@ class FeatureMatrixBuilder:
         diagnostic_cols = [c for c in ["cloud_occluded_flag", "imputed_flag"] if c in matrix.columns]
 
         ordered_cols = present_keys + present_features + diagnostic_cols
-        if TARGET_COLUMN in matrix.columns:
-            ordered_cols.append(TARGET_COLUMN)
+        for tc in ["observed_pm25", "observed_pm10"]:
+            if tc in matrix.columns and tc not in ordered_cols:
+                ordered_cols.append(tc)
 
         matrix = matrix[ordered_cols].copy()
 
@@ -747,6 +769,7 @@ class FeatureMatrixBuilder:
 
         matrix["resolution_km"] = np.float32(resolution_km)
         matrix["exclusion_radius_km"] = np.float32(exclusion_km)
+        matrix.attrs["target_column"] = target_col
 
         return matrix
 

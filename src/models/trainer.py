@@ -21,6 +21,8 @@ from src.config.paths import (
     MODEL_CONFIG_PATH,
     MODELS_DIR,
     REPORTS_DIR,
+    get_models_dir,
+    get_reports_dir,
     load_yaml_config,
 )
 from src.features.feature_matrix_builder import (
@@ -46,9 +48,12 @@ class ModelTrainer:
         self,
         config_path: Optional[Path] = None,
         output_dir: Optional[Path] = None,
+        pollutant: str = "pm25",
+        target_col: Optional[str] = None,
     ) -> None:
         self.config_path = config_path or MODEL_CONFIG_PATH
-        self.output_dir = output_dir or MODELS_DIR
+        self.pollutant = pollutant.lower()
+        self.output_dir = output_dir or get_models_dir(self.pollutant)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         if self.config_path.exists():
@@ -56,7 +61,13 @@ class ModelTrainer:
         else:
             self.config = {}
 
-        self.target_col = self.config.get("general", {}).get("target_column", TARGET_COLUMN)
+        if target_col is not None:
+            self.target_col = target_col
+        elif self.pollutant == "pm10":
+            self.target_col = self.config.get("general", {}).get("target_column_pm10", "observed_pm10")
+        else:
+            self.target_col = self.config.get("general", {}).get("target_column", TARGET_COLUMN)
+
         self.random_state = self.config.get("general", {}).get("random_state", 42)
         self.cv_splits = self.config.get("general", {}).get("cv_splits", 5)
 
@@ -102,14 +113,20 @@ class ModelTrainer:
         Trains the full 4-Model Suite and Stacking Ensemble on training data.
         """
         logger.info("=" * 70)
-        logger.info("🏋️ TRAINING MODEL SUITE: %s", experiment_id)
+        logger.info("🏋️ TRAINING MODEL SUITE (%s): %s", self.pollutant.upper(), experiment_id)
         logger.info("=" * 70)
 
         X, y, f_cols = self.prepare_data(train_df, feature_cols)
         logger.info("Dataset shape: %d samples, %d features", len(X), len(f_cols))
 
         splits = cv or self.cv_splits
-        ensemble = DustStackingEnsemble(config=self.config, name=f"Ensemble_{experiment_id}")
+        ensemble_name = f"Ensemble_{experiment_id}_{self.pollutant.upper()}" if self.pollutant == "pm10" else f"Ensemble_{experiment_id}"
+        ensemble = DustStackingEnsemble(
+            config=self.config,
+            name=ensemble_name,
+            pollutant=self.pollutant,
+            target_col=self.target_col,
+        )
         ensemble.fit(
             X=X,
             y=y,
@@ -118,8 +135,10 @@ class ModelTrainer:
             random_state=self.random_state,
         )
 
-        # Save checkpoint
-        checkpoint_dir = self.output_dir / experiment_id.lower().replace("-", "_")
+        # Save checkpoint with pollutant suffix: e.g. exp_2km_pm25, exp_2km_pm10
+        exp_clean = experiment_id.lower().replace("-", "_")
+        chk_name = exp_clean if exp_clean.endswith(f"_{self.pollutant}") else f"{exp_clean}_{self.pollutant}"
+        checkpoint_dir = self.output_dir / chk_name
         ensemble.save(checkpoint_dir)
         logger.info("Model checkpoint successfully saved to: %s", checkpoint_dir)
 
@@ -143,10 +162,10 @@ class ModelTrainer:
         # Evaluate individual models
         for m_key in MODEL_KEYS:
             pred_col = f"pred_{m_key}"
-            results[m_key] = compute_dust_metrics(y_test, comp_preds[pred_col])
+            results[m_key] = compute_dust_metrics(y_test, comp_preds[pred_col], pollutant=self.pollutant)
 
         # Evaluate ensemble
-        results["ensemble"] = compute_dust_metrics(y_test, comp_preds["pred_ensemble"])
+        results["ensemble"] = compute_dust_metrics(y_test, comp_preds["pred_ensemble"], pollutant=self.pollutant)
         results["weights"] = dict(ensemble.weights)
 
         # Build comparison dataframe
@@ -248,19 +267,26 @@ class ModelTrainer:
         summary_df: pd.DataFrame,
     ) -> None:
         """Writes markdown and JSON reports for Phase 4."""
-        REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+        target_dir = get_reports_dir(self.pollutant)
+        target_dir.mkdir(parents=True, exist_ok=True)
+        suffix = f"_{self.pollutant}"
+        pol_name = self.pollutant.upper()
 
-        # JSON Report
-        json_path = REPORTS_DIR / "phase4_model_suite_benchmark.json"
+        # JSON Report (Suffixed primary + legacy alias)
+        json_path = target_dir / f"phase4_model_suite_benchmark{suffix}.json"
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(benchmark_results, f, indent=2, default=str)
         logger.info("Saved JSON benchmark report to: %s", json_path)
 
+        json_legacy_path = target_dir / "phase4_model_suite_benchmark.json"
+        with open(json_legacy_path, "w", encoding="utf-8") as f:
+            json.dump(benchmark_results, f, indent=2, default=str)
+
         # Markdown Report
         md_lines = [
-            "# 🤖 Phase 4: Model Suite & Ensemble Training Benchmark Report",
+            f"# 🤖 Phase 4: Model Suite & Ensemble Training Benchmark Report ({pol_name})",
             "",
-            "> Thailand Multi-Resolution Satellite Dust Prediction (PM2.5 Real-time Nowcasting)",
+            f"> Thailand Multi-Resolution Satellite Dust Prediction ({pol_name} Real-time Nowcasting)",
             "",
             "## 1. Multi-Resolution Benchmark Summary (4 Models × 4 Resolutions)",
             "",
@@ -282,10 +308,14 @@ class ModelTrainer:
         md_lines.append("- **Directional Invariance**: CatBoost effectively utilizes 4-directional atmospheric pressure gradients.")
         md_lines.append("- **Monotonic Compliance**: XGBoost enforces physical laws on calm air (||∇P||) and split-window BTD.")
 
-        md_path = REPORTS_DIR / "phase4_model_suite_benchmark.md"
+        md_path = target_dir / f"phase4_model_suite_benchmark{suffix}.md"
         with open(md_path, "w", encoding="utf-8") as f:
             f.write("\n".join(md_lines))
         logger.info("Saved Markdown benchmark report to: %s", md_path)
+
+        md_legacy_path = target_dir / "phase4_model_suite_benchmark.md"
+        with open(md_legacy_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(md_lines))
 
     def run_weather_ablation_benchmark(
         self,

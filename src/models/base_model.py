@@ -19,23 +19,36 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
 logger = logging.getLogger(__name__)
 
-# Thailand PCD PM2.5 AQI Bands (µg/m³)
+# Thailand PCD AQI Bands (µg/m³)
+# PM2.5:
 # 0 - 15.0: Very Good (Blue)
 # 15.1 - 25.0: Good (Green)
 # 25.1 - 37.5: Moderate (Yellow)
 # 37.6 - 75.0: Orange (Unhealthy for sensitive groups)
 # > 75.0: Red (Hazardous)
-THAILAND_AQI_THRESHOLDS = [0.0, 15.0, 25.0, 37.5, 75.0, 1000.0]
+THAILAND_AQI_THRESHOLDS_PM25 = [0.0, 15.0, 25.0, 37.5, 75.0, 1000.0]
+
+# PM10:
+# 0 - 50.0: Very Good (Blue)
+# 50.1 - 80.0: Good (Green)
+# 80.1 - 120.0: Moderate (Yellow)
+# 120.1 - 180.0: Orange (Unhealthy for sensitive groups)
+# > 180.0: Red (Hazardous)
+THAILAND_AQI_THRESHOLDS_PM10 = [0.0, 50.0, 80.0, 120.0, 180.0, 1000.0]
+
+THAILAND_AQI_THRESHOLDS = THAILAND_AQI_THRESHOLDS_PM25
 
 
-def assign_aqi_category(pm25_values: np.ndarray) -> np.ndarray:
-    """Discretizes continuous PM2.5 into PCD AQI color category indices (0 to 4)."""
-    return np.digitize(pm25_values, bins=THAILAND_AQI_THRESHOLDS[1:-1], right=True)
+def assign_aqi_category(pm_values: np.ndarray, pollutant: str = "pm25") -> np.ndarray:
+    """Discretizes continuous PM concentration into PCD AQI color category indices (0 to 4)."""
+    bins = THAILAND_AQI_THRESHOLDS_PM10[1:-1] if "pm10" in pollutant.lower() else THAILAND_AQI_THRESHOLDS_PM25[1:-1]
+    return np.digitize(pm_values, bins=bins, right=True)
 
 
 def compute_dust_metrics(
     y_true: Union[pd.Series, np.ndarray],
-    y_pred: Union[pd.Series, np.ndarray]
+    y_pred: Union[pd.Series, np.ndarray],
+    pollutant: str = "pm25",
 ) -> Dict[str, float]:
     """
     Computes statistical and domain-specific air quality performance metrics.
@@ -70,7 +83,7 @@ def compute_dust_metrics(
     mae = float(mean_absolute_error(y_t, y_p))
     rmse = float(np.sqrt(mean_squared_error(y_t, y_p)))
 
-    # Safe MAPE: avoid division by zero when PM2.5 is near zero
+    # Safe MAPE: avoid division by zero when PM is near zero
     denom = np.maximum(y_t, 1.0)
     mape = float(np.mean(np.abs(y_t - y_p) / denom) * 100.0)
 
@@ -88,8 +101,8 @@ def compute_dust_metrics(
         pearson_val = 0.0
 
     # AQI Categorical Accuracy
-    cat_true = assign_aqi_category(y_t)
-    cat_pred = assign_aqi_category(y_p)
+    cat_true = assign_aqi_category(y_t, pollutant=pollutant)
+    cat_pred = assign_aqi_category(y_p, pollutant=pollutant)
     aqi_acc = float(np.mean(cat_true == cat_pred) * 100.0)
 
     return {

@@ -41,8 +41,14 @@ from sklearn.metrics import (
 
 logger = logging.getLogger(__name__)
 
-# Thailand Pollution Control Department (PCD) PM2.5 AQI Thresholds (µg/m³)
-THAILAND_AQI_THRESHOLDS = [0.0, 15.0, 25.0, 37.5, 75.0, 1000.0]
+# Thailand Pollution Control Department (PCD) AQI Thresholds (µg/m³)
+THAILAND_AQI_THRESHOLDS_PM25 = [0.0, 15.0, 25.0, 37.5, 75.0, 1000.0]
+THAILAND_AQI_THRESHOLDS_PM10 = [0.0, 50.0, 80.0, 120.0, 180.0, 1000.0]
+THAILAND_AQI_THRESHOLDS = THAILAND_AQI_THRESHOLDS_PM25
+
+HIGH_RISK_ALERT_THRESHOLD_PM25 = 37.6
+HIGH_RISK_ALERT_THRESHOLD_PM10 = 120.0
+HIGH_RISK_ALERT_THRESHOLD = HIGH_RISK_ALERT_THRESHOLD_PM25
 
 AQI_CATEGORY_NAMES_EN = [
     "Very Good",
@@ -71,16 +77,19 @@ AQI_COLOR_HEX = [
 AQI_COLOR_NAMES = ["Blue", "Green", "Yellow", "Orange", "Red"]
 
 
-def assign_aqi_category(pm25_values: Union[np.ndarray, pd.Series, List[float]]) -> np.ndarray:
+def assign_aqi_category(
+    pm_values: Union[np.ndarray, pd.Series, List[float]],
+    pollutant: str = "pm25"
+) -> np.ndarray:
     """
-    Discretizes continuous PM2.5 concentrations (µg/m³) into Thailand PCD
+    Discretizes continuous particulate matter concentrations (µg/m³) into Thailand PCD
     AQI category indices (0 to 4).
     """
-    arr = np.asarray(pm25_values, dtype=np.float64)
+    arr = np.asarray(pm_values, dtype=np.float64)
     # Clip negative values to zero
     arr = np.maximum(arr, 0.0)
-    # Bins: (0, 15], (15, 25], (25, 37.5], (37.5, 75], (75, inf)
-    cats = np.digitize(arr, bins=THAILAND_AQI_THRESHOLDS[1:-1], right=True)
+    bins = THAILAND_AQI_THRESHOLDS_PM10[1:-1] if "pm10" in pollutant.lower() else THAILAND_AQI_THRESHOLDS_PM25[1:-1]
+    cats = np.digitize(arr, bins=bins, right=True)
     return np.clip(cats, 0, 4).astype(np.int32)
 
 
@@ -168,6 +177,7 @@ def compute_continuous_metrics(
 def compute_aqi_classification_metrics(
     y_true: Union[pd.Series, np.ndarray, List[float]],
     y_pred: Union[pd.Series, np.ndarray, List[float]],
+    pollutant: str = "pm25",
 ) -> Dict[str, Any]:
     """
     Evaluates predictions against Thailand PCD 5-tier health warning categories.
@@ -190,8 +200,8 @@ def compute_aqi_classification_metrics(
     y_t = y_t[valid_mask]
     y_p = y_p[valid_mask]
 
-    cat_t = assign_aqi_category(y_t)
-    cat_p = assign_aqi_category(y_p)
+    cat_t = assign_aqi_category(y_t, pollutant=pollutant)
+    cat_p = assign_aqi_category(y_p, pollutant=pollutant)
 
     acc = float(accuracy_score(cat_t, cat_p) * 100.0)
 
@@ -241,13 +251,14 @@ def compute_aqi_classification_metrics(
 def compute_comprehensive_metrics(
     y_true: Union[pd.Series, np.ndarray, List[float]],
     y_pred: Union[pd.Series, np.ndarray, List[float]],
+    pollutant: str = "pm25",
 ) -> Dict[str, Any]:
     """
     Combines continuous regression metrics and PCD AQI classification metrics
     into a unified evaluation dictionary.
     """
     cont_metrics = compute_continuous_metrics(y_true, y_pred)
-    aqi_metrics = compute_aqi_classification_metrics(y_true, y_pred)
+    aqi_metrics = compute_aqi_classification_metrics(y_true, y_pred, pollutant=pollutant)
 
     return {
         **cont_metrics,

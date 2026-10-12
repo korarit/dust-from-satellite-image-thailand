@@ -19,6 +19,7 @@ from src.models.base_model import (
     compute_dust_metrics,
     assign_aqi_category,
     THAILAND_AQI_THRESHOLDS,
+    THAILAND_AQI_THRESHOLDS_PM10,
 )
 from src.models.lgbm_model import LGBMDustModel
 from src.models.catboost_model import CatBoostDustModel
@@ -32,6 +33,7 @@ __all__ = [
     "compute_dust_metrics",
     "assign_aqi_category",
     "THAILAND_AQI_THRESHOLDS",
+    "THAILAND_AQI_THRESHOLDS_PM10",
     "LGBMDustModel",
     "CatBoostDustModel",
     "XGBoostDustModel",

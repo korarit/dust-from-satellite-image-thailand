@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Thailand Real-time PM10 Nowcast Map</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        body, html {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background: #111827; color: #f3f4f6;
+        }
+        #map { width: 100%; height: 100%; }
+        .header-panel {
+            position: absolute; top: 15px; left: 60px; z-index: 1000;
+            background: rgba(17, 24, 39, 0.92); backdrop-filter: blur(8px);
+            padding: 14px 20px; border-radius: 12px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1);
+            max-width: 480px;
+        }
+        .header-panel h1 {
+            margin: 0 0 6px 0; font-size: 17px; font-weight: 700; color: #38bdf8;
+            display: flex; align-items: center; gap: 8px;
+        }
+        .header-panel p { margin: 0 0 10px 0; font-size: 12px; color: #9ca3af; }
+        .kpi-row { display: flex; gap: 10px; margin-top: 6px; }
+        .kpi-card {
+            flex: 1; background: rgba(31, 41, 55, 0.8); padding: 6px 10px;
+            border-radius: 8px; border: 1px solid rgba(255,255,255,0.05); text-align: center;
+        }
+        .kpi-val { font-size: 15px; font-weight: 700; color: #f9fafb; }
+        .kpi-lbl { font-size: 10px; color: #9ca3af; text-transform: uppercase; }
+        .legend-panel {
+            position: absolute; bottom: 25px; right: 20px; z-index: 1000;
+            background: rgba(17, 24, 39, 0.92); backdrop-filter: blur(8px);
+            padding: 12px 16px; border-radius: 12px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1);
+            font-size: 11px;
+        }
+        .legend-title { font-weight: 700; margin-bottom: 8px; font-size: 12px; color: #e5e7eb; }
+        .legend-item { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+        .legend-color { width: 14px; height: 14px; border-radius: 4px; border: 1px solid rgba(0,0,0,0.3); }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <div class="header-panel">
+        <h1>🛰️ Thailand PM10 Satellite Nowcast</h1>
+        <p>Ensemble Quartet (Himawari-9 IR + HII Directional Pressure + DEM 30m)</p>
+        <div class="kpi-row">
+            <div class="kpi-card"><div class="kpi-val">39.6</div><div class="kpi-lbl">Mean µg/m³</div></div>
+            <div class="kpi-card"><div class="kpi-val">16.4 - 67.7</div><div class="kpi-lbl">Min - Max</div></div>
+            <div class="kpi-card"><div class="kpi-val" style="color: #10b981;">0</div><div class="kpi-lbl">Alert Cells (≥120.0)</div></div>
+        </div>
+    </div>
+    <div class="legend-panel">
+        <div class="legend-title">PCD Thailand PM10 Standards</div>
+        <div class="legend-item"><div class="legend-color" style="background:#00b0f0;"></div><span>0 - 50.0 µg/m³ (ดีมาก / Very Good)</span></div>
+        <div class="legend-item"><div class="legend-color" style="background:#92d050;"></div><span>50.1 - 80.0 µg/m³ (ดี / Good)</span></div>
+        <div class="legend-item"><div class="legend-color" style="background:#ffff00;"></div><span>80.1 - 120.0 µg/m³ (ปานกลาง / Moderate)</span></div>
+        <div class="legend-item"><div class="legend-color" style="background:#ff7c00;"></div><span>120.1 - 180.0 µg/m³ (เริ่มมีผลกระทบ / Orange)</span></div>
+        <div class="legend-item"><div class="legend-color" style="background:#ff0000;"></div><span>> 180.0 µg/m³ (มีผลกระทบ / Hazardous)</span></div>
+    </div>
+    <script>
+        const map = L.map('map', { zoomControl: false }).setView([14.452070236206055, 101.0027847290039], 6);
+        L.control.zoom({ position: 'topright' }).addTo(map);
+
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; CartoDB & OpenStreetMap',
+            maxZoom: 16
+        }).addTo(map);
+
+        const markers = [{"lat": 7.56453, "lon": 99.5953, "pm": 21.0, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_022800", "elev": 14.9}, {"lat": 12.57388, "lon": 99.95436, "pm": 37.0, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_087252", "elev": 8.1}, {"lat": 12.61175, "lon": 102.1077, "pm": 20.2, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_088680", "elev": 14.0}, {"lat": 12.67463, "lon": 101.24361, "pm": 34.0, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_089944", "elev": 2.7}, {"lat": 12.98216, "lon": 101.20948, "pm": 42.0, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_097371", "elev": 5.0}, {"lat": 13.42349, "lon": 100.0315, "pm": 28.0, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_107795", "elev": 7.1}, {"lat": 13.6197, "lon": 100.54995, "pm": 25.0, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_112630", "elev": 8.0}, {"lat": 13.63886, "lon": 100.36521, "pm": 49.0, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_113057", "elev": 5.5}, {"lat": 13.6562, "lon": 100.49473, "pm": 45.0, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_113501", "elev": 10.4}, {"lat": 13.67439, "lon": 100.47635, "pm": 47.0, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_113937", "elev": 1.8}, {"lat": 13.67416, "lon": 100.51333, "pm": 55.0, "color": "#92d050", "tier_en": "Good", "tier_th": "\u0e14\u0e35", "gid": "GRID_113939", "elev": 5.0}, {"lat": 13.67334, "lon": 100.64274, "pm": 44.0, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_113946", "elev": 1.0}, {"lat": 13.69289, "lon": 100.40251, "pm": 37.0, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_114370", "elev": 10.0}, {"lat": 13.69166, "lon": 100.60589, "pm": 67.7, "color": "#92d050", "tier_en": "Good", "tier_th": "\u0e14\u0e35", "gid": "GRID_114381", "elev": 3.5}, {"lat": 13.69142, "lon": 100.64287, "pm": 63.5, "color": "#92d050", "tier_en": "Good", "tier_th": "\u0e14\u0e35", "gid": "GRID_114383", "elev": 1.0}, {"lat": 13.71128, "lon": 100.34714, "pm": 64.4, "color": "#92d050", "tier_en": "Good", "tier_th": "\u0e14\u0e35", "gid": "GRID_114804", "elev": 1.0}, {"lat": 13.69005, "lon": 102.50915, "pm": 21.1, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_114921", "elev": 1.0}, {"lat": 13.72862, "lon": 100.47669, "pm": 49.0, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_115248", "elev": 1.0}, {"lat": 13.72793, "lon": 100.58764, "pm": 38.0, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_115254", "elev": 4.4}, {"lat": 13.72757, "lon": 100.64312, "pm": 48.0, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_115257", "elev": 21.1}, {"lat": 13.74744, "lon": 100.34735, "pm": 38.0, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_115678", "elev": 1.0}, {"lat": 13.76455, "lon": 100.51391, "pm": 45.0, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_116124", "elev": 15.4}, {"lat": 13.76444, "lon": 100.5324, "pm": 43.0, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_116125", "elev": 1.0}, {"lat": 13.76432, "lon": 100.5509, "pm": 55.2, "color": "#92d050", "tier_en": "Good", "tier_th": "\u0e14\u0e35", "gid": "GRID_116126", "elev": 4.2}, {"lat": 13.76347, "lon": 100.68036, "pm": 30.0, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_116133", "elev": 1.2}, {"lat": 13.78318, "lon": 100.42154, "pm": 34.1, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_116556", "elev": 1.0}, {"lat": 13.78263, "lon": 100.51403, "pm": 43.0, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_116561", "elev": 12.0}, {"lat": 13.78252, "lon": 100.53252, "pm": 27.2, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_116562", "elev": 2.3}, {"lat": 13.78216, "lon": 100.58801, "pm": 37.0, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_116565", "elev": 1.5}, {"lat": 13.80012, "lon": 100.60663, "pm": 34.0, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_117003", "elev": 1.0}, {"lat": 13.8177, "lon": 100.68074, "pm": 38.0, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_117444", "elev": 13.4}, {"lat": 13.81732, "lon": 100.73624, "pm": 38.0, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_117447", "elev": 13.8}, {"lat": 13.85483, "lon": 100.533, "pm": 29.0, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_118310", "elev": 1.0}, {"lat": 13.85373, "lon": 100.6995, "pm": 46.0, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_118319", "elev": 1.0}, {"lat": 13.85252, "lon": 100.866, "pm": 38.0, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_118328", "elev": 4.5}, {"lat": 13.89013, "lon": 100.66276, "pm": 38.0, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_119191", "elev": 1.0}, {"lat": 13.90906, "lon": 100.53335, "pm": 49.0, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_119621", "elev": 18.2}, {"lat": 13.9087, "lon": 100.58887, "pm": 43.1, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_119624", "elev": 1.0}, {"lat": 14.03512, "lon": 100.60825, "pm": 40.0, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_122684", "elev": 8.3}, {"lat": 14.5208, "lon": 100.92714, "pm": 39.0, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_134500", "elev": 11.3}, {"lat": 14.61466, "lon": 100.44531, "pm": 49.0, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_136659", "elev": 1.0}, {"lat": 14.79419, "lon": 100.63229, "pm": 40.0, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_141029", "elev": 1.0}, {"lat": 14.94387, "lon": 103.10414, "pm": 42.0, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_145522", "elev": 233.7}, {"lat": 15.24767, "lon": 104.85494, "pm": 29.0, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_153900", "elev": 92.8}, {"lat": 15.37626, "lon": 100.02188, "pm": 33.0, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_154948", "elev": 10.3}, {"lat": 16.05131, "lon": 103.64833, "pm": 44.0, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_172582", "elev": 210.3}, {"lat": 16.18492, "lon": 103.29687, "pm": 47.0, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_175615", "elev": 213.5}, {"lat": 16.41628, "lon": 101.1507, "pm": 28.0, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_180296", "elev": 176.0}, {"lat": 16.44118, "lon": 100.32698, "pm": 28.0, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_180688", "elev": 1.0}, {"lat": 16.48089, "lon": 99.52158, "pm": 27.0, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_181517", "elev": 12.8}, {"lat": 16.54731, "lon": 104.72481, "pm": 46.0, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_185283", "elev": 93.2}, {"lat": 17.00418, "lon": 99.82363, "pm": 26.0, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_194176", "elev": 1.0}, {"lat": 17.19314, "lon": 102.45596, "pm": 38.0, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_199536", "elev": 248.7}, {"lat": 17.15759, "lon": 104.12501, "pm": 42.0, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_199625", "elev": 151.2}, {"lat": 17.4102, "lon": 104.76988, "pm": 59.5, "color": "#92d050", "tier_en": "Good", "tier_th": "\u0e14\u0e35", "gid": "GRID_206184", "elev": 102.3}, {"lat": 17.87397, "lon": 102.73278, "pm": 56.9, "color": "#92d050", "tier_en": "Good", "tier_th": "\u0e14\u0e35", "gid": "GRID_216080", "elev": 905.3}, {"lat": 18.56052, "lon": 99.03478, "pm": 25.0, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_231524", "elev": 866.6}, {"lat": 19.29871, "lon": 97.96893, "pm": 16.4, "color": "#00b0f0", "tier_en": "Very Good", "tier_th": "\u0e14\u0e35\u0e21\u0e32\u0e01", "gid": "GRID_249209", "elev": 660.9}];
+        markers.forEach(m => {
+            const circle = L.circleMarker([m.lat, m.lon], {
+                radius: 7,
+                fillColor: m.color,
+                color: '#ffffff',
+                weight: 0.8,
+                opacity: 0.9,
+                fillOpacity: 0.85
+            }).addTo(map);
+
+            let popupContent = `
+                <div style="font-family: sans-serif; font-size: 12px; color: #111;">
+                    <div style="font-weight: bold; font-size: 14px; margin-bottom: 4px;">
+                        PM10: <span style="color: ${m.color === '#ffff00' ? '#ca8a04' : m.color};">${m.pm} µg/m³</span>
+                    </div>
+                    <div><b>Status:</b> ${m.tier_th} (${m.tier_en})</div>
+                    <div><b>Grid ID:</b> ${m.gid}</div>
+                    <div><b>Coords:</b> ${m.lat.toFixed(4)}, ${m.lon.toFixed(4)}</div>
+                    ${m.elev !== null ? `<div><b>Elevation:</b> ${m.elev} m</div>` : ''}
+                </div>
+            `;
+            circle.bindPopup(popupContent);
+        });
+    </script>
+</body>
+</html>

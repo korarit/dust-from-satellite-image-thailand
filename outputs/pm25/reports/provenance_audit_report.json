@@ -1,0 +1,123 @@
+{
+  "audit_timestamp_utc": "2026-10-12T18:03:55.369537+00:00",
+  "overall_decision": "CERTIFIED_REAL_OBSERVATIONS_PASS",
+  "is_synthetic": false,
+  "gate_version": "1.0-strict-zero-mock",
+  "components": {
+    "codebase_ast_scanner": {
+      "scanner_status": "PASS",
+      "violations_count": 0,
+      "violations": []
+    },
+    "himawari_satellite": {
+      "status": "PASS",
+      "files_count": 94,
+      "verified": true,
+      "sample_files": [
+        {
+          "filename": "HS_H09_20230101_0000_B13_FLDK_R20_S0410.DAT",
+          "size_bytes": 6051533,
+          "sha256_prefix": "a00ebb8448e3b6f5",
+          "valid_hsd_naming": true
+        },
+        {
+          "filename": "HS_H09_20230101_0000_B15_FLDK_R20_S0410.DAT",
+          "size_bytes": 6051533,
+          "sha256_prefix": "b819038b60c201fc",
+          "valid_hsd_naming": true
+        },
+        {
+          "filename": "HS_H09_20251230_0000_B07_FLDK_R20_S0310.DAT",
+          "size_bytes": 6051523,
+          "sha256_prefix": "6fcf757c5b2f2bea",
+          "valid_hsd_naming": true
+        },
+        {
+          "filename": "HS_H09_20251230_0000_B07_FLDK_R20_S0410.DAT",
+          "size_bytes": 6051533,
+          "sha256_prefix": "8156990420690d54",
+          "valid_hsd_naming": true
+        },
+        {
+          "filename": "HS_H09_20251230_0000_B07_FLDK_R20_S0510.DAT",
+          "size_bytes": 6051523,
+          "sha256_prefix": "e8a7fabe35a370cc",
+          "valid_hsd_naming": true
+        }
+      ]
+    },
+    "master_grid_copernicus_dem": {
+      "status": "PASS",
+      "verified": true,
+      "total_cells": 276317,
+      "min_elevation_m": 1.0,
+      "max_elevation_m": 2421.89990234375,
+      "mean_elevation_m": 317.47222900390625,
+      "source": "Copernicus_GLO_30_AWS_OpenData",
+      "sha256_prefix": "618e9cbaa1cc3eed"
+    },
+    "hii_telemetry": {
+      "status": "PASS",
+      "files_count": 1,
+      "verified": true,
+      "datasets": [
+        {
+          "filename": "hii_pressure_smoke_test.parquet",
+          "records": 1486,
+          "stations": 2,
+          "sha256_prefix": "707ba2c54650f470",
+          "schema_valid": true
+        }
+      ]
+    },
+    "ground_target_pm25": {
+      "status": "PASS",
+      "files_count": 6,
+      "verified": true,
+      "datasets": [
+        {
+          "filename": "air4thai_live_sample.parquet",
+          "records": 171,
+          "stations": 171,
+          "within_bounds": true,
+          "sha256_prefix": "48eff1576c156774"
+        },
+        {
+          "filename": "ground_truth_test_2026.parquet",
+          "records": 339,
+          "stations": 175,
+          "within_bounds": true,
+          "sha256_prefix": "c5fa62ce289eb18c"
+        },
+        {
+          "filename": "ground_truth_train_2024_2025.parquet",
+          "records": 188,
+          "stations": 4,
+          "within_bounds": true,
+          "sha256_prefix": "3ac694798264c7fe"
+        },
+        {
+          "filename": "openaq_historical_smoke_test.parquet",
+          "records": 51,
+          "stations": 1,
+          "within_bounds": true,
+          "sha256_prefix": "12ee4e7370c54c90"
+        },
+        {
+          "filename": "openaq_sample_225642.parquet",
+          "records": 66,
+          "stations": 1,
+          "within_bounds": true,
+          "sha256_prefix": "e477ebf16594eb8e"
+        },
+        {
+          "filename": "pcd_pm25_smoke_test.parquet",
+          "records": 171,
+          "stations": 171,
+          "within_bounds": true,
+          "sha256_prefix": "3c6509a44735f3c8"
+        }
+      ]
+    }
+  }
+}

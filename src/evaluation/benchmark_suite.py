@@ -30,7 +30,7 @@ from typing import Dict, List, Optional, Tuple, Union, Any
 import numpy as np
 import pandas as pd
 
-from src.config.paths import REPORTS_DIR, MODELS_DIR
+from src.config.paths import REPORTS_DIR, MODELS_DIR, get_reports_dir
 from src.features.feature_matrix_builder import ALL_FEATURE_COLUMNS, TARGET_COLUMN
 from src.models import (
     BaseDustModel,
@@ -62,8 +62,9 @@ class MultiResolutionBenchmarkSuite:
     and 4 model architectures plus NNLS Stacking Ensemble.
     """
 
-    def __init__(self, output_dir: Optional[Path] = None) -> None:
-        self.output_dir = output_dir or REPORTS_DIR
+    def __init__(self, output_dir: Optional[Path] = None, pollutant: str = "pm25") -> None:
+        self.pollutant = pollutant.lower()
+        self.output_dir = output_dir or get_reports_dir(self.pollutant)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
     def measure_model_inference_latency(
@@ -101,10 +102,12 @@ class MultiResolutionBenchmarkSuite:
         feature_cols: List[str],
         resolution_km: float,
         target_col: str = "observed_pm25",
+        pollutant: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Evaluates ensemble and all individual component models on test data.
         """
+        pol = pollutant.lower() if pollutant else ("pm10" if "pm10" in target_col.lower() else "pm25")
         valid_test = test_df[~test_df[target_col].isna()].copy().reset_index(drop=True)
         if valid_test.empty:
             raise ValueError("Test DataFrame has no non-NaN target rows for benchmarking.")
@@ -121,7 +124,7 @@ class MultiResolutionBenchmarkSuite:
         for m_key in MODEL_KEYS:
             pred_col = f"pred_{m_key}"
             preds = comp_preds[pred_col].values
-            m_metrics = compute_comprehensive_metrics(y_test, preds)
+            m_metrics = compute_comprehensive_metrics(y_test, preds, pollutant=pol)
 
             # Measure latency
             base_model = getattr(ensemble, "base_models", {}).get(m_key)
@@ -139,7 +142,7 @@ class MultiResolutionBenchmarkSuite:
 
         # 2. Stacking Ensemble
         ens_preds = comp_preds["pred_ensemble"].values
-        ens_metrics = compute_comprehensive_metrics(y_test, ens_preds)
+        ens_metrics = compute_comprehensive_metrics(y_test, ens_preds, pollutant=pol)
         ens_perf = self.measure_model_inference_latency(ensemble, X_test)
 
         model_results["ensemble"] = {
@@ -162,11 +165,16 @@ class MultiResolutionBenchmarkSuite:
         trained_ensembles_by_res: Dict[float, DustStackingEnsemble],
         test_matrices_by_res: Dict[float, pd.DataFrame],
         feature_cols: List[str],
-        target_col: str = "observed_pm25",
+        target_col: Optional[str] = None,
+        pollutant: str = "pm25",
     ) -> Dict[str, Any]:
         """
         Runs comprehensive multi-resolution benchmark across all 4 spatial grids.
         """
+        pol = pollutant.lower()
+        if target_col is None:
+            target_col = "observed_pm10" if pol == "pm10" else "observed_pm25"
+
         leaderboard_rows = []
         resolution_benchmarks = {}
 
@@ -184,6 +192,7 @@ class MultiResolutionBenchmarkSuite:
                 feature_cols=feature_cols,
                 resolution_km=res_km,
                 target_col=target_col,
+                pollutant=pol,
             )
             resolution_benchmarks[str(res_km)] = res_bench
 
@@ -213,13 +222,14 @@ class MultiResolutionBenchmarkSuite:
         rq_answers = self._synthesize_research_questions(leaderboard_df)
 
         final_report = {
+            "pollutant": pol,
             "resolutions": resolution_benchmarks,
             "leaderboard": leaderboard_df.to_dict(orient="records"),
             "research_questions": rq_answers,
         }
 
         # Save deliverables
-        self._export_reports(final_report, leaderboard_df, rq_answers)
+        self._export_reports(final_report, leaderboard_df, rq_answers, pollutant=pol)
         return final_report
 
     def _synthesize_research_questions(self, df: pd.DataFrame) -> Dict[str, str]:
@@ -271,17 +281,29 @@ class MultiResolutionBenchmarkSuite:
         final_report: Dict[str, Any],
         leaderboard_df: pd.DataFrame,
         rq_answers: Dict[str, str],
+        pollutant: str = "pm25",
     ) -> None:
-        """Exports JSON and Markdown leaderboard reports."""
-        json_path = self.output_dir / "phase5_multi_resolution_benchmark.json"
+        """Exports JSON and Markdown leaderboard reports with pollutant suffix."""
+        pol = pollutant.lower()
+        suffix = f"_{pol}"
+        target_dir = self.output_dir or get_reports_dir(pol)
+        target_dir.mkdir(parents=True, exist_ok=True)
+        # Primary deliverable with explicit pollutant suffix
+        json_path = target_dir / f"phase5_multi_resolution_benchmark{suffix}.json"
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(final_report, f, indent=2, default=str)
         logger.info("Saved Phase 5 Benchmark JSON -> %s", json_path)
 
+        # Backward compatibility alias without pollutant suffix
+        json_legacy_path = target_dir / "phase5_multi_resolution_benchmark.json"
+        with open(json_legacy_path, "w", encoding="utf-8") as f:
+            json.dump(final_report, f, indent=2, default=str)
+
+        pol_title = pollutant.upper()
         md_lines = [
-            "# 📊 Phase 5: Multi-Resolution Benchmark & Model Comparison Report",
+            f"# 📊 Phase 5: Multi-Resolution Benchmark & Model Comparison Report ({pol_title})",
             "",
-            "> **Thailand Multi-Resolution Satellite Dust Prediction Benchmark**",
+            f"> **Thailand Multi-Resolution Satellite Dust Prediction Benchmark ({pol_title})**",
             "> Complete evaluation of the 4-Model Quartet + Stacking Ensemble across 4 Spatial Resolutions (3km, 2km, 1km, 500m)",
             "",
             "## 1. Master Benchmark Leaderboard",
@@ -307,7 +329,13 @@ class MultiResolutionBenchmarkSuite:
         md_lines.append(f"### RQ3: Best Model per Resolution\n{rq_answers.get('RQ3_Best_Model_Architecture', '')}\n")
         md_lines.append(f"### RQ4: Operational Compute Trade-off (Pareto Frontier)\n{rq_answers.get('RQ4_Compute_Tradeoff_Pareto', '')}\n")
 
-        md_path = self.output_dir / "phase5_multi_resolution_benchmark.md"
+        # Primary deliverable with explicit pollutant suffix
+        md_path = target_dir / f"phase5_multi_resolution_benchmark{suffix}.md"
         with open(md_path, "w", encoding="utf-8") as f:
             f.write("\n".join(md_lines))
         logger.info("Saved Phase 5 Benchmark Markdown -> %s", md_path)
+
+        # Backward compatibility alias
+        md_legacy_path = target_dir / "phase5_multi_resolution_benchmark.md"
+        with open(md_legacy_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(md_lines))

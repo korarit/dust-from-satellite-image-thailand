@@ -24,7 +24,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-from src.config.paths import EVALUATION_DIR, REPORTS_DIR
+from src.config.paths import EVALUATION_DIR, REPORTS_DIR, get_evaluation_dir
 from src.evaluation.metrics import (
     assign_aqi_category,
     compute_continuous_metrics,
@@ -70,29 +70,35 @@ class EvaluationPlotter:
     saved to outputs/evaluation/.
     """
 
-    def __init__(self, output_dir: Optional[Path] = None) -> None:
-        self.output_dir = output_dir or EVALUATION_DIR
+    def __init__(self, output_dir: Optional[Path] = None, pollutant: str = "pm25") -> None:
+        self.pollutant = pollutant.lower()
+        self.output_dir = output_dir or get_evaluation_dir(self.pollutant)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         set_custom_dark_style()
-
     def plot_parity_scatter(
         self,
         y_true: Union[np.ndarray, pd.Series, List[float]],
         y_pred: Union[np.ndarray, pd.Series, List[float]],
         model_name: str = "Stacking Ensemble (NNLS)",
-        filename: str = "parity_scatter_plot.png",
+        filename: Optional[str] = None,
+        pollutant: str = "pm25",
     ) -> Path:
         """
-        1. Observed vs Predicted PM2.5 Parity Scatter Plot.
+        1. Observed vs Predicted Parity Scatter Plot.
         Features 1:1 Identity reference line, regression line, and statistical metrics badge.
         """
+        pol = pollutant.lower()
+        pol_name = pol.upper()
+        if filename is None:
+            filename = f"parity_scatter_plot_{pol}.png"
+
         y_t = np.asarray(y_true, dtype=np.float64).ravel()
         y_p = np.asarray(y_pred, dtype=np.float64).ravel()
         valid = (~np.isnan(y_t)) & (~np.isnan(y_p))
         y_t, y_p = y_t[valid], y_p[valid]
 
         metrics = compute_continuous_metrics(y_t, y_p)
-        cats = assign_aqi_category(y_t)
+        cats = assign_aqi_category(y_t, pollutant=pol)
         point_colors = [AQI_COLOR_HEX[c] for c in cats]
 
         fig, ax = plt.subplots(figsize=(8, 7), facecolor=BG_COLOR)
@@ -115,9 +121,9 @@ class EvaluationPlotter:
 
         ax.set_xlim(0, max_val)
         ax.set_ylim(0, max_val)
-        ax.set_xlabel("Ground Truth Observed PM2.5 (µg/m³)", fontsize=11, fontweight="bold", labelpad=8)
-        ax.set_ylabel("Model Predicted PM2.5 (µg/m³)", fontsize=11, fontweight="bold", labelpad=8)
-        ax.set_title(f"Parity Plot: Observed vs Predicted PM2.5\n[{model_name}]", fontsize=13, fontweight="bold", color=ACCENT_BLUE, pad=12)
+        ax.set_xlabel(f"Ground Truth Observed {pol_name} (µg/m³)", fontsize=11, fontweight="bold", labelpad=8)
+        ax.set_ylabel(f"Model Predicted {pol_name} (µg/m³)", fontsize=11, fontweight="bold", labelpad=8)
+        ax.set_title(f"Parity Plot: Observed vs Predicted {pol_name}\n[{model_name}]", fontsize=13, fontweight="bold", color=ACCENT_BLUE, pad=12)
         ax.grid(True, alpha=0.4)
 
         # Stats Annotation Box
@@ -149,12 +155,18 @@ class EvaluationPlotter:
         self,
         y_true: Union[np.ndarray, pd.Series, List[float]],
         y_pred: Union[np.ndarray, pd.Series, List[float]],
-        filename: str = "residual_analysis.png",
+        filename: Optional[str] = None,
+        pollutant: str = "pm25",
     ) -> Path:
         """
         2. Residual Analysis: Error vs Concentration and Residual Histogram/KDE.
         Detects heteroscedasticity and evaluates zero-bias centering.
         """
+        pol = pollutant.lower()
+        pol_name = pol.upper()
+        if filename is None:
+            filename = f"residual_analysis_{pol}.png"
+
         y_t = np.asarray(y_true, dtype=np.float64).ravel()
         y_p = np.asarray(y_pred, dtype=np.float64).ravel()
         valid = (~np.isnan(y_t)) & (~np.isnan(y_p))
@@ -172,7 +184,7 @@ class EvaluationPlotter:
         ax1.axhline(0.0, color="#ef4444", linestyle="--", linewidth=1.5, zorder=2)
         ax1.axhline(mean_res, color=ACCENT_CYAN, linestyle=":", linewidth=1.5, label=f"Mean Bias ({mean_res:.2f})")
         ax1.scatter(y_t, residuals, color=ACCENT_BLUE, s=40, alpha=0.75, edgecolors="#ffffff", linewidth=0.4, zorder=3)
-        ax1.set_xlabel("Observed PM2.5 (µg/m³)", fontsize=11, fontweight="bold")
+        ax1.set_xlabel(f"Observed {pol_name} (µg/m³)", fontsize=11, fontweight="bold")
         ax1.set_ylabel("Residual (Predicted - Observed) [µg/m³]", fontsize=11, fontweight="bold")
         ax1.set_title("Residuals vs Concentration", fontsize=12, fontweight="bold", color=ACCENT_BLUE)
         ax1.grid(True, alpha=0.4)
@@ -188,7 +200,7 @@ class EvaluationPlotter:
         ax2.grid(True, alpha=0.4)
         ax2.legend(facecolor="#090d16", edgecolor=GRID_COLOR)
 
-        plt.suptitle("Residual Diagnostics & Error Distribution Analysis", fontsize=14, fontweight="bold", color=TEXT_COLOR, y=0.98)
+        plt.suptitle(f"{pol_name} Residual Diagnostics & Error Distribution Analysis", fontsize=14, fontweight="bold", color=TEXT_COLOR, y=0.98)
         plt.tight_layout()
 
         out_path = self.output_dir / filename
@@ -201,18 +213,27 @@ class EvaluationPlotter:
         self,
         y_true: Union[np.ndarray, pd.Series, List[float]],
         y_pred: Union[np.ndarray, pd.Series, List[float]],
-        filename: str = "aqi_confusion_matrix.png",
+        filename: Optional[str] = None,
+        pollutant: str = "pm25",
     ) -> Path:
         """
         3. Confusion Matrix Heatmap for PCD Thailand 5-tier Health Warning Bands.
         """
-        aqi_res = compute_aqi_classification_metrics(y_true, y_pred)
+        pol = pollutant.lower()
+        pol_name = pol.upper()
+        if filename is None:
+            filename = f"aqi_confusion_matrix_{pol}.png"
+
+        aqi_res = compute_aqi_classification_metrics(y_true, y_pred, pollutant=pol)
         cm = np.array(aqi_res["confusion_matrix"])
 
         fig, ax = plt.subplots(figsize=(9, 7.5), facecolor=BG_COLOR)
         ax.set_facecolor(PANEL_COLOR)
 
-        short_labels = ["Very Good\n(0-15)", "Good\n(15-25)", "Moderate\n(25-37.5)", "Orange\n(37.5-75)", "Red\n(>75)"]
+        if pol == "pm10":
+            short_labels = ["Very Good\n(0-50)", "Good\n(50-80)", "Moderate\n(80-120)", "Orange\n(120-180)", "Red\n(>180)"]
+        else:
+            short_labels = ["Very Good\n(0-15)", "Good\n(15-25)", "Moderate\n(25-37.5)", "Orange\n(37.5-75)", "Red\n(>75)"]
 
         # Annotation labels: count and percentage
         annot = np.empty_like(cm, dtype=object)
@@ -231,15 +252,15 @@ class EvaluationPlotter:
             cbar_kws={"label": "Sample Count"}
         )
 
-        ax.set_xlabel("Predicted AQI Health Band", fontsize=11, fontweight="bold", labelpad=10)
-        ax.set_ylabel("True Ground Truth AQI Health Band", fontsize=11, fontweight="bold", labelpad=10)
+        ax.set_xlabel(f"Predicted {pol_name} AQI Health Band", fontsize=11, fontweight="bold", labelpad=10)
+        ax.set_ylabel(f"True Ground Truth {pol_name} AQI Health Band", fontsize=11, fontweight="bold", labelpad=10)
         acc_val = aqi_res.get("accuracy", 0.0)
         f1_val = aqi_res.get("macro_f1", 0.0)
         recall_hr = aqi_res.get("high_risk_recall", 0.0)
         ax.set_title(
-            f"Thailand PCD AQI 5-Tier Confusion Matrix\n"
-            f"[Accuracy: {acc_val:.1f}% | Macro F1: {f1_val:.1f}% | High-Risk Alert Recall: {recall_hr:.1f}%]",
-            fontsize=13, fontweight="bold", color=ACCENT_BLUE, pad=12
+            f"Thailand PCD {pol_name} AQI 5-Tier Confusion Matrix\n"
+            f"[Acc: {acc_val:.1f}% | Macro F1: {f1_val:.1f}% | High-Risk Alert Recall: {recall_hr:.1f}%]",
+            fontsize=12, fontweight="bold", color=ACCENT_BLUE, pad=12
         )
 
         plt.tight_layout()
@@ -252,11 +273,14 @@ class EvaluationPlotter:
     def plot_multi_resolution_benchmark(
         self,
         leaderboard_df: pd.DataFrame,
-        filename: str = "multi_resolution_benchmark.png",
+        filename: Optional[str] = None,
+        pollutant: str = "pm25",
     ) -> Path:
         """
         4. Multi-Resolution Comparison: MAE Comparison Bar Chart and Latency vs Accuracy Pareto Frontier.
         """
+        pol = pollutant.lower()
+        fname = filename or f"multi_resolution_benchmark_{pol}.png"
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6), facecolor=BG_COLOR)
         for ax in (ax1, ax2):
             ax.set_facecolor(PANEL_COLOR)
@@ -299,7 +323,7 @@ class EvaluationPlotter:
         plt.suptitle("Multi-Resolution Benchmark (3km, 2km, 1km, 500m) Diagnostics", fontsize=14, fontweight="bold", color=TEXT_COLOR, y=0.98)
         plt.tight_layout()
 
-        out_path = self.output_dir / filename
+        out_path = self.output_dir / fname
         plt.savefig(out_path, dpi=200, bbox_inches="tight")
         plt.close(fig)
         logger.info("Saved Multi-Resolution Benchmark Plot -> %s", out_path)
@@ -308,11 +332,14 @@ class EvaluationPlotter:
     def plot_regional_generalization(
         self,
         regional_results: Dict[str, Any],
-        filename: str = "regional_generalization_bar.png",
+        filename: Optional[str] = None,
+        pollutant: str = "pm25",
     ) -> Path:
         """
         5. Regional Generalization: Spatial Hold-Out Cross-Validation performance across 5 regions.
         """
+        pol = pollutant.lower()
+        fname = filename or f"regional_generalization_bar_{pol}.png"
         by_reg = regional_results.get("by_region", {})
         regions = []
         maes = []
@@ -359,7 +386,7 @@ class EvaluationPlotter:
         plt.suptitle("Spatial Generalization: Regional Hold-Out Cross-Validation", fontsize=14, fontweight="bold", color=TEXT_COLOR, y=0.98)
         plt.tight_layout()
 
-        out_path = self.output_dir / filename
+        out_path = self.output_dir / fname
         plt.savefig(out_path, dpi=200, bbox_inches="tight")
         plt.close(fig)
         logger.info("Saved Regional Generalization Bar Chart -> %s", out_path)
@@ -369,11 +396,14 @@ class EvaluationPlotter:
         self,
         attribution_df: pd.DataFrame,
         top_n: int = 15,
-        filename: str = "feature_importance_consensus.png",
+        filename: Optional[str] = None,
+        pollutant: str = "pm25",
     ) -> Path:
         """
         6. Top Predictive Atmospheric & Satellite Features Consensus across 4 Quartet Models.
         """
+        pol = pollutant.lower()
+        fname = filename or f"feature_importance_consensus_{pol}.png"
         df = attribution_df.head(top_n).sort_values("ensemble_importance", ascending=True)
 
         fig, ax = plt.subplots(figsize=(10, 8), facecolor=BG_COLOR)
@@ -396,7 +426,7 @@ class EvaluationPlotter:
                     va="center", ha="left", color="#f8fafc", fontsize=9, fontweight="bold")
 
         plt.tight_layout()
-        out_path = self.output_dir / filename
+        out_path = self.output_dir / fname
         plt.savefig(out_path, dpi=200, bbox_inches="tight")
         plt.close(fig)
         logger.info("Saved Feature Importance Consensus Plot -> %s", out_path)
@@ -405,11 +435,14 @@ class EvaluationPlotter:
     def plot_ensemble_weights_pie(
         self,
         weights: Dict[str, float],
-        filename: str = "ensemble_weights_pie.png",
+        filename: Optional[str] = None,
+        pollutant: str = "pm25",
     ) -> Path:
         """
         7. Donut / Pie Chart showing the Non-Negative Least Squares (NNLS) Quartet Weight Allocation.
         """
+        pol = pollutant.lower()
+        fname = filename or f"ensemble_weights_pie_{pol}.png"
         models = [k.upper().replace("_", " ") for k in weights.keys()]
         w_vals = [float(v) for v in weights.values()]
 
@@ -442,7 +475,7 @@ class EvaluationPlotter:
                      fontsize=13, fontweight="bold", color=ACCENT_BLUE, pad=16)
 
         plt.tight_layout()
-        out_path = self.output_dir / filename
+        out_path = self.output_dir / fname
         plt.savefig(out_path, dpi=200, bbox_inches="tight")
         plt.close(fig)
         logger.info("Saved Ensemble Weights Donut Chart -> %s", out_path)
@@ -456,15 +489,17 @@ class EvaluationPlotter:
         regional_results: Dict[str, Any],
         attribution_df: pd.DataFrame,
         ensemble_weights: Dict[str, float],
+        pollutant: str = "pm25",
     ) -> Dict[str, Path]:
-        """Generates all 7 publication evaluation diagnostic plots."""
-        p_parity = self.plot_parity_scatter(y_true, y_pred)
-        p_res = self.plot_residual_analysis(y_true, y_pred)
-        p_cm = self.plot_aqi_confusion_matrix(y_true, y_pred)
-        p_multi = self.plot_multi_resolution_benchmark(leaderboard_df)
-        p_reg = self.plot_regional_generalization(regional_results)
-        p_feat = self.plot_feature_importance_consensus(attribution_df)
-        p_w = self.plot_ensemble_weights_pie(ensemble_weights)
+        """Generates all 7 publication evaluation diagnostic plots with explicit pollutant suffix."""
+        pol = pollutant.lower()
+        p_parity = self.plot_parity_scatter(y_true, y_pred, pollutant=pol)
+        p_res = self.plot_residual_analysis(y_true, y_pred, pollutant=pol)
+        p_cm = self.plot_aqi_confusion_matrix(y_true, y_pred, pollutant=pol)
+        p_multi = self.plot_multi_resolution_benchmark(leaderboard_df, pollutant=pol)
+        p_reg = self.plot_regional_generalization(regional_results, pollutant=pol)
+        p_feat = self.plot_feature_importance_consensus(attribution_df, pollutant=pol)
+        p_w = self.plot_ensemble_weights_pie(ensemble_weights, pollutant=pol)
 
         return {
             "parity_scatter": p_parity,
@@ -475,3 +510,4 @@ class EvaluationPlotter:
             "feature_importance_consensus": p_feat,
             "ensemble_weights_pie": p_w,
         }
+

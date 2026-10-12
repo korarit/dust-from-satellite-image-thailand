@@ -137,8 +137,12 @@ class SpatialTemporalEvaluator:
     Quantifies generalization performance on unseen spatial domains.
     """
 
-    def __init__(self, target_col: str = "observed_pm25") -> None:
+    def __init__(self, target_col: str = "observed_pm25", pollutant: Optional[str] = None) -> None:
         self.target_col = target_col
+        if pollutant is not None:
+            self.pollutant = pollutant.lower()
+        else:
+            self.pollutant = "pm10" if "pm10" in target_col.lower() else "pm25"
         self.cv = RegionalHoldoutCV()
 
     def evaluate_regional_generalization(
@@ -173,7 +177,7 @@ class SpatialTemporalEvaluator:
             preds = model.predict(X_val)
 
             # Compute regional metrics
-            m = compute_comprehensive_metrics(y_val, preds)
+            m = compute_comprehensive_metrics(y_val, preds, pollutant=self.pollutant)
             regional_results[reg] = {
                 "region_en": reg,
                 "region_th": REGION_LABELS_TH.get(reg, reg),
@@ -185,7 +189,7 @@ class SpatialTemporalEvaluator:
             all_y_pred.extend(preds)
 
         # Macro-averaged metrics across all unseen regions
-        overall_metrics = compute_comprehensive_metrics(all_y_true, all_y_pred)
+        overall_metrics = compute_comprehensive_metrics(all_y_true, all_y_pred, pollutant=self.pollutant)
 
         return {
             "by_region": regional_results,

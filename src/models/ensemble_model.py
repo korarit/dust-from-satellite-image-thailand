@@ -44,9 +44,13 @@ class DustStackingEnsemble(BaseDustModel):
         self,
         config: Optional[Dict[str, Any]] = None,
         name: str = "StackingEnsemble",
+        pollutant: str = "pm25",
+        target_col: Optional[str] = None,
     ) -> None:
         super().__init__(model_params=config, name=name)
         self.config: Dict[str, Any] = config or {}
+        self.pollutant = pollutant.lower()
+        self.target_col = target_col or ("observed_pm10" if self.pollutant == "pm10" else "observed_pm25")
 
         # Extract sub-configs
         models_cfg = self.config.get("models", {})
@@ -126,11 +130,13 @@ class DustStackingEnsemble(BaseDustModel):
             oof_matrix,
             columns=[f"oof_{k}" for k in MODEL_KEYS]
         )
-        self.oof_predictions_["observed_pm25"] = y_arr
+        self.oof_predictions_[self.target_col] = y_arr
+        if self.target_col != "observed_pm25":
+            self.oof_predictions_["observed_pm25"] = y_arr
 
         # Compute individual base model OOF performance
         for m_idx, m_key in enumerate(MODEL_KEYS):
-            self.oof_metrics_[m_key] = compute_dust_metrics(y_arr, oof_matrix[:, m_idx])
+            self.oof_metrics_[m_key] = compute_dust_metrics(y_arr, oof_matrix[:, m_idx], pollutant=self.pollutant)
             logger.info("  • OOF %-14s MAE: %.3f µg/m³, RMSE: %.3f, R2: %.4f",
                         m_key.upper(),
                         self.oof_metrics_[m_key]["mae"],
@@ -169,7 +175,7 @@ class DustStackingEnsemble(BaseDustModel):
         # Calculate Ensemble OOF Performance
         oof_ensemble = np.sum(oof_matrix * normalized_weights, axis=1)
         self.oof_predictions_["oof_ensemble"] = oof_ensemble
-        self.oof_metrics_["ensemble"] = compute_dust_metrics(y_arr, oof_ensemble)
+        self.oof_metrics_["ensemble"] = compute_dust_metrics(y_arr, oof_ensemble, pollutant=self.pollutant)
         logger.info("  ⭐ OOF ENSEMBLE    MAE: %.3f µg/m³, RMSE: %.3f, R2: %.4f",
                     self.oof_metrics_["ensemble"]["mae"],
                     self.oof_metrics_["ensemble"]["rmse"],
@@ -271,29 +277,38 @@ class DustStackingEnsemble(BaseDustModel):
         return df
 
     def save(self, dir_path: Union[str, Path]) -> None:
-        """Persists all 4 base models and ensemble metadata into directory."""
+        """Persists all 4 base models and ensemble metadata into directory with pollutant suffix."""
         save_dir = Path(dir_path)
         save_dir.mkdir(parents=True, exist_ok=True)
 
-        # Save base models
+        pol = self.pollutant.lower()
+        # Save base models with pollutant in filename: e.g. lightgbm_model_pm25.joblib
         for m_key, m in self.base_models.items():
-            m_path = save_dir / f"{m_key}_model.joblib"
-            m.save(m_path)
+            m_path_pol = save_dir / f"{m_key}_model_{pol}.joblib"
+            m.save(m_path_pol)
+            # Also save standard filename for backward compatibility
+            m_path_std = save_dir / f"{m_key}_model.joblib"
+            m.save(m_path_std)
 
         # Save metadata and weights
         meta = {
             "name": self.name,
+            "pollutant": self.pollutant,
+            "target_col": self.target_col,
             "weights": self.weights,
             "feature_names_": self.feature_names_,
             "is_fitted_": self.is_fitted_,
             "oof_metrics": self.oof_metrics_,
             "monotonic_constraints": self.mono_constraints,
         }
+        with open(save_dir / f"ensemble_meta_{pol}.json", "w", encoding="utf-8") as f:
+            json.dump(meta, f, indent=2)
         with open(save_dir / "ensemble_meta.json", "w", encoding="utf-8") as f:
             json.dump(meta, f, indent=2)
 
         # Save OOF predictions if present
         if self.oof_predictions_ is not None:
+            self.oof_predictions_.to_parquet(save_dir / f"oof_predictions_{pol}.parquet", index=False)
             self.oof_predictions_.to_parquet(save_dir / "oof_predictions.parquet", index=False)
 
     @classmethod
@@ -302,14 +317,21 @@ class DustStackingEnsemble(BaseDustModel):
         load_dir = Path(dir_path)
         meta_path = load_dir / "ensemble_meta.json"
         if not meta_path.exists():
-            raise FileNotFoundError(f"Missing ensemble metadata at {meta_path}")
+            candidates = list(load_dir.glob("ensemble_meta*.json"))
+            if candidates:
+                meta_path = candidates[0]
+            else:
+                raise FileNotFoundError(f"Missing ensemble metadata at {load_dir}")
 
         with open(meta_path, "r", encoding="utf-8") as f:
             meta = json.load(f)
 
+        pol = meta.get("pollutant", "pm25")
         ensemble = cls(
             config={"features": {"monotonic_constraints": meta.get("monotonic_constraints", {})}},
             name=meta.get("name", "StackingEnsemble"),
+            pollutant=pol,
+            target_col=meta.get("target_col"),
         )
         ensemble.feature_names_ = meta["feature_names_"]
         ensemble.weights = meta["weights"]
@@ -324,14 +346,20 @@ class DustStackingEnsemble(BaseDustModel):
             "random_forest": RandomForestDustModel,
         }
         for m_key, cls_type in model_classes.items():
-            m_path = load_dir / f"{m_key}_model.joblib"
-            if m_path.exists():
-                ensemble.base_models[m_key] = cls_type.load(m_path)
+            m_path_pol = load_dir / f"{m_key}_model_{pol}.joblib"
+            m_path_std = load_dir / f"{m_key}_model.joblib"
+            if m_path_pol.exists():
+                ensemble.base_models[m_key] = cls_type.load(m_path_pol)
+            elif m_path_std.exists():
+                ensemble.base_models[m_key] = cls_type.load(m_path_std)
 
         # Load OOF predictions if present
-        oof_path = load_dir / "oof_predictions.parquet"
-        if oof_path.exists():
-            ensemble.oof_predictions_ = pd.read_parquet(oof_path)
+        oof_path_pol = load_dir / f"oof_predictions_{pol}.parquet"
+        oof_path_std = load_dir / "oof_predictions.parquet"
+        if oof_path_pol.exists():
+            ensemble.oof_predictions_ = pd.read_parquet(oof_path_pol)
+        elif oof_path_std.exists():
+            ensemble.oof_predictions_ = pd.read_parquet(oof_path_std)
 
         return ensemble
 

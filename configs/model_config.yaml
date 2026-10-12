@@ -5,6 +5,7 @@
 
 general:
   target_column: "observed_pm25"
+  target_column_pm10: "observed_pm10"
   random_state: 42
   cv_splits: 5
   eval_metric: "mae"

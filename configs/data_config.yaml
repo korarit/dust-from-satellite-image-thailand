@@ -45,6 +45,8 @@ target:
   physical_bounds:
     pm25_min: 0.0
     pm25_max: 500.0
+    pm10_min: 0.0
+    pm10_max: 1000.0
   stuck_sensor_max_hours: 6
   hourly_aggregation: true
 

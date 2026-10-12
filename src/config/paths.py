@@ -27,17 +27,40 @@ GEO_DIR = DATA_DIR / "geo"
 METADATA_DIR = DATA_DIR / "metadata"
 FEATURES_DIR = DATA_DIR / "features"
 
-# Outputs Subdirectories
-REPORTS_DIR = OUTPUTS_DIR / "reports"
-MODELS_DIR = OUTPUTS_DIR / "models"
-MAPS_DIR = OUTPUTS_DIR / "maps"
-EVALUATION_DIR = OUTPUTS_DIR / "evaluation"
+# Outputs Subdirectories & Pollutant Folders
+OUTPUTS_PM25_DIR = OUTPUTS_DIR / "pm25"
+OUTPUTS_PM10_DIR = OUTPUTS_DIR / "pm10"
+
+def get_pollutant_dir(pollutant: str = "pm25") -> Path:
+    """Returns the dedicated root output directory for a specific pollutant."""
+    return OUTPUTS_PM10_DIR if pollutant.lower() == "pm10" else OUTPUTS_PM25_DIR
+
+def get_models_dir(pollutant: str = "pm25") -> Path:
+    """Returns the dedicated models directory for a specific pollutant."""
+    return get_pollutant_dir(pollutant) / "models"
+
+def get_maps_dir(pollutant: str = "pm25") -> Path:
+    """Returns the dedicated maps directory for a specific pollutant."""
+    return get_pollutant_dir(pollutant) / "maps"
+
+def get_reports_dir(pollutant: str = "pm25") -> Path:
+    """Returns the dedicated reports directory for a specific pollutant."""
+    return get_pollutant_dir(pollutant) / "reports"
+
+def get_evaluation_dir(pollutant: str = "pm25") -> Path:
+    """Returns the dedicated evaluation directory for a specific pollutant."""
+    return get_pollutant_dir(pollutant) / "evaluation"
+
+# Default subdirectories (defaulting to pm25 for backward compatibility)
+REPORTS_DIR = OUTPUTS_PM25_DIR / "reports"
+MODELS_DIR = OUTPUTS_PM25_DIR / "models"
+MAPS_DIR = OUTPUTS_PM25_DIR / "maps"
+EVALUATION_DIR = OUTPUTS_PM25_DIR / "evaluation"
 
 # Config file paths
 GRID_CONFIG_PATH = CONFIGS_DIR / "grid_config.yaml"
 DATA_CONFIG_PATH = CONFIGS_DIR / "data_config.yaml"
 MODEL_CONFIG_PATH = CONFIGS_DIR / "model_config.yaml"
-
 
 
 def load_yaml_config(config_path: Path) -> dict:
@@ -62,10 +85,20 @@ def ensure_directories() -> None:
         METADATA_DIR,
         FEATURES_DIR,
         OUTPUTS_DIR,
+        OUTPUTS_PM25_DIR,
+        OUTPUTS_PM10_DIR,
         REPORTS_DIR,
         MODELS_DIR,
         MAPS_DIR,
         EVALUATION_DIR,
+        OUTPUTS_PM10_DIR / "models",
+        OUTPUTS_PM10_DIR / "maps",
+        OUTPUTS_PM10_DIR / "reports",
+        OUTPUTS_PM10_DIR / "evaluation",
+        OUTPUTS_DIR / "reports",
+        OUTPUTS_DIR / "models",
+        OUTPUTS_DIR / "maps",
+        OUTPUTS_DIR / "evaluation",
     ]
     for d in dirs:
         d.mkdir(parents=True, exist_ok=True)

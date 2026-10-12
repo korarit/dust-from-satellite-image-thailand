@@ -294,7 +294,9 @@ def test_multi_resolution_benchmark_suite(regional_grid_dataset, tmp_path):
     assert "RQ3_Best_Model_Architecture" in rqs
     assert "RQ4_Compute_Tradeoff_Pareto" in rqs
 
-    # Reports generated
+    # Reports generated (both pollutant-suffixed and legacy alias)
+    assert (tmp_path / "reports" / "phase5_multi_resolution_benchmark_pm25.json").exists()
+    assert (tmp_path / "reports" / "phase5_multi_resolution_benchmark_pm25.md").exists()
     assert (tmp_path / "reports" / "phase5_multi_resolution_benchmark.json").exists()
     assert (tmp_path / "reports" / "phase5_multi_resolution_benchmark.md").exists()
 

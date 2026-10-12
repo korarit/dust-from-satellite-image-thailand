@@ -34,7 +34,7 @@ try:
 except ImportError:
     HAS_RASTERIO = False
 
-from src.config.paths import MAPS_DIR, REPORTS_DIR
+from src.config.paths import MAPS_DIR, REPORTS_DIR, get_maps_dir
 from src.evaluation.metrics import (
     assign_aqi_category,
     get_aqi_metadata,
@@ -49,12 +49,13 @@ logger = logging.getLogger(__name__)
 
 class DustMapVisualizer:
     """
-    Produces multi-format deliverables for Thailand PM2.5 Nowcasting maps:
+    Produces multi-format deliverables for Thailand PM2.5 / PM10 Nowcasting maps:
     Parquet, GeoTIFF, Interactive Leaflet HTML, and Static PNG.
     """
 
-    def __init__(self, output_dir: Optional[Path] = None) -> None:
-        self.output_dir = output_dir or MAPS_DIR
+    def __init__(self, output_dir: Optional[Path] = None, pollutant: str = "pm25") -> None:
+        self.pollutant = pollutant.lower()
+        self.output_dir = output_dir or get_maps_dir(self.pollutant)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
     def attach_aqi_presentation_fields(
@@ -62,6 +63,7 @@ class DustMapVisualizer:
         df: pd.DataFrame,
         pred_col: str = "pm25_pred",
         timestamp_utc: Optional[pd.Timestamp] = None,
+        pollutant: Optional[str] = None,
     ) -> pd.DataFrame:
         """
         Enriches prediction DataFrame with PCD category indices, hex colors,
@@ -71,8 +73,9 @@ class DustMapVisualizer:
         if pred_col not in result.columns:
             raise KeyError(f"Prediction column '{pred_col}' not found in DataFrame.")
 
+        pol = pollutant.lower() if pollutant else ("pm10" if "pm10" in pred_col.lower() else "pm25")
         preds = result[pred_col].values
-        cats = assign_aqi_category(preds)
+        cats = assign_aqi_category(preds, pollutant=pol)
         result["aqi_category"] = cats
 
         colors = [AQI_COLOR_HEX[c] for c in cats]
@@ -192,13 +195,18 @@ class DustMapVisualizer:
         df: pd.DataFrame,
         filename: str = "nowcast_pm25_map.html",
         pred_col: str = "pm25_pred",
-        title: str = "Thailand Real-time PM2.5 Nowcast Map",
+        title: Optional[str] = None,
+        pollutant: Optional[str] = None,
     ) -> Path:
         """
         Generates a standalone, self-contained interactive Leaflet web map.
         Requires zero local JS dependencies (uses Leaflet via standard CDN).
         """
         out_path = self.output_dir / filename
+        pol = pollutant.lower() if pollutant else ("pm10" if "pm10" in pred_col.lower() else "pm25")
+        pol_label = "PM10" if pol == "pm10" else "PM2.5"
+        if title is None:
+            title = f"Thailand Real-time {pol_label} Nowcast Map"
 
         plot_df = df.copy()
         if "lat" not in plot_df.columns and "centroid_lat" in plot_df.columns:
@@ -252,7 +260,23 @@ class DustMapVisualizer:
         min_pm = round(float(np.min(all_pm)), 1) if len(all_pm) > 0 else 0.0
         max_pm = round(float(np.max(all_pm)), 1) if len(all_pm) > 0 else 0.0
         mean_pm = round(float(np.mean(all_pm)), 1) if len(all_pm) > 0 else 0.0
-        high_risk_count = int(np.sum(all_pm >= 37.6)) if len(all_pm) > 0 else 0
+        high_risk_thr = 120.0 if pol == "pm10" else 37.6
+        high_risk_count = int(np.sum(all_pm >= high_risk_thr)) if len(all_pm) > 0 else 0
+
+        if pol == "pm10":
+            legend_items_html = """        <div class="legend-title">PCD Thailand PM10 Standards</div>
+        <div class="legend-item"><div class="legend-color" style="background:#00b0f0;"></div><span>0 - 50.0 µg/m³ (ดีมาก / Very Good)</span></div>
+        <div class="legend-item"><div class="legend-color" style="background:#92d050;"></div><span>50.1 - 80.0 µg/m³ (ดี / Good)</span></div>
+        <div class="legend-item"><div class="legend-color" style="background:#ffff00;"></div><span>80.1 - 120.0 µg/m³ (ปานกลาง / Moderate)</span></div>
+        <div class="legend-item"><div class="legend-color" style="background:#ff7c00;"></div><span>120.1 - 180.0 µg/m³ (เริ่มมีผลกระทบ / Orange)</span></div>
+        <div class="legend-item"><div class="legend-color" style="background:#ff0000;"></div><span>> 180.0 µg/m³ (มีผลกระทบ / Hazardous)</span></div>"""
+        else:
+            legend_items_html = """        <div class="legend-title">PCD Thailand PM2.5 Standards</div>
+        <div class="legend-item"><div class="legend-color" style="background:#00b0f0;"></div><span>0 - 15.0 µg/m³ (ดีมาก / Very Good)</span></div>
+        <div class="legend-item"><div class="legend-color" style="background:#92d050;"></div><span>15.1 - 25.0 µg/m³ (ดี / Good)</span></div>
+        <div class="legend-item"><div class="legend-color" style="background:#ffff00;"></div><span>25.1 - 37.5 µg/m³ (ปานกลาง / Moderate)</span></div>
+        <div class="legend-item"><div class="legend-color" style="background:#ff7c00;"></div><span>37.6 - 75.0 µg/m³ (เริ่มมีผลกระทบ / Orange)</span></div>
+        <div class="legend-item"><div class="legend-color" style="background:#ff0000;"></div><span>> 75.0 µg/m³ (มีผลกระทบ / Hazardous)</span></div>"""
 
         html_template = f"""<!DOCTYPE html>
 <html lang="en">
@@ -303,21 +327,16 @@ class DustMapVisualizer:
 <body>
     <div id="map"></div>
     <div class="header-panel">
-        <h1>🛰️ Thailand PM2.5 Satellite Nowcast</h1>
+        <h1>🛰️ Thailand {pol_label} Satellite Nowcast</h1>
         <p>Ensemble Quartet (Himawari-9 IR + HII Directional Pressure + DEM 30m)</p>
         <div class="kpi-row">
             <div class="kpi-card"><div class="kpi-val">{mean_pm}</div><div class="kpi-lbl">Mean µg/m³</div></div>
             <div class="kpi-card"><div class="kpi-val">{min_pm} - {max_pm}</div><div class="kpi-lbl">Min - Max</div></div>
-            <div class="kpi-card"><div class="kpi-val" style="color: {'#ef4444' if high_risk_count > 0 else '#10b981'};">{high_risk_count}</div><div class="kpi-lbl">Alert Cells (≥37.6)</div></div>
+            <div class="kpi-card"><div class="kpi-val" style="color: {'#ef4444' if high_risk_count > 0 else '#10b981'};">{high_risk_count}</div><div class="kpi-lbl">Alert Cells (≥{high_risk_thr})</div></div>
         </div>
     </div>
     <div class="legend-panel">
-        <div class="legend-title">PCD Thailand PM2.5 Standards</div>
-        <div class="legend-item"><div class="legend-color" style="background:#00b0f0;"></div><span>0 - 15.0 µg/m³ (ดีมาก / Very Good)</span></div>
-        <div class="legend-item"><div class="legend-color" style="background:#92d050;"></div><span>15.1 - 25.0 µg/m³ (ดี / Good)</span></div>
-        <div class="legend-item"><div class="legend-color" style="background:#ffff00;"></div><span>25.1 - 37.5 µg/m³ (ปานกลาง / Moderate)</span></div>
-        <div class="legend-item"><div class="legend-color" style="background:#ff7c00;"></div><span>37.6 - 75.0 µg/m³ (เริ่มมีผลกระทบ / Orange)</span></div>
-        <div class="legend-item"><div class="legend-color" style="background:#ff0000;"></div><span>> 75.0 µg/m³ (มีผลกระทบ / Hazardous)</span></div>
+{legend_items_html}
     </div>
     <script>
         const map = L.map('map', {{ zoomControl: false }}).setView([{mean_lat}, {mean_lon}], 6);
@@ -342,7 +361,7 @@ class DustMapVisualizer:
             let popupContent = `
                 <div style="font-family: sans-serif; font-size: 12px; color: #111;">
                     <div style="font-weight: bold; font-size: 14px; margin-bottom: 4px;">
-                        PM2.5: <span style="color: ${{m.color === '#ffff00' ? '#ca8a04' : m.color}};">${{m.pm}} µg/m³</span>
+                        {pol_label}: <span style="color: ${{m.color === '#ffff00' ? '#ca8a04' : m.color}};">${{m.pm}} µg/m³</span>
                     </div>
                     <div><b>Status:</b> ${{m.tier_th}} (${{m.tier_en}})</div>
                     <div><b>Grid ID:</b> ${{m.gid}}</div>
@@ -367,12 +386,17 @@ class DustMapVisualizer:
         df: pd.DataFrame,
         filename: str = "nowcast_pm25_map.png",
         pred_col: str = "pm25_pred",
-        title: str = "Thailand Multi-Resolution PM2.5 Nowcast",
+        title: Optional[str] = None,
+        pollutant: Optional[str] = None,
     ) -> Path:
         """
-        Generates publication-quality static PNG visualization of PM2.5 across Thailand.
+        Generates publication-quality static PNG visualization across Thailand.
         """
         out_path = self.output_dir / filename
+        pol = pollutant.lower() if pollutant else ("pm10" if "pm10" in pred_col.lower() else "pm25")
+        pol_label = "PM10" if pol == "pm10" else "PM2.5"
+        if title is None:
+            title = f"Thailand Multi-Resolution {pol_label} Nowcast"
 
         plot_df = df.copy()
         if "lat" not in plot_df.columns and "centroid_lat" in plot_df.columns:
@@ -401,12 +425,17 @@ class DustMapVisualizer:
 
         # Discretized PCD colormap
         cmap = ListedColormap(AQI_COLOR_HEX)
-        bounds = [0.0, 15.0, 25.0, 37.5, 75.0, 150.0]
+        if pol == "pm10":
+            bounds = [0.0, 50.0, 80.0, 120.0, 180.0, 300.0]
+            max_clip = 300.0
+        else:
+            bounds = [0.0, 15.0, 25.0, 37.5, 75.0, 150.0]
+            max_clip = 150.0
         norm = BoundaryNorm(bounds, cmap.N)
 
         lats = plot_df["lat"].values
         lons = plot_df["lon"].values
-        preds = np.clip(plot_df[pred_col].values, 0.0, 150.0)
+        preds = np.clip(plot_df[pred_col].values, 0.0, max_clip)
 
         scatter = ax_map.scatter(
             lons, lats,
@@ -431,7 +460,7 @@ class DustMapVisualizer:
         ax_dist = fig.add_subplot(gs[0, 1])
         ax_dist.set_facecolor("#1e293b")
 
-        cats = assign_aqi_category(plot_df[pred_col].values)
+        cats = assign_aqi_category(plot_df[pred_col].values, pollutant=pol)
         cat_counts = [int(np.sum(cats == i)) for i in range(5)]
 
         bars = ax_dist.barh(
@@ -465,23 +494,33 @@ class DustMapVisualizer:
     def generate_all_deliverables(
         self,
         grid_predictions_df: pd.DataFrame,
-        base_filename_stem: str = "nowcast_pm25_map",
-        pred_col: str = "pm25_pred",
+        base_filename_stem: Optional[str] = None,
+        pred_col: Optional[str] = None,
         resolution_m: float = 2000.0,
         timestamp_utc: Optional[pd.Timestamp] = None,
+        pollutant: str = "pm25",
     ) -> Dict[str, Path]:
         """
         Executes complete deliverables suite:
         Parquet dataset, GeoTIFF raster, Interactive Leaflet HTML, and Static PNG.
         """
+        pol = pollutant.lower()
+        if pred_col is None:
+            pred_col = "pm10_pred" if pol == "pm10" else "pm25_pred"
+        if base_filename_stem is None:
+            res_str = f"{int(resolution_m)}m" if resolution_m < 1000 else f"{int(resolution_m/1000)}km"
+            base_filename_stem = f"nowcast_{pol}_{res_str}"
+        elif f"_{pol}" not in base_filename_stem:
+            base_filename_stem = f"{base_filename_stem}_{pol}"
+
         enriched_df = self.attach_aqi_presentation_fields(
-            grid_predictions_df, pred_col=pred_col, timestamp_utc=timestamp_utc
+            grid_predictions_df, pred_col=pred_col, timestamp_utc=timestamp_utc, pollutant=pol
         )
 
         p_parquet = self.export_parquet(enriched_df, f"{base_filename_stem}.parquet")
         p_tif = self.export_geotiff(enriched_df, f"{base_filename_stem}.tif", pred_col=pred_col, resolution_m=resolution_m)
-        p_html = self.export_interactive_html(enriched_df, f"{base_filename_stem}.html", pred_col=pred_col)
-        p_png = self.export_static_png(enriched_df, f"{base_filename_stem}.png", pred_col=pred_col)
+        p_html = self.export_interactive_html(enriched_df, f"{base_filename_stem}.html", pred_col=pred_col, pollutant=pol)
+        p_png = self.export_static_png(enriched_df, f"{base_filename_stem}.png", pred_col=pred_col, pollutant=pol)
 
         return {
             "parquet": p_parquet,
@@ -489,3 +528,4 @@ class DustMapVisualizer:
             "interactive_html": p_html,
             "static_png": p_png,
         }
+

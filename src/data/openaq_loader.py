@@ -46,6 +46,8 @@ DEFAULT_THAILAND_OPENAQ_LOCATIONS = {
 
 PHYSICAL_PM25_MIN = 0.0
 PHYSICAL_PM25_MAX = 500.0
+PHYSICAL_PM10_MIN = 0.0
+PHYSICAL_PM10_MAX = 1000.0
 MAX_STUCK_HOURS = 6
 
 
@@ -148,7 +150,8 @@ class OpenAQLoader:
         start_date: pd.Timestamp,
         end_date: pd.Timestamp,
         page_limit: int = 1000,
-        timeout: int = 20
+        timeout: int = 20,
+        pollutant: str = "pm25",
     ) -> pd.DataFrame:
         """
         Fetches hourly particulate matter measurements directly from OpenAQ v3 API.
@@ -182,6 +185,7 @@ class OpenAQLoader:
         if not results:
             return pd.DataFrame()
 
+        target_col = "observed_pm10" if "pm10" in pollutant.lower() else "observed_pm25"
         rows = []
         for item in results:
             val = item.get("value")
@@ -194,7 +198,7 @@ class OpenAQLoader:
                     ts = pd.to_datetime(utc_str, utc=True).tz_localize(None)
                     rows.append({
                         "timestamp_utc": ts,
-                        "observed_pm25": float(val)
+                        target_col: float(val)
                     })
                 except Exception:
                     continue
@@ -209,7 +213,8 @@ class OpenAQLoader:
         self,
         location_id: int,
         start_date: pd.Timestamp,
-        end_date: pd.Timestamp
+        end_date: pd.Timestamp,
+        pollutant: str = "pm25",
     ) -> pd.DataFrame:
         """
         Fetches observations for a station location via OpenAQ v3 API.
@@ -217,10 +222,12 @@ class OpenAQLoader:
         """
         stations = self.get_thailand_stations()
         match = stations[stations["location_id"] == location_id]
+        p_param = "pm10" if "pm10" in pollutant.lower() else "pm25"
+        target_col = f"observed_{p_param}"
 
         if not match.empty:
             row = match.iloc[0]
-            sensor_id = row.get("pm25_sensor_id")
+            sensor_id = row.get(f"{p_param}_sensor_id") if f"{p_param}_sensor_id" in row else (row.get("pm25_sensor_id") if p_param == "pm25" else None)
             station_name = row.get("station_name", f"OpenAQ_{location_id}")
             lat = float(row.get("latitude", 13.75))
             lon = float(row.get("longitude", 100.5))
@@ -248,7 +255,7 @@ class OpenAQLoader:
                             lat = coords.get("latitude", lat)
                             lon = coords.get("longitude", lon)
                         for s in loc_obj.get("sensors", []):
-                            if s.get("parameter", {}).get("name") == "pm25":
+                            if s.get("parameter", {}).get("name") == p_param:
                                 sensor_id = s.get("id")
                                 break
             except Exception as e:
@@ -256,10 +263,10 @@ class OpenAQLoader:
                 return pd.DataFrame()
 
         if not sensor_id:
-            logger.warning("No PM2.5 sensor found for location %d", location_id)
+            logger.warning("No %s sensor found for location %d", p_param.upper(), location_id)
             return pd.DataFrame()
 
-        df_meas = self.fetch_sensor_measurements_api(int(sensor_id), start_date, end_date)
+        df_meas = self.fetch_sensor_measurements_api(int(sensor_id), start_date, end_date, pollutant=pollutant)
         if df_meas.empty:
             return pd.DataFrame()
 
@@ -271,14 +278,15 @@ class OpenAQLoader:
 
         cols = [
             "station_code", "station_name", "timestamp_utc",
-            "observed_pm25", "latitude", "longitude", "source"
+            target_col, "latitude", "longitude", "source"
         ]
         return df_meas[cols]
 
     def fetch_station_day(
         self,
         location_id: int,
-        target_date: pd.Timestamp
+        target_date: pd.Timestamp,
+        pollutant: str = "pm25",
     ) -> pd.DataFrame:
         """
         Downloads and parses one day of observations for a specific OpenAQ location ID from S3.
@@ -307,31 +315,34 @@ class OpenAQLoader:
         if df.empty or "parameter" not in df.columns:
             return pd.DataFrame()
 
-        # Filter PM2.5 measurements
-        pm25_df = df[df["parameter"].str.lower() == "pm25"].copy()
-        if pm25_df.empty:
+        p_param = "pm10" if "pm10" in pollutant.lower() else "pm25"
+        target_col = f"observed_{p_param}"
+
+        # Filter particulate measurements
+        p_df = df[df["parameter"].str.lower() == p_param].copy()
+        if p_df.empty:
             return pd.DataFrame()
 
         # Standardize columns: datetime, lat, lon, value
-        pm25_df["timestamp_utc"] = pd.to_datetime(pm25_df["datetime"], errors="coerce", utc=True).dt.tz_localize(None)
-        pm25_df["observed_pm25"] = pd.to_numeric(pm25_df["value"], errors="coerce")
-        pm25_df["latitude"] = pd.to_numeric(pm25_df["lat"], errors="coerce")
-        pm25_df["longitude"] = pd.to_numeric(pm25_df["lon"], errors="coerce")
+        p_df["timestamp_utc"] = pd.to_datetime(p_df["datetime"], errors="coerce", utc=True).dt.tz_localize(None)
+        p_df[target_col] = pd.to_numeric(p_df["value"], errors="coerce")
+        p_df["latitude"] = pd.to_numeric(p_df["lat"], errors="coerce")
+        p_df["longitude"] = pd.to_numeric(p_df["lon"], errors="coerce")
 
         station_name = DEFAULT_THAILAND_OPENAQ_LOCATIONS.get(
             location_id,
-            pm25_df["location"].iloc[0] if "location" in pm25_df.columns else f"OpenAQ_{location_id}"
+            p_df["location"].iloc[0] if "location" in p_df.columns else f"OpenAQ_{location_id}"
         )
 
         standard_df = pd.DataFrame({
             "station_code": f"OPENAQ_{location_id}",
             "station_name": station_name,
-            "timestamp_utc": pm25_df["timestamp_utc"],
-            "observed_pm25": pm25_df["observed_pm25"],
-            "latitude": pm25_df["latitude"],
-            "longitude": pm25_df["longitude"],
+            "timestamp_utc": p_df["timestamp_utc"],
+            target_col: p_df[target_col],
+            "latitude": p_df["latitude"],
+            "longitude": p_df["longitude"],
             "source": "OpenAQ_Air4Thai"
-        }).dropna(subset=["timestamp_utc", "observed_pm25", "latitude", "longitude"])
+        }).dropna(subset=["timestamp_utc", target_col, "latitude", "longitude"])
 
         return standard_df
 
@@ -341,7 +352,8 @@ class OpenAQLoader:
         start_date: pd.Timestamp,
         end_date: pd.Timestamp,
         max_workers: int = 4,
-        prefer_api: bool = True
+        prefer_api: bool = True,
+        pollutant: str = "pm25",
     ) -> pd.DataFrame:
         """
         Fetches historical records for a location ID over a given date range.
@@ -349,9 +361,9 @@ class OpenAQLoader:
         """
         if prefer_api and self.api_key:
             try:
-                df_api = self.fetch_station_api(location_id, start_date, end_date)
+                df_api = self.fetch_station_api(location_id, start_date, end_date, pollutant=pollutant)
                 if not df_api.empty:
-                    return self.clean_and_qa_dataset(df_api)
+                    return self.clean_and_qa_dataset(df_api, pollutant=pollutant)
             except Exception as e:
                 logger.warning("API fetch failed for loc %d, falling back to S3: %s", location_id, e)
 
@@ -360,7 +372,7 @@ class OpenAQLoader:
 
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             fut_to_day = {
-                executor.submit(self.fetch_station_day, location_id, day): day
+                executor.submit(self.fetch_station_day, location_id, day, pollutant): day
                 for day in days
             }
             for fut in as_completed(fut_to_day):
@@ -375,7 +387,7 @@ class OpenAQLoader:
             return pd.DataFrame()
 
         combined = pd.concat(dfs, ignore_index=True)
-        return self.clean_and_qa_dataset(combined)
+        return self.clean_and_qa_dataset(combined, pollutant=pollutant)
 
     def fetch_benchmark_stations(
         self,
@@ -384,10 +396,11 @@ class OpenAQLoader:
         location_ids: Optional[List[int]] = None,
         region: Optional[str] = None,
         max_workers: int = 6,
-        prefer_api: bool = True
+        prefer_api: bool = True,
+        pollutant: str = "pm25",
     ) -> pd.DataFrame:
         """
-        Fetches historical PM2.5 records across stations for the given date range.
+        Fetches historical PM2.5 or PM10 records across stations for the given date range.
         Supports filtering by specific location_ids or geographical region ('north', 'central', etc.).
         """
         if location_ids is not None:
@@ -398,8 +411,8 @@ class OpenAQLoader:
         else:
             locs = list(DEFAULT_THAILAND_OPENAQ_LOCATIONS.keys())
 
-        logger.info("Fetching OpenAQ historical data for %d stations from %s to %s",
-                    len(locs), start_date, end_date)
+        logger.info("Fetching OpenAQ historical data (%s) for %d stations from %s to %s",
+                    pollutant.upper(), len(locs), start_date, end_date)
 
         dfs: List[pd.DataFrame] = []
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -409,7 +422,8 @@ class OpenAQLoader:
                     loc,
                     start_date,
                     end_date,
-                    prefer_api=prefer_api
+                    prefer_api=prefer_api,
+                    pollutant=pollutant
                 ): loc
                 for loc in locs
             }
@@ -427,19 +441,26 @@ class OpenAQLoader:
             return pd.DataFrame()
 
         combined = pd.concat(dfs, ignore_index=True)
-        return self.clean_and_qa_dataset(combined)
+        return self.clean_and_qa_dataset(combined, pollutant=pollutant)
 
-    def clean_and_qa_dataset(self, df: pd.DataFrame) -> pd.DataFrame:
+    def clean_and_qa_dataset(self, df: pd.DataFrame, pollutant: str = "pm25") -> pd.DataFrame:
         """
         Applies physical boundaries and stuck sensor filtering to the dataset.
         """
         if df.empty:
             return df
 
-        # 1. Physical limits: [0.0, 500.0]
+        target_col = "observed_pm10" if ("pm10" in pollutant.lower() or ("observed_pm10" in df.columns and "observed_pm25" not in df.columns)) else "observed_pm25"
+        if target_col not in df.columns:
+            return df
+
+        min_val = PHYSICAL_PM10_MIN if "pm10" in target_col else PHYSICAL_PM25_MIN
+        max_val = PHYSICAL_PM10_MAX if "pm10" in target_col else PHYSICAL_PM25_MAX
+
+        # 1. Physical limits
         mask_bounds = (
-            (df["observed_pm25"] >= PHYSICAL_PM25_MIN) &
-            (df["observed_pm25"] <= PHYSICAL_PM25_MAX)
+            (df[target_col] >= min_val) &
+            (df[target_col] <= max_val)
         )
         df_clean = df[mask_bounds].copy()
 
@@ -451,17 +472,18 @@ class OpenAQLoader:
         df_clean = df_clean[mask_geo].copy()
 
         # 3. Stuck sensor filter
-        df_clean = self._filter_stuck_sensors(df_clean)
+        df_clean = self._filter_stuck_sensors(df_clean, target_col=target_col)
 
         return df_clean.sort_values(["station_code", "timestamp_utc"]).reset_index(drop=True)
 
     def _filter_stuck_sensors(
         self,
         df: pd.DataFrame,
-        max_consecutive_hours: int = MAX_STUCK_HOURS
+        max_consecutive_hours: int = MAX_STUCK_HOURS,
+        target_col: str = "observed_pm25",
     ) -> pd.DataFrame:
         """Removes runs of identical values exceeding max_consecutive_hours."""
-        if df.empty or len(df) <= max_consecutive_hours:
+        if df.empty or len(df) <= max_consecutive_hours or target_col not in df.columns:
             return df
 
         df_sorted = df.sort_values(["station_code", "timestamp_utc"]).copy()
@@ -472,7 +494,7 @@ class OpenAQLoader:
                 valid_indices.extend(group.index.tolist())
                 continue
 
-            vals = group["observed_pm25"].to_numpy()
+            vals = group[target_col].to_numpy()
             times = group["timestamp_utc"].to_numpy()
             n = len(vals)
             is_stuck = np.zeros(n, dtype=bool)
@@ -505,7 +527,7 @@ class OpenAQLoader:
         logger.info("Saved %d OpenAQ records to %s", len(df), out_path)
         return out_path
 
-    def audit_records(self, df: pd.DataFrame) -> Dict[str, Any]:
+    def audit_records(self, df: pd.DataFrame, pollutant: str = "pm25") -> Dict[str, Any]:
         """Performs statistical QA audit on OpenAQ dataset."""
         if df.empty:
             return {
@@ -514,16 +536,32 @@ class OpenAQLoader:
                 "status": "EMPTY",
             }
 
-        vals = df["observed_pm25"].dropna()
-        return {
+        target_col = "observed_pm10" if ("pm10" in pollutant.lower() or ("observed_pm10" in df.columns and "observed_pm25" not in df.columns)) else "observed_pm25"
+        max_bound = PHYSICAL_PM10_MAX if "pm10" in target_col else PHYSICAL_PM25_MAX
+
+        vals = df[target_col].dropna() if target_col in df.columns else pd.Series([], dtype=float)
+        min_v = float(vals.min()) if len(vals) > 0 else None
+        max_v = float(vals.max()) if len(vals) > 0 else None
+        mean_v = float(vals.mean()) if len(vals) > 0 else None
+
+        res = {
             "total_records": int(len(df)),
             "stations_count": int(df["station_code"].nunique()),
             "stations": df["station_name"].unique().tolist(),
-            "min_pm25": float(vals.min()) if len(vals) > 0 else None,
-            "max_pm25": float(vals.max()) if len(vals) > 0 else None,
-            "mean_pm25": float(vals.mean()) if len(vals) > 0 else None,
-            "within_bounds_0_to_500": bool((vals >= 0.0).all() and (vals <= 500.0).all()),
-            "time_min": str(df["timestamp_utc"].min()),
-            "time_max": str(df["timestamp_utc"].max()),
-            "status": "PASS",
+            "target_column": target_col,
+            "min_pm25": min_v,
+            "max_pm25": max_v,
+            "mean_pm25": mean_v,
+            "within_bounds_0_to_500": bool((vals >= 0.0).all() and (vals <= 500.0).all()) if len(vals) > 0 else False,
+            "within_bounds": bool((vals >= 0.0).all() and (vals <= max_bound).all()) if len(vals) > 0 else False,
+            "time_min": str(df["timestamp_utc"].min()) if "timestamp_utc" in df.columns else None,
+            "time_max": str(df["timestamp_utc"].max()) if "timestamp_utc" in df.columns else None,
+            "status": "PASS" if len(vals) > 0 else "EMPTY",
         }
+        if "pm10" in target_col:
+            res["min_pm10"] = min_v
+            res["max_pm10"] = max_v
+            res["mean_pm10"] = mean_v
+            res["within_bounds_0_to_1000"] = bool((vals >= 0.0).all() and (vals <= 1000.0).all()) if len(vals) > 0 else False
+
+        return res

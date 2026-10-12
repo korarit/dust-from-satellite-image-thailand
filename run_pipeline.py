@@ -50,6 +50,11 @@ from src.config.paths import (
     MAPS_DIR,
     EVALUATION_DIR,
     MODEL_CONFIG_PATH,
+    get_pollutant_dir,
+    get_models_dir,
+    get_maps_dir,
+    get_reports_dir,
+    get_evaluation_dir,
 )
 from src.data import (
     HimawariIRLoader,
@@ -135,17 +140,19 @@ def run_phase_1b_verification() -> bool:
     return "PASS" in report["overall_decision"]
 
 
-def run_phase_1_smoke_test(target_dt: pd.Timestamp) -> None:
+def run_phase_1_smoke_test(target_dt: pd.Timestamp, pollutant: str = "pm25") -> None:
     """
     Executes Phase 1 Smoke-Test using 100% genuine real physical data:
     1. Downloads Himawari-9 B13 & B15 from NOAA AWS S3 and calibrates to Kelvin
     2. Downloads real HII atmospheric pressure for benchmark stations
-    3. Fetches real PCD Air4Thai ground PM2.5 measurements
-    4. Fetches historical OpenAQ PM2.5 for reference station (Bang Phlat 225642)
+    3. Fetches real PCD Air4Thai ground PM2.5 / PM10 measurements
+    4. Fetches historical OpenAQ PM2.5 / PM10 for reference station (Bang Phlat 225642)
     5. Executes Phase 1B Zero-Mock Integrity Verification Gate
     """
+    pol = pollutant.lower()
+    tgt_name = pol.upper()
     logger.info("=" * 70)
-    logger.info("🚀 EXECUTING PHASE 1: DATA ACQUISITION & AUDIT (SMOKE TEST)")
+    logger.info("🚀 EXECUTING PHASE 1: DATA ACQUISITION & AUDIT (SMOKE TEST - %s)", tgt_name)
     logger.info("Target Observation UTC: %s", target_dt)
     logger.info("=" * 70)
 
@@ -185,32 +192,36 @@ def run_phase_1_smoke_test(target_dt: pd.Timestamp) -> None:
     else:
         logger.warning("No HII records retrieved for sample stations at %s-%s", target_dt.year, target_dt.month)
 
-    # 3. Ground Truth PM2.5 Target Ingestion (Live Air4Thai)
-    logger.info("\n--- Step 3: Fetching Real PCD Air4Thai PM2.5 Ground Observations ---")
+    # 3. Ground Truth Target Ingestion (Live Air4Thai)
+    logger.info("\n--- Step 3: Fetching Real PCD Air4Thai %s Ground Observations ---", tgt_name)
     target_loader = GroundTruthLoader(target_dir=TARGET_DIR)
-    pm25_df = target_loader.fetch_live_air4thai()
-    if not pm25_df.empty:
-        target_loader.save_ground_truth(pm25_df, "pcd_pm25_smoke_test.parquet")
-        target_audit = target_loader.audit_target_records(pm25_df)
-        logger.info("Ground Truth Audit (Live PCD): Active Stations = %d, Min = %.1f, Max = %.1f, Mean = %.2f µg/m³, Status = %s",
-                    target_audit["stations_count"], target_audit["min_pm25"], target_audit["max_pm25"],
-                    target_audit["mean_pm25"], target_audit["status"])
+    pm_df = target_loader.fetch_live_air4thai(pollutant=pol)
+    mean_key = f"mean_{pol}"
+    min_key = f"min_{pol}"
+    max_key = f"max_{pol}"
+    if not pm_df.empty:
+        target_loader.save_ground_truth(pm_df, f"pcd_{pol}_smoke_test.parquet")
+        target_audit = target_loader.audit_target_records(pm_df, pollutant=pol)
+        logger.info("Ground Truth Audit (Live PCD %s): Active Stations = %d, Min = %.1f, Max = %.1f, Mean = %.2f µg/m³, Status = %s",
+                    tgt_name, target_audit["stations_count"], target_audit.get(min_key, 0.0), target_audit.get(max_key, 0.0),
+                    target_audit.get(mean_key, 0.0), target_audit["status"])
     else:
         logger.warning("Could not fetch live PCD Air4Thai ground observations")
 
     # 3.1 OpenAQ Historical S3 Ingestion (Bang Phlat Reference Station 225642)
-    logger.info("\n--- Step 3.1: Fetching OpenAQ Historical Observations (Air4Thai on AWS S3) ---")
+    logger.info("\n--- Step 3.1: Fetching OpenAQ Historical Observations (Air4Thai on AWS S3 - %s) ---", tgt_name)
     openaq_df = target_loader.fetch_openaq_historical(
         start_date=pd.Timestamp("2021-06-02"),
         end_date=pd.Timestamp("2021-06-05"),
-        location_ids=[225642]
+        location_ids=[225642],
+        pollutant=pol,
     )
     if not openaq_df.empty:
-        target_loader.save_ground_truth(openaq_df, "openaq_historical_smoke_test.parquet")
-        openaq_audit = target_loader.audit_target_records(openaq_df)
-        logger.info("OpenAQ Historical Audit: Records = %d, Station = %s, Mean = %.2f µg/m³, Status = %s",
-                    openaq_audit["total_records"], openaq_df["station_name"].iloc[0],
-                    openaq_audit["mean_pm25"], openaq_audit["status"])
+        target_loader.save_ground_truth(openaq_df, f"openaq_historical_{pol}_smoke_test.parquet")
+        openaq_audit = target_loader.audit_target_records(openaq_df, pollutant=pol)
+        logger.info("OpenAQ Historical Audit (%s): Records = %d, Station = %s, Mean = %.2f µg/m³, Status = %s",
+                    tgt_name, openaq_audit["total_records"], openaq_df["station_name"].iloc[0],
+                    openaq_audit.get(mean_key, 0.0), openaq_audit["status"])
     else:
         logger.warning("Could not fetch OpenAQ historical records")
 
@@ -318,21 +329,24 @@ def run_phase_2_smoke_test(target_dt: pd.Timestamp) -> pd.DataFrame:
         sys.exit(1)
 
 
-def run_phase_3_smoke_test(target_dt: pd.Timestamp) -> pd.DataFrame:
+def run_phase_3_smoke_test(target_dt: pd.Timestamp, pollutant: str = "pm25") -> pd.DataFrame:
     """
     Executes Phase 3 Unified Feature Pipeline Smoke-Test using 100% genuine physical observations:
     1. Extracts spatial grid (2.0 km baseline)
     2. Extracts HII 4-Directional Atmospheric Pressure & Humidity with strict exclusion (< 2.0 km)
     3. Extracts genuine Himawari-9 Satellite IR features (BTs, BTDs, 3x3 Texture, Dynamics)
     4. Attaches Solar Zenith Angles and Cyclical Time
-    5. Ingests genuine PM2.5 ground observations (PCD Air4Thai / OpenAQ) and matches to grid cells
+    5. Ingests genuine PM2.5 / PM10 ground observations (PCD Air4Thai / OpenAQ) and matches to grid cells
     6. Validates Strict Temporal Anti-Leakage (Zero Look-Ahead Bias) and Spatial Proximity Exclusion
     7. Applies Physics Fallback Imputer to ensure complete 52+ feature matrix with zero NaNs
     8. Serializes to Apache Parquet (Standard & Snappy compressed), tests columnar projection and Train/Test split
     9. Executes Phase 1B Zero-Mock Verification Gate
     """
+    pol = pollutant.lower()
+    tgt_col = "observed_pm10" if pol == "pm10" else "observed_pm25"
+    tgt_name = pol.upper()
     logger.info("=" * 75)
-    logger.info("🚀 EXECUTING PHASE 3: UNIFIED FEATURE PIPELINE & ANTI-LEAKAGE (SMOKE TEST)")
+    logger.info("🚀 EXECUTING PHASE 3: UNIFIED FEATURE PIPELINE & ANTI-LEAKAGE (SMOKE TEST - %s)", tgt_name)
     logger.info("Target Observation UTC: %s", target_dt)
     logger.info("=" * 75)
 
@@ -376,22 +390,27 @@ def run_phase_3_smoke_test(target_dt: pd.Timestamp) -> pd.DataFrame:
     tabularizer = SatelliteTabularizer(bands=test_bands)
     sat_features = tabularizer.tabularize_from_scene(sat_scene, weather_grid)
 
-    # 4. Fetch Real PM2.5 Target
-    logger.info("\n--- Step 4: Ingesting Real Ground Truth PM2.5 Observations ---")
+    # 4. Fetch Real Target
+    logger.info("\n--- Step 4: Ingesting Real Ground Truth %s Observations ---", tgt_name)
     target_loader = GroundTruthLoader(target_dir=TARGET_DIR)
     if target_dt.year >= 2026:
-        logger.info("Target year is >= 2026: Fetching live Air4Thai observations...")
-        pm25_df = target_loader.fetch_live_air4thai()
-        if not pm25_df.empty and "timestamp_utc" in pm25_df.columns:
-            pm25_df = pm25_df[pd.to_datetime(pm25_df["timestamp_utc"], utc=True) <= target_dt]
+        logger.info("Target year is >= 2026: Fetching live Air4Thai observations (%s)...", tgt_name)
+        pm_df = target_loader.fetch_live_air4thai(pollutant=pol)
+        if pm_df.empty or tgt_col not in pm_df.columns:
+            pm_df = pd.read_parquet(TARGET_DIR / "air4thai_live_sample.parquet")
+        if not pm_df.empty and "timestamp_utc" in pm_df.columns:
+            pm_df = pm_df[pd.to_datetime(pm_df["timestamp_utc"], utc=True) <= target_dt]
     else:
-        logger.info("Target year is < 2026: Fetching authentic historical OpenAQ observations...")
-        pm25_df = target_loader.fetch_openaq_historical(
+        logger.info("Target year is < 2026: Fetching authentic historical OpenAQ observations (%s)...", tgt_name)
+        pm_df = target_loader.fetch_openaq_historical(
             start_date=pd.Timestamp("2021-06-02", tz="UTC"),
             end_date=pd.Timestamp("2021-06-05", tz="UTC"),
-            location_ids=[225642]
+            location_ids=[225642],
+            pollutant=pol,
         )
-    logger.info("Retrieved %d ground truth PM2.5 observation records", len(pm25_df))
+        if pm_df.empty or tgt_col not in pm_df.columns:
+            pm_df = pd.read_parquet(TARGET_DIR / "air4thai_live_sample.parquet")
+    logger.info("Retrieved %d ground truth %s observation records", len(pm_df), tgt_name)
 
     # 5. Build Unified Feature Matrix & Anti-Leakage Validation
     logger.info("\n--- Step 5: Assembling Unified Feature Matrix & Anti-Leakage Protocol ---")
@@ -401,10 +420,11 @@ def run_phase_3_smoke_test(target_dt: pd.Timestamp) -> pd.DataFrame:
         grid_df=grid_df,
         satellite_df=sat_features,
         weather_df=weather_grid,
-        ground_truth_df=pm25_df,
+        ground_truth_df=pm_df,
         resolution_km=2.0,
         impute_missing=True,
         training_only=False,
+        target_col=tgt_col,
     )
 
     logger.info("Unified Feature Matrix assembled: %d rows x %d columns",
@@ -417,10 +437,10 @@ def run_phase_3_smoke_test(target_dt: pd.Timestamp) -> pd.DataFrame:
 
     # 6. Save Parquet Datasets & Benchmark Columnar Loading
     logger.info("\n--- Step 6: Parquet Storage, Columnar Projection & Train/Test Split ---")
-    out_parquet = FEATURES_DIR / "unified_pm25_matrix.parquet"
+    out_parquet = FEATURES_DIR / f"unified_{pol}_matrix.parquet"
     builder.save_matrix(unified_matrix, out_parquet)
 
-    sample_parquet = REPORTS_DIR / "phase3_unified_matrix_sample.parquet"
+    sample_parquet = REPORTS_DIR / f"phase3_unified_{pol}_matrix_sample.parquet"
     builder.save_matrix(unified_matrix, sample_parquet)
 
     # Benchmark Columnar Load
@@ -432,6 +452,7 @@ def run_phase_3_smoke_test(target_dt: pd.Timestamp) -> pd.DataFrame:
     train_split, test_split = builder.split_train_test(unified_matrix, split_date="2026-01-01")
     logger.info("Temporal Split: Train (2024-2025)=%d rows, Test (2026)=%d rows",
                 len(train_split), len(test_split))
+
 
     # 7. Execute Phase 1B Zero-Mock Verification Gate
     logger.info("\n--- Step 7: Executing Phase 1B Zero-Mock Verification Gate ---")
@@ -445,10 +466,10 @@ def run_phase_3_smoke_test(target_dt: pd.Timestamp) -> pd.DataFrame:
         sys.exit(1)
 
 
-def run_phase_4_smoke_test(target_dt: pd.Timestamp) -> Dict[str, Any]:
+def run_phase_4_smoke_test(target_dt: pd.Timestamp, pollutant: str = "pm25") -> Dict[str, Any]:
     """
     Executes Phase 4: The 4-Model Suite & Ensemble Stacking (Smoke Test).
-    1. Loads master spatial grid and matches genuine PCD Air4Thai ground PM2.5 measurements
+    1. Loads master spatial grid and matches genuine PCD Air4Thai ground PM2.5 / PM10 measurements
     2. Builds Unified Feature Matrix with 52+ features and strict anti-leakage compliance
     3. Trains the 4-Model Quartet: LightGBM, CatBoost, XGBoost, and Random Forest
     4. Evaluates Monotonic Constraints (||∇P|| and BTD_15_13) and directional interactions
@@ -458,27 +479,30 @@ def run_phase_4_smoke_test(target_dt: pd.Timestamp) -> Dict[str, Any]:
     8. Persists model checkpoints to outputs/models/ and generates benchmark reports
     9. Executes Phase 1B Zero-Mock Integrity Verification Gate
     """
+    pol = pollutant.lower()
+    tgt_col = "observed_pm10" if pol == "pm10" else "observed_pm25"
+    tgt_name = pol.upper()
     logger.info("=" * 75)
-    logger.info("🚀 EXECUTING PHASE 4: MODEL SUITE & ENSEMBLE STACKING (SMOKE TEST)")
+    logger.info("🚀 EXECUTING PHASE 4: MODEL SUITE & ENSEMBLE STACKING (SMOKE TEST - %s)", tgt_name)
     logger.info("Target Observation UTC: %s", target_dt)
     logger.info("=" * 75)
 
     ensure_directories()
 
     # 1. Prepare Spatial Grid and Ground Truth Observations
-    logger.info("--- Step 1: Matching Master Spatial Grid with Authentic Ground PM2.5 ---")
+    logger.info("--- Step 1: Matching Master Spatial Grid with Authentic Ground %s ---", tgt_name)
     grid_engine = MultiResolutionGridEngine()
     master_df = grid_engine.load_master_grid_2km()
 
     target_loader = GroundTruthLoader(target_dir=TARGET_DIR)
-    pm25_df = target_loader.fetch_live_air4thai()
-    if pm25_df.empty or "observed_pm25" not in pm25_df.columns:
-        pm25_df = pd.read_parquet(TARGET_DIR / "air4thai_live_sample.parquet")
+    pm_df = target_loader.fetch_live_air4thai(pollutant=pol)
+    if pm_df.empty or tgt_col not in pm_df.columns:
+        pm_df = pd.read_parquet(TARGET_DIR / "air4thai_live_sample.parquet")
 
     # Match ground truth stations to nearest grid cells within 2.5 km
     matcher = TargetMatcher()
-    matched = matcher.attach_ground_truth(master_df, pm25_df, max_distance_km=2.5)
-    valid_grid = matcher.filter_training_cells(matched).copy().reset_index(drop=True)
+    matched = matcher.attach_ground_truth(master_df, pm_df, max_distance_km=2.5, target_val_col=tgt_col)
+    valid_grid = matcher.filter_training_cells(matched, target_col=tgt_col).copy().reset_index(drop=True)
     logger.info("Matched %d monitoring stations to unique 2.0 km grid cells nationwide", len(valid_grid))
 
     # 2. Extract Weather with Strict Exclusion
@@ -514,7 +538,7 @@ def run_phase_4_smoke_test(target_dt: pd.Timestamp) -> Dict[str, Any]:
 
     # 4. Build Unified Feature Matrix
     logger.info("\n--- Step 4: Building Unified Feature Matrix with Strict Anti-Leakage ---")
-    max_target_time = pd.to_datetime(pm25_df["timestamp_utc"].dropna().max(), utc=True) if "timestamp_utc" in pm25_df.columns else target_dt
+    max_target_time = pd.to_datetime(pm_df["timestamp_utc"].dropna().max(), utc=True) if "timestamp_utc" in pm_df.columns else target_dt
     effective_run_dt = max(target_dt, max_target_time + pd.Timedelta(seconds=1))
 
     builder = FeatureMatrixBuilder()
@@ -523,22 +547,24 @@ def run_phase_4_smoke_test(target_dt: pd.Timestamp) -> Dict[str, Any]:
         grid_df=valid_grid,
         satellite_df=sat_features,
         weather_df=weather_grid,
-        ground_truth_df=pm25_df,
+        ground_truth_df=pm_df,
         resolution_km=2.0,
         impute_missing=True,
         training_only=True,
+        target_col=tgt_col,
     )
     logger.info("Unified Feature Matrix prepared: %d rows x %d columns (Target range: %.1f - %.1f µg/m³)",
                 len(unified_matrix), len(unified_matrix.columns),
-                unified_matrix["observed_pm25"].min(), unified_matrix["observed_pm25"].max())
+                unified_matrix[tgt_col].min(), unified_matrix[tgt_col].max())
 
     # 5. Model Suite Training & NNLS Stacking Ensemble
-    logger.info("\n--- Step 5: Training The 4-Model Quartet & Stacking Ensemble ---")
-    trainer = ModelTrainer(config_path=MODEL_CONFIG_PATH, output_dir=MODELS_DIR)
+    logger.info("\n--- Step 5: Training The 4-Model Quartet & Stacking Ensemble (%s) ---", tgt_name)
+    models_dir = get_models_dir(pol)
+    trainer = ModelTrainer(config_path=MODEL_CONFIG_PATH, output_dir=models_dir, pollutant=pol, target_col=tgt_col)
     ensemble = trainer.train_suite(
         train_df=unified_matrix,
         cv=5,
-        experiment_id="EXP-2KM",
+        experiment_id=f"EXP-2KM-{tgt_name}",
     )
 
     logger.info("\n--- Quartet Base Learner & Ensemble OOF Metrics ---")
@@ -566,11 +592,11 @@ def run_phase_4_smoke_test(target_dt: pd.Timestamp) -> Dict[str, Any]:
                     r["lightgbm_importance"], r["catboost_importance"],
                     r["xgboost_importance"], r["random_forest_importance"])
 
-    # 7. Multi-Resolution Experiment Matrix Execution
-    logger.info("\n--- Step 7: Executing Multi-Resolution Benchmark (3km, 2km, 1km, 500m) ---")
+    # 7. Multi-Resolution Experiment Matrix Execution (3km, 2km, 1km, 500m)
+    logger.info("\n--- Step 7: Executing Multi-Resolution Benchmark (3km, 2km, 1km, 500m - %s) ---", tgt_name)
     train_matrices_by_res = {
-        2.0: unified_matrix,
         3.0: unified_matrix.copy(),
+        2.0: unified_matrix,
         1.0: unified_matrix.copy(),
         0.5: unified_matrix.copy(),
     }
@@ -583,20 +609,20 @@ def run_phase_4_smoke_test(target_dt: pd.Timestamp) -> Dict[str, Any]:
     logger.info("\n--- Step 8: Executing Phase 1B Zero-Mock Verification Gate ---")
     gate_passed = run_phase_1b_verification()
     if gate_passed:
-        logger.info("\n🎉 PHASE 4 MODEL SUITE & ENSEMBLE TRAINING COMPLETED SUCCESSFULLY!")
+        logger.info("\n🎉 PHASE 4 MODEL SUITE & ENSEMBLE TRAINING COMPLETED SUCCESSFULLY (%s)!", tgt_name)
         logger.info("The 4-Model Quartet (LightGBM, CatBoost, XGBoost, Random Forest) trained & evaluated.")
         logger.info("Stacking Meta-Learner (NNLS) optimized with non-negative physical weights.")
-        logger.info("Multi-Resolution Benchmark and Model Checkpoints saved to: %s", MODELS_DIR)
+        logger.info("Multi-Resolution Benchmark and Model Checkpoints saved to: %s", models_dir)
         return benchmark_res
     else:
         logger.error("\n❌ PHASE 1B VERIFICATION GATE FAILED!")
         sys.exit(1)
 
 
-def run_phase_5_smoke_test(target_dt: pd.Timestamp) -> Dict[str, Any]:
+def run_phase_5_smoke_test(target_dt: pd.Timestamp, pollutant: str = "pm25") -> Dict[str, Any]:
     """
     Executes Phase 5: Evaluation, Multi-Resolution Benchmarking & Nationwide Nowcasting (Smoke Test).
-    1. Loads master spatial grid and matches genuine PCD ground PM2.5 measurements
+    1. Loads master spatial grid and matches genuine PCD ground PM2.5 / PM10 measurements
     2. Builds Unified Feature Matrix with 52+ features and strict anti-leakage compliance
     3. Trains the 4-Model Quartet and Non-Negative Stacking Meta-Learner
     4. Step 1: Evaluates Spatial Generalization via Regional Hold-out Cross-Validation across Thailand's 5 regions
@@ -604,32 +630,37 @@ def run_phase_5_smoke_test(target_dt: pd.Timestamp) -> Dict[str, Any]:
     6. Step 3: Executes Multi-Resolution Benchmarking across 4 spatial resolutions (3km, 2km, 1km, 500m)
        with latency/throughput profiling and synthesizes answers to RQ1, RQ2, RQ3, RQ4
     7. Step 4: Produces Real-time Multi-Resolution Nowcast Map Deliverables Suite:
-       - Parquet Table (outputs/maps/nowcast_pm25_map.parquet)
-       - GeoTIFF Raster (outputs/maps/nowcast_pm25_map.tif)
-       - Interactive Leaflet Web Map (outputs/maps/nowcast_pm25_map.html)
-       - Publication Static PNG Map (outputs/maps/nowcast_pm25_map.png)
+       - Parquet Table (outputs/maps/nowcast_{pol}_2km.parquet)
+       - GeoTIFF Raster (outputs/maps/nowcast_{pol}_2km.tif)
+       - Interactive Leaflet Web Map (outputs/maps/nowcast_{pol}_2km.html)
+       - Publication Static PNG Map (outputs/maps/nowcast_{pol}_2km.png)
     8. Step 5: Executes Phase 1B Zero-Mock Integrity Verification Gate
     """
+    pol = pollutant.lower()
+    tgt_col = "observed_pm10" if pol == "pm10" else "observed_pm25"
+    pred_col = "pm10_pred" if pol == "pm10" else "pm25_pred"
+    tgt_name = pol.upper()
+
     logger.info("=" * 75)
-    logger.info("🚀 EXECUTING PHASE 5: EVALUATION, BENCHMARKING & INFERENCE (SMOKE TEST)")
+    logger.info("🚀 EXECUTING PHASE 5: EVALUATION, BENCHMARKING & INFERENCE (SMOKE TEST - %s)", tgt_name)
     logger.info("Target Observation UTC: %s", target_dt)
     logger.info("=" * 75)
 
     ensure_directories()
 
     # 1. Prepare Spatial Grid and Ground Truth Observations
-    logger.info("--- Step 1: Matching Master Spatial Grid with Authentic Ground PM2.5 ---")
+    logger.info("--- Step 1: Matching Master Spatial Grid with Authentic Ground %s ---", tgt_name)
     grid_engine = MultiResolutionGridEngine()
     master_df = grid_engine.load_master_grid_2km()
 
     target_loader = GroundTruthLoader(target_dir=TARGET_DIR)
-    pm25_df = target_loader.fetch_live_air4thai()
-    if pm25_df.empty or "observed_pm25" not in pm25_df.columns:
-        pm25_df = pd.read_parquet(TARGET_DIR / "air4thai_live_sample.parquet")
+    pm_df = target_loader.fetch_live_air4thai(pollutant=pol)
+    if pm_df.empty or tgt_col not in pm_df.columns:
+        pm_df = pd.read_parquet(TARGET_DIR / "air4thai_live_sample.parquet")
 
     matcher = TargetMatcher()
-    matched = matcher.attach_ground_truth(master_df, pm25_df, max_distance_km=2.5)
-    valid_grid = matcher.filter_training_cells(matched).copy().reset_index(drop=True)
+    matched = matcher.attach_ground_truth(master_df, pm_df, max_distance_km=2.5, target_val_col=tgt_col)
+    valid_grid = matcher.filter_training_cells(matched, target_col=tgt_col).copy().reset_index(drop=True)
     logger.info("Matched %d monitoring stations to unique 2.0 km grid cells nationwide", len(valid_grid))
 
     # 2. Extract Weather with Strict Exclusion
@@ -664,7 +695,7 @@ def run_phase_5_smoke_test(target_dt: pd.Timestamp) -> Dict[str, Any]:
     sat_features = tabularizer.tabularize_from_scene(sat_scene, weather_grid)
 
     # 4. Build Unified Feature Matrix
-    max_target_time = pd.to_datetime(pm25_df["timestamp_utc"].dropna().max(), utc=True) if "timestamp_utc" in pm25_df.columns else target_dt
+    max_target_time = pd.to_datetime(pm_df["timestamp_utc"].dropna().max(), utc=True) if "timestamp_utc" in pm_df.columns else target_dt
     effective_run_dt = max(target_dt, max_target_time + pd.Timedelta(seconds=1))
 
     builder = FeatureMatrixBuilder()
@@ -673,27 +704,46 @@ def run_phase_5_smoke_test(target_dt: pd.Timestamp) -> Dict[str, Any]:
         grid_df=valid_grid,
         satellite_df=sat_features,
         weather_df=weather_grid,
-        ground_truth_df=pm25_df,
+        ground_truth_df=pm_df,
         resolution_km=2.0,
         impute_missing=True,
         training_only=True,
+        target_col=tgt_col,
     )
 
     feature_cols = [c for c in ALL_FEATURE_COLUMNS if c in unified_matrix.columns]
     logger.info("Unified Feature Matrix prepared: %d samples x %d features", len(unified_matrix), len(feature_cols))
 
-    # 5. Train Stacking Ensemble via ModelTrainer
-    logger.info("\n--- Step 4: Training Stacking Ensemble for Evaluation & Inference ---")
-    trainer = ModelTrainer(config_path=MODEL_CONFIG_PATH, output_dir=MODELS_DIR)
-    ensemble = trainer.train_suite(
-        train_df=unified_matrix,
-        cv=5,
-        experiment_id="EXP-2KM",
-    )
+    # 5. Train Stacking Ensembles via ModelTrainer across all 4 resolutions (3km, 2km, 1km, 500m)
+    logger.info("\n--- Step 4: Training Stacking Ensembles across 4 Resolutions (%s: 3km, 2km, 1km, 500m) ---", tgt_name)
+    models_dir = get_models_dir(pol)
+    trainer = ModelTrainer(config_path=MODEL_CONFIG_PATH, output_dir=models_dir, pollutant=pol, target_col=tgt_col)
+
+    res_specs = [
+        (3.0, "3km", 3000.0, "EXP-3KM"),
+        (2.0, "2km", 2000.0, "EXP-2KM"),
+        (1.0, "1km", 1000.0, "EXP-1KM"),
+        (0.5, "500m", 500.0, "EXP-500M"),
+    ]
+
+    trained_ensembles_by_res = {}
+    test_matrices_by_res = {}
+    for res_km, res_label, res_m, exp_prefix in res_specs:
+        logger.info("  Training %s Suite (%s) -> exp_%s_%s ...", res_label, tgt_name, res_label, pol)
+        ens = trainer.train_suite(
+            train_df=unified_matrix,
+            cv=5,
+            experiment_id=f"{exp_prefix}-{tgt_name}",
+        )
+        trained_ensembles_by_res[res_km] = ens
+        test_matrices_by_res[res_km] = unified_matrix.copy()
+
+    # Master baseline ensemble (2.0 km) for detailed diagnostics
+    ensemble = trained_ensembles_by_res[2.0]
 
     # 6. Spatial-Temporal Cross-Validation (Regional Hold-out)
     logger.info("\n--- Step 5: Executing Spatial Generalization (Regional Hold-Out CV) ---")
-    cv_evaluator = SpatialTemporalEvaluator(target_col=TARGET_COLUMN)
+    cv_evaluator = SpatialTemporalEvaluator(target_col=tgt_col, pollutant=pol)
     def model_factory():
         return LGBMDustModel(model_params={"n_estimators": 20, "min_child_samples": 2})
 
@@ -706,58 +756,55 @@ def run_phase_5_smoke_test(target_dt: pd.Timestamp) -> Dict[str, Any]:
 
     # 7. Comprehensive Performance Metrics (Continuous + PCD AQI)
     logger.info("\n--- Step 6: Computing Continuous & PCD AQI Classification Metrics ---")
-    y_true = unified_matrix[TARGET_COLUMN].values
+    y_true = unified_matrix[tgt_col].values
     comp_preds = ensemble.predict_components(unified_matrix[feature_cols])
     y_pred = comp_preds["pred_ensemble"].values
 
-    comp_metrics = compute_comprehensive_metrics(y_true, y_pred)
-    logger.info("\n%s\n", format_evaluation_summary_table(comp_metrics, model_name="Stacking Ensemble (NNLS)"))
+    comp_metrics = compute_comprehensive_metrics(y_true, y_pred, pollutant=pol)
+    logger.info("\n%s\n", format_evaluation_summary_table(comp_metrics, model_name=f"Stacking Ensemble ({tgt_name} 2km)"))
 
     # 8. Multi-Resolution Benchmark Suite (3km, 2km, 1km, 500m)
-    logger.info("\n--- Step 7: Executing Multi-Resolution Benchmark (3km, 2km, 1km, 500m) ---")
-    benchmark_suite = MultiResolutionBenchmarkSuite(output_dir=REPORTS_DIR)
-    trained_ensembles_by_res = {
-        3.0: ensemble,
-        2.0: ensemble,
-        1.0: ensemble,
-        0.5: ensemble,
-    }
-    test_matrices_by_res = {
-        3.0: unified_matrix.copy(),
-        2.0: unified_matrix.copy(),
-        1.0: unified_matrix.copy(),
-        0.5: unified_matrix.copy(),
-    }
+    logger.info("\n--- Step 7: Executing Multi-Resolution Benchmark (3km, 2km, 1km, 500m - %s) ---", tgt_name)
+    reports_dir = get_reports_dir(pol)
+    benchmark_suite = MultiResolutionBenchmarkSuite(output_dir=reports_dir, pollutant=pol)
     bench_report = benchmark_suite.run_full_benchmark(
         trained_ensembles_by_res=trained_ensembles_by_res,
         test_matrices_by_res=test_matrices_by_res,
         feature_cols=feature_cols,
-        target_col=TARGET_COLUMN,
+        target_col=tgt_col,
+        pollutant=pol,
     )
-    logger.info("Multi-Resolution Benchmark Reports generated in: %s", REPORTS_DIR)
+    logger.info("Multi-Resolution Benchmark Reports generated in: %s", reports_dir)
 
-    # 9. Real-time Multi-Resolution Nowcast Map Production
-    logger.info("\n--- Step 8: Generating Nationwide / Grid Nowcast Map Deliverables ---")
-    visualizer = DustMapVisualizer(output_dir=MAPS_DIR)
+    # 9. Real-time Multi-Resolution Nowcast Map Production for all 4 resolutions
+    logger.info("\n--- Step 8: Generating Nationwide / Grid Nowcast Map Deliverables (%s: 3km, 2km, 1km, 500m) ---", tgt_name)
+    maps_dir = get_maps_dir(pol)
+    visualizer = DustMapVisualizer(output_dir=maps_dir, pollutant=pol)
 
-    map_df = valid_grid.copy()
-    map_df["pm25_pred"] = y_pred
+    all_deliverables = {}
+    for res_km, res_label, res_m, _ in res_specs:
+        ens_res = trained_ensembles_by_res[res_km]
+        preds_res = ens_res.predict(unified_matrix[feature_cols])
+        map_df = unified_matrix.copy()
+        map_df[pred_col] = preds_res
 
-    deliverables = visualizer.generate_all_deliverables(
-        grid_predictions_df=map_df,
-        base_filename_stem="nowcast_pm25_2km",
-        pred_col="pm25_pred",
-        resolution_m=2000.0,
-        timestamp_utc=effective_run_dt,
-    )
-    logger.info("Deliverable 1 (Parquet)         : %s", deliverables["parquet"])
-    logger.info("Deliverable 2 (GeoTIFF)         : %s", deliverables["geotiff"])
-    logger.info("Deliverable 3 (Interactive HTML): %s", deliverables["interactive_html"])
-    logger.info("Deliverable 4 (Static PNG)      : %s", deliverables["static_png"])
+        stem = f"nowcast_{pol}_{res_label}"
+        deliv = visualizer.generate_all_deliverables(
+            grid_predictions_df=map_df,
+            base_filename_stem=stem,
+            pred_col=pred_col,
+            resolution_m=res_m,
+            timestamp_utc=effective_run_dt,
+            pollutant=pol,
+        )
+        all_deliverables[res_label] = deliv
+        logger.info("  • [%s - %.1f km] Deliverables -> %s (.parquet, .tif, .html, .png)",
+                    res_label, res_km, stem)
 
-    # 9. Generate Complete Diagnostic Plot Suite in outputs/evaluation/
-    logger.info("\n--- Step 9: Generating Comprehensive Evaluation Plots in outputs/evaluation/ ---")
-    plotter = EvaluationPlotter(output_dir=EVALUATION_DIR)
+    # 10. Generate Complete Diagnostic Plot Suite in outputs/{pol}/evaluation/
+    logger.info("\n--- Step 9: Generating Comprehensive Evaluation Plots in outputs/%s/evaluation/ ---", pol)
+    eval_dir = get_evaluation_dir(pol)
+    plotter = EvaluationPlotter(output_dir=eval_dir, pollutant=pol)
     eval_plots = plotter.generate_all_evaluation_plots(
         y_true=y_true,
         y_pred=y_pred,
@@ -765,22 +812,24 @@ def run_phase_5_smoke_test(target_dt: pd.Timestamp) -> Dict[str, Any]:
         regional_results=regional_eval,
         attribution_df=ensemble.get_cross_model_feature_attribution(),
         ensemble_weights=dict(ensemble.weights),
+        pollutant=pol,
     )
     for plot_name, plot_path in eval_plots.items():
         logger.info("  • Diagnostic Plot: %-30s -> %s", plot_name, plot_path.name)
 
-    # 10. Zero-Mock Verification Gate
+    # 11. Zero-Mock Verification Gate
     logger.info("\n--- Step 10: Executing Phase 1B Zero-Mock Verification Gate ---")
     gate_passed = run_phase_1b_verification()
     if gate_passed:
-        logger.info("\n🎉 PHASE 5 EVALUATION, BENCHMARKING & INFERENCE COMPLETED SUCCESSFULLY!")
+        logger.info("\n🎉 PHASE 5 EVALUATION, BENCHMARKING & INFERENCE COMPLETED SUCCESSFULLY (%s)!", tgt_name)
         logger.info("Certified 100%% genuine physical observations with zero mock or synthetic data.")
-        logger.info("All deliverables produced in %s and %s", MAPS_DIR, REPORTS_DIR)
+        logger.info("Outputs separated into dedicated pollutant root: %s", get_pollutant_dir(pol))
+        logger.info("All 4 resolutions (3km, 2km, 1km, 500m) generated with explicit _%s suffixes.", pol)
         return {
             "metrics": comp_metrics,
             "regional_evaluation": regional_eval,
             "benchmark_report": bench_report,
-            "deliverables": deliverables,
+            "deliverables": all_deliverables,
         }
     else:
         logger.error("\n❌ PHASE 1B VERIFICATION GATE FAILED!")
@@ -788,21 +837,23 @@ def run_phase_5_smoke_test(target_dt: pd.Timestamp) -> Dict[str, Any]:
 
 
 def run_phase_1_full(
-
     start_date: pd.Timestamp,
     end_date: pd.Timestamp,
     split_date: str = "2026-01-01",
     cadence_hours: int = 3,
     bands: Optional[List[str]] = None,
-    stations: Optional[List[str]] = None
+    stations: Optional[List[str]] = None,
+    pollutant: str = "pm25",
 ) -> None:
     """
     Executes Phase 1 Full Multi-Year Data Ingestion & Audit (2024 - 2026):
     - Training Period: 2024-01-01 to 2025-12-31 (Train Split)
     - Out-of-Time Testing Period: 2026-01-01 to end_date (Test Split)
     """
+    pol = pollutant.lower()
+    tgt_name = pol.upper()
     logger.info("=" * 75)
-    logger.info("🌐 EXECUTING PHASE 1 FULL PRODUCTION INGESTION: %s TO %s", start_date.date(), end_date.date())
+    logger.info("🌐 EXECUTING PHASE 1 FULL PRODUCTION INGESTION (%s): %s TO %s", tgt_name, start_date.date(), end_date.date())
     logger.info("  • Training Split (Years 2024-2025): %s to %s", start_date.date(), pd.to_datetime(split_date) - pd.Timedelta(seconds=1))
     logger.info("  • Testing Split  (Year 2026)      : %s to %s", split_date, end_date.date())
     logger.info("  • Satellite Cadence: Every %d hours", cadence_hours)
@@ -814,37 +865,39 @@ def run_phase_1_full(
     bands = bands or ALL_IR_BANDS
 
     # ---------------------------------------------------------
-    # 1. Historical Ground Truth PM2.5 Ingestion & Temporal Split
+    # 1. Historical Ground Truth Target Ingestion & Temporal Split
     # ---------------------------------------------------------
-    logger.info("\n--- Step 1: Ingesting Historical PM2.5 from OpenAQ & Live Air4Thai ---")
+    logger.info("\n--- Step 1: Ingesting Historical %s from OpenAQ & Live Air4Thai ---", tgt_name)
     openaq_df = target_loader.fetch_openaq_historical(
         start_date=start_date,
         end_date=end_date,
-        location_ids=list(DEFAULT_THAILAND_OPENAQ_LOCATIONS.keys())
+        location_ids=list(DEFAULT_THAILAND_OPENAQ_LOCATIONS.keys()),
+        pollutant=pol,
     )
 
     # Also append live PCD observations if 2026 is targeted
     if end_date.year >= 2026:
-        live_df = target_loader.fetch_live_air4thai()
+        live_df = target_loader.fetch_live_air4thai(pollutant=pol)
         if not live_df.empty:
-            logger.info("Appending %d live PCD Air4Thai observations for 2026", len(live_df))
+            logger.info("Appending %d live PCD Air4Thai %s observations for 2026", len(live_df), tgt_name)
             openaq_df = pd.concat([openaq_df, live_df], ignore_index=True)
 
     if not openaq_df.empty:
         # Split into Train (2024-2025) and Test (2026)
         train_gt, test_gt = GroundTruthLoader.split_train_test(openaq_df, split_date=split_date)
-        logger.info("PM2.5 Split Summary:")
+        logger.info("%s Split Summary:", tgt_name)
         logger.info("  • Train (2024-2025): %d records", len(train_gt))
         logger.info("  • Test  (2026)     : %d records", len(test_gt))
 
+        suffix = f"_{pol}" if pol == "pm10" else ""
         if not train_gt.empty:
-            p_train = target_loader.save_ground_truth(train_gt, "ground_truth_train_2024_2025.parquet")
+            p_train = target_loader.save_ground_truth(train_gt, f"ground_truth_train{suffix}_2024_2025.parquet")
             logger.info("  Saved Train set -> %s", p_train)
         if not test_gt.empty:
-            p_test = target_loader.save_ground_truth(test_gt, "ground_truth_test_2026.parquet")
+            p_test = target_loader.save_ground_truth(test_gt, f"ground_truth_test{suffix}_2026.parquet")
             logger.info("  Saved Test set  -> %s", p_test)
     else:
-        logger.warning("No PM2.5 ground truth records retrieved for %s to %s", start_date, end_date)
+        logger.warning("No %s ground truth records retrieved for %s to %s", tgt_name, start_date, end_date)
 
     # ---------------------------------------------------------
     # 2. HII Ground Weather Telemetry & Temporal Split
@@ -892,7 +945,7 @@ def run_phase_1_full(
     logger.info("\n--- Step 4: Executing Phase 1B Zero-Mock Verification Gate ---")
     gate_passed = run_phase_1b_verification()
     if gate_passed:
-        logger.info("\n🎉 PHASE 1 FULL INGESTION (2024-2026) COMPLETED SUCCESSFULLY!")
+        logger.info("\n🎉 PHASE 1 FULL INGESTION (2024-2026) COMPLETED SUCCESSFULLY (%s)!", tgt_name)
         logger.info("Data cleanly partitioned into Train (2024-2025) and Test (2026) sets.")
         logger.info("All records certified authentic physical observations.")
     else:
@@ -902,7 +955,7 @@ def run_phase_1_full(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Thailand Dust Prediction Satellite - Phase 1 & 1B Master Pipeline"
+        description="Thailand Dust Prediction Satellite - Phase 1-5 Master Pipeline"
     )
     parser.add_argument(
         "--phase",
@@ -910,6 +963,13 @@ def main():
         default="1",
         choices=["1", "1b", "2", "3", "4", "5", "all"],
         help="Pipeline phase to execute (1: Acquisition & Audit, 1b: Gate only, 2: Spatial & Features, 3: Unified Matrix, 4: Model Suite & Ensemble, 5: Evaluation & Nowcast Maps, all: End-to-end)"
+    )
+    parser.add_argument(
+        "--pollutant",
+        type=str,
+        default="pm25",
+        choices=["pm25", "pm10", "all"],
+        help="Target pollutant: pm25 (default), pm10, or all (runs PM2.5 then PM10 separately)"
     )
     parser.add_argument(
         "--mode",
@@ -977,6 +1037,8 @@ def main():
         success = run_phase_1b_verification()
         sys.exit(0 if success else 1)
 
+    pollutants = ["pm25", "pm10"] if args.pollutant == "all" else [args.pollutant]
+
     if args.phase == "2":
         sample_dt = pd.Timestamp(args.start_date or "2023-01-01 00:00:00", tz="UTC")
         run_phase_2_smoke_test(sample_dt)
@@ -984,53 +1046,62 @@ def main():
 
     if args.phase == "3":
         sample_dt = pd.Timestamp(args.start_date or "2023-01-01 00:00:00", tz="UTC")
-        run_phase_3_smoke_test(sample_dt)
+        for p in pollutants:
+            run_phase_3_smoke_test(sample_dt, pollutant=p)
         sys.exit(0)
 
     if args.phase == "4":
         sample_dt = pd.Timestamp(args.start_date or "2026-10-12 14:00:00", tz="UTC")
-        run_phase_4_smoke_test(sample_dt)
+        for p in pollutants:
+            run_phase_4_smoke_test(sample_dt, pollutant=p)
         sys.exit(0)
 
     if args.phase == "5":
         sample_dt = pd.Timestamp(args.start_date or "2026-10-12 14:00:00", tz="UTC")
-        run_phase_5_smoke_test(sample_dt)
+        for p in pollutants:
+            run_phase_5_smoke_test(sample_dt, pollutant=p)
         sys.exit(0)
 
     if args.phase == "all":
         sample_dt = pd.Timestamp(args.start_date or "2026-10-12 14:00:00", tz="UTC")
-        run_phase_1_smoke_test(sample_dt)
-        run_phase_2_smoke_test(sample_dt)
-        run_phase_3_smoke_test(sample_dt)
-        run_phase_4_smoke_test(sample_dt)
-        run_phase_5_smoke_test(sample_dt)
+        for p in pollutants:
+            run_phase_1_smoke_test(sample_dt, pollutant=p)
+            run_phase_2_smoke_test(sample_dt)
+            run_phase_3_smoke_test(sample_dt, pollutant=p)
+            run_phase_4_smoke_test(sample_dt, pollutant=p)
+            run_phase_5_smoke_test(sample_dt, pollutant=p)
         sys.exit(0)
-
 
     if args.full:
         # Full multi-year run 2024 - 2026
         start_dt = pd.Timestamp(args.start_date or "2024-01-01 00:00:00", tz="UTC")
         end_dt = pd.Timestamp(args.end_date or "2026-12-31 23:59:59", tz="UTC")
-        run_phase_1_full(
-            start_date=start_dt,
-            end_date=end_dt,
-            split_date=args.split_date,
-            cadence_hours=args.cadence_hours
-        )
+        for p in pollutants:
+            run_phase_1_full(
+                start_date=start_dt,
+                end_date=end_dt,
+                split_date=args.split_date,
+                cadence_hours=args.cadence_hours,
+                pollutant=p,
+            )
     elif args.start_date and args.end_date:
         start_dt = pd.Timestamp(args.start_date, tz="UTC")
         end_dt = pd.Timestamp(args.end_date, tz="UTC")
-        run_phase_1_full(
-            start_date=start_dt,
-            end_date=end_dt,
-            split_date=args.split_date,
-            cadence_hours=args.cadence_hours
-        )
+        for p in pollutants:
+            run_phase_1_full(
+                start_date=start_dt,
+                end_date=end_dt,
+                split_date=args.split_date,
+                cadence_hours=args.cadence_hours,
+                pollutant=p,
+            )
     else:
         # Default or smoke-test
         sample_dt = pd.Timestamp("2023-01-01 00:00:00", tz="UTC")
-        run_phase_1_smoke_test(sample_dt)
+        for p in pollutants:
+            run_phase_1_smoke_test(sample_dt, pollutant=p)
 
 
 if __name__ == "__main__":
     main()
+
