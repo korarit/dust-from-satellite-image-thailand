@@ -40,7 +40,7 @@ try:
 except ImportError:
     HAS_RASTERIO = False
 
-from src.config.paths import GEO_DIR
+from src.config.paths import GEO_DIR, PROJECT_ROOT
 
 logger = logging.getLogger(__name__)
 
@@ -258,11 +258,16 @@ class MultiResolutionGridEngine:
         self._kdtree_2km: Optional[cKDTree] = None
 
     def load_master_grid_2km(self) -> pd.DataFrame:
-        """Loads and caches Thailand 2km Master Grid."""
+        """Loads and caches Thailand 2km Master Grid with fallback to bundled repo grid."""
         if self._master_2km_df is None:
-            if not self.base_grid_path.exists():
-                raise FileNotFoundError(f"Master Grid 2km file not found at {self.base_grid_path}")
-            df = pd.read_parquet(self.base_grid_path)
+            grid_path = self.base_grid_path
+            if not grid_path.exists():
+                fallback = PROJECT_ROOT / "data" / "geo" / "thailand_2km_master_grid.parquet"
+                if fallback.exists():
+                    grid_path = fallback
+                else:
+                    raise FileNotFoundError(f"Master Grid 2km file not found at {grid_path}")
+            df = pd.read_parquet(grid_path)
             self._master_2km_df = df
             coords = np.column_stack([df["centroid_lat"], df["centroid_lon"]])
             self._kdtree_2km = cKDTree(coords)

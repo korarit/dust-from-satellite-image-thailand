@@ -24,11 +24,24 @@ Examples:
   python run_pipeline.py --audit
 """
 
+import os
 import sys
 import argparse
 import logging
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Tuple
+
+# Early intercept for --dir-data and --dir-output before importing project modules
+# This guarantees that environment variables (DUST_DATA_DIR, DUST_OUTPUTS_DIR) are populated
+for _i, _arg in enumerate(sys.argv):
+    if _arg in ("--dir-data", "--data-dir") and _i + 1 < len(sys.argv):
+        os.environ["DUST_DATA_DIR"] = str(Path(sys.argv[_i + 1]).resolve())
+    elif _arg.startswith(("--dir-data=", "--data-dir=")):
+        os.environ["DUST_DATA_DIR"] = str(Path(_arg.split("=", 1)[1]).resolve())
+    elif _arg in ("--dir-output", "--output-dir", "--dir-outputs", "--outputs-dir") and _i + 1 < len(sys.argv):
+        os.environ["DUST_OUTPUTS_DIR"] = str(Path(sys.argv[_i + 1]).resolve())
+    elif _arg.startswith(("--dir-output=", "--output-dir=", "--dir-outputs=", "--outputs-dir=")):
+        os.environ["DUST_OUTPUTS_DIR"] = str(Path(_arg.split("=", 1)[1]).resolve())
 
 import pandas as pd
 
@@ -39,6 +52,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from src.config.paths import (
     ensure_directories,
+    configure_paths,
     DATA_DIR,
     HIMAWARI_CACHE_DIR,
     HII_DIR,
@@ -56,6 +70,32 @@ from src.config.paths import (
     get_reports_dir,
     get_evaluation_dir,
 )
+
+def update_pipeline_runtime_paths() -> None:
+    """Synchronizes module-level paths with src.config.paths."""
+    global DATA_DIR, HIMAWARI_CACHE_DIR, HII_DIR, TARGET_DIR, REPORTS_DIR, GEO_DIR, FEATURES_DIR, MODELS_DIR, MAPS_DIR, EVALUATION_DIR
+    import src.config.paths as _paths
+    DATA_DIR = _paths.DATA_DIR
+    HIMAWARI_CACHE_DIR = _paths.HIMAWARI_CACHE_DIR
+    HII_DIR = _paths.HII_DIR
+    TARGET_DIR = _paths.TARGET_DIR
+    REPORTS_DIR = _paths.REPORTS_DIR
+    GEO_DIR = _paths.GEO_DIR
+    FEATURES_DIR = _paths.FEATURES_DIR
+    MODELS_DIR = _paths.MODELS_DIR
+    MAPS_DIR = _paths.MAPS_DIR
+    EVALUATION_DIR = _paths.EVALUATION_DIR
+
+def _load_air4thai_sample_df() -> pd.DataFrame:
+    """Loads air4thai sample observations with fallback to bundled repo dataset."""
+    sample_file = TARGET_DIR / "air4thai_live_sample.parquet"
+    if sample_file.exists():
+        return pd.read_parquet(sample_file)
+    fallback = PROJECT_ROOT / "data" / "target" / "air4thai_live_sample.parquet"
+    if fallback.exists():
+        return pd.read_parquet(fallback)
+    raise FileNotFoundError(f"Sample air4thai ground truth file not found at {sample_file} or fallback {fallback}")
+
 from src.data import (
     HimawariIRLoader,
     HIIWeatherLoader,
@@ -397,7 +437,7 @@ def run_phase_3_smoke_test(target_dt: pd.Timestamp, pollutant: str = "pm25") -> 
         logger.info("Target year is >= 2026: Fetching live Air4Thai observations (%s)...", tgt_name)
         pm_df = target_loader.fetch_live_air4thai(pollutant=pol)
         if pm_df.empty or tgt_col not in pm_df.columns:
-            pm_df = pd.read_parquet(TARGET_DIR / "air4thai_live_sample.parquet")
+            pm_df = _load_air4thai_sample_df()
         if not pm_df.empty and "timestamp_utc" in pm_df.columns:
             pm_df = pm_df[pd.to_datetime(pm_df["timestamp_utc"], utc=True) <= target_dt]
     else:
@@ -409,7 +449,7 @@ def run_phase_3_smoke_test(target_dt: pd.Timestamp, pollutant: str = "pm25") -> 
             pollutant=pol,
         )
         if pm_df.empty or tgt_col not in pm_df.columns:
-            pm_df = pd.read_parquet(TARGET_DIR / "air4thai_live_sample.parquet")
+            pm_df = _load_air4thai_sample_df()
     logger.info("Retrieved %d ground truth %s observation records", len(pm_df), tgt_name)
 
     # 5. Build Unified Feature Matrix & Anti-Leakage Validation
@@ -497,7 +537,7 @@ def run_phase_4_smoke_test(target_dt: pd.Timestamp, pollutant: str = "pm25") -> 
     target_loader = GroundTruthLoader(target_dir=TARGET_DIR)
     pm_df = target_loader.fetch_live_air4thai(pollutant=pol)
     if pm_df.empty or tgt_col not in pm_df.columns:
-        pm_df = pd.read_parquet(TARGET_DIR / "air4thai_live_sample.parquet")
+        pm_df = _load_air4thai_sample_df()
 
     # Match ground truth stations to nearest grid cells within 2.5 km
     matcher = TargetMatcher()
@@ -656,7 +696,7 @@ def run_phase_5_smoke_test(target_dt: pd.Timestamp, pollutant: str = "pm25") -> 
     target_loader = GroundTruthLoader(target_dir=TARGET_DIR)
     pm_df = target_loader.fetch_live_air4thai(pollutant=pol)
     if pm_df.empty or tgt_col not in pm_df.columns:
-        pm_df = pd.read_parquet(TARGET_DIR / "air4thai_live_sample.parquet")
+        pm_df = _load_air4thai_sample_df()
 
     matcher = TargetMatcher()
     matched = matcher.attach_ground_truth(master_df, pm_df, max_distance_km=2.5, target_val_col=tgt_col)
@@ -1030,8 +1070,31 @@ def main():
         action="store_true",
         help="Execute Phase 1B provenance and codebase integrity audit"
     )
+    parser.add_argument(
+        "--dir-data", "--data-dir",
+        type=str,
+        default=None,
+        dest="dir_data",
+        help="Custom storage directory path for data ingestion, satellite cache & features (e.g. for Google Colab: /content/data or /content/drive/MyDrive/data)"
+    )
+    parser.add_argument(
+        "--dir-output", "--output-dir", "--dir-outputs", "--outputs-dir",
+        type=str,
+        default=None,
+        dest="dir_output",
+        help="Custom storage directory path for models, maps, evaluation & reports (e.g. for Google Colab: /content/outputs)"
+    )
 
     args = parser.parse_args()
+
+    if args.dir_data or args.dir_output:
+        configure_paths(data_dir=args.dir_data, outputs_dir=args.dir_output)
+        update_pipeline_runtime_paths()
+        logger.info("Custom directory paths configured:")
+        if args.dir_data:
+            logger.info("  • Data Directory   : %s", args.dir_data)
+        if args.dir_output:
+            logger.info("  • Outputs Directory: %s", args.dir_output)
 
     if args.audit or args.phase == "1b":
         success = run_phase_1b_verification()

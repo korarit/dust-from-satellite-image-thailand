@@ -243,11 +243,15 @@ class ProvenanceAuditor:
         """Verifies Master Grid 2x2 km and Copernicus DEM provenance."""
         grid_file = GEO_DIR / "thailand_2km_master_grid.parquet"
         if not grid_file.exists():
-            return {
-                "status": "MISSING_MASTER_GRID",
-                "verified": False,
-                "details": f"Grid file not found at {grid_file}",
-            }
+            fallback = PROJECT_ROOT / "data" / "geo" / "thailand_2km_master_grid.parquet"
+            if fallback.exists():
+                grid_file = fallback
+            else:
+                return {
+                    "status": "MISSING_MASTER_GRID",
+                    "verified": False,
+                    "details": f"Grid file not found at {grid_file} or fallback {fallback}",
+                }
 
         try:
             df = pd.read_parquet(grid_file)

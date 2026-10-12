@@ -186,71 +186,211 @@ dust-prediction-satelite/
 │   ├── geo/                        # มาสเตอร์กริดเชิงพื้นที่ของประเทศไทย (EPSG:32647)
 │   ├── hii/                        # ข้อมูลโทรมาตรความกดอากาศและความชื้นจาก สสน.
 │   ├── metadata/                   # พิกัดและรายละเอียดของสถานีตรวจวัดทั้งหมด
-│   └── target/                     # ข้อมูลฝุ่น PM2.5 ภาคพื้นดินจาก OpenAQ Data (รวบรวม Air4Thai / DustBoy)
+│   └── target/                     # ข้อมูลฝุ่น PM2.5 / PM10 ภาคพื้นดิน (OpenAQ / Air4Thai)
 ├── outputs/
-│   ├── evaluation/                 # แผนภูมิประเมินผล กราฟ Parity และ Confusion Matrix
-│   ├── maps/                       # แผนที่ Nowcast รายชั่วโมง (GeoTIFF, Parquet, Interactive HTML)
-│   ├── models/                     # เมทาดาทาของโมเดลและผลลัพธ์ OOF Predictions
-│   └── reports/                    # รายงานผลการประเมินและ Benchmark ฉบับเต็ม (Markdown / JSON)
+│   ├── pm25/                       # ผลลัพธ์ของโมเดลและการประเมิน PM2.5
+│   │   ├── evaluation/             # แผนภูมิประเมินผล กราฟ Parity และ Confusion Matrix
+│   │   ├── maps/                   # แผนที่ Nowcast (GeoTIFF, Parquet, Interactive HTML, PNG)
+│   │   ├── models/                 # ไฟล์โมเดลที่เทรนเสร็จแล้วและ OOF Predictions
+│   │   └── reports/                # รายงานผล Benchmark (Markdown, JSON, CSV)
+│   └── pm10/                       # ผลลัพธ์ของโมเดลและการประเมิน PM10
+│       ├── evaluation/             # แผนภูมิประเมินผลและเมทริกซ์ของ PM10
+│       ├── maps/                   # แผนที่ Nowcast PM10 ทั้ง 4 ระดับความละเอียด
+│       ├── models/                 # ไฟล์โมเดล PM10 ทั้ง 4 ขุนพลและ Stacking Ensemble
+│       └── reports/                # รายงาน Benchmark ของ PM10
 ├── src/
 │   ├── config/                     # การจัดการ Path และตัวโหลดคอนฟิก
 │   ├── data/                       # ไปป์ไลน์ดาวน์โหลดและตรวจเช็คข้อมูล (Himawari, HII, Ground Truth)
-│   ├── evaluation/                 # ระบบคำนวณเมทริกซ์ Spatial-Temporal CV และฟังก์ชันพล็อต
+│   ├── evaluation/                 # ระบบคำนวณเมทริกซ์ Spatial-Temporal CV และพล็อตเตอร์
 │   ├── features/                   # เอนจินสร้างกริด, Satellite Tabularizer, Directional Weather Engine
 │   └── models/                     # โมเดล 4 ขุนพล และเอนจินเทรน Stacking Ensemble
-├── tests/                          # ชุดการทดสอบ Unit Tests และ Integration Tests (Phase 1-5)
+├── tests/                          # ชุดการทดสอบ Unit Tests และ Integration Tests (Phase 1-5 & PM10)
 ├── requirements.txt                # รายการไลบรารีภาษา Python ที่จำเป็น
-├── run_pipeline.py                 # สคริปต์รันไปป์ไลน์ครบวงจร Phase 1-5
+├── run_pipeline.py                 # สคริปต์รันไปป์ไลน์ครบวงจร Phase 1-5 (CLI Master Runner)
 └── README.md                       # เอกสารงานวิจัยและคู่มือการใช้งานระบบ
 ```
 
 ---
 
-## คู่มือการติดตั้งและทำซ้ำการทดลอง (Quickstart & Reproducibility)
+## คู่มือการติดตั้งและวิธีใช้งาน (Installation & Pipeline Execution Guide)
 
-### 1. การติดตั้งสภาพแวดล้อม (Environment Setup)
+### 1. ความต้องการของระบบ (System Requirements)
+- **Python**: เวอร์ชัน 3.10 ขึ้นไป (แนะนำ Python 3.10 หรือ 3.11)
+- **ระบบปฏิบัติการ**: รองรับทั้ง Windows (PowerShell / CMD), Linux (Ubuntu/Debian), และ macOS
+- **หน่วยความจำ (RAM)**: แนะนำ 8GB ขึ้นไปสำหรับการเทรนและสร้างแผนที่ระดับความละเอียดสูง
 
-จำเป็นต้องใช้ Python เวอร์ชัน 3.10 ขึ้นไป:
+---
 
+### 2. การติดตั้งสภาพแวดล้อมและแพ็กเกจ (Installation & Setup)
+
+#### ขั้นตอนที่ 2.1: เตรียมโฟลเดอร์โปรเจกต์
+เปิด Terminal / PowerShell แล้วเข้าไปยังโฟลเดอร์โปรเจกต์:
 ```bash
-git clone https://github.com/korarit/dust-from-satellite-image-thailand.git
-cd dust-from-satellite-image-thailand
-python -m venv .venv
-source .venv/bin/activate  # สำหรับ Windows: .venv\Scripts\activate
+cd dust-prediction-satelite
+```
+
+#### ขั้นตอนที่ 2.2: สร้างและเปิดใช้งาน Virtual Environment
+แนะนำให้สร้าง Virtual Environment เพื่อแยก Dependencies:
+
+- **บน Windows (PowerShell):**
+  ```powershell
+  python -m venv .venv
+  .venv\Scripts\Activate.ps1
+  ```
+- **บน Windows (Command Prompt - CMD):**
+  ```cmd
+  python -m venv .venv
+  .venv\Scripts\activate.bat
+  ```
+- **บน Linux / macOS:**
+  ```bash
+  python3 -m venv .venv
+  source .venv/bin/activate
+  ```
+
+#### ขั้นตอนที่ 2.3: อัปเกรด pip และติดตั้ง Libraries จาก `requirements.txt`
+```bash
+python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-### 2. การตรวจสอบความสมบูรณ์ของข้อมูล (Zero-Mock Data Audit)
+> **แพ็กเกจหลักที่ติดตั้งใน `requirements.txt`:**
+> - **Core & Data Processing**: `numpy`, `pandas`, `pyarrow`, `scipy`, `xarray`, `pydantic`, `pyyaml`
+> - **Satellite & Weather Ingestion**: `boto3`, `satpy`, `requests`, `urllib3`
+> - **Machine Learning Quartet & Ensemble**: `scikit-learn`, `lightgbm`, `xgboost`, `catboost`
+> - **Development & Quality Audit**: `tqdm`, `pytest`
 
-รันการตรวจสอบความถูกต้องและแหล่งที่มาของข้อมูล (Data Provenance Audit):
+---
 
+### 3. คำสั่งสำหรับรันการเทรนโมเดล (Model Training Pipeline)
+
+การเทรนโมเดลและรันไปป์ไลน์สั่งการผ่าน `run_pipeline.py` ได้อย่างยืดหยุ่น:
+
+#### 3.1 รันเทรนแบบ Fast Smoke-Test (แนะนำสำหรับการทดสอบเริ่มต้น)
+ใช้ข้อมูลสังเกตการณ์จริงตัวอย่างเพื่อทดสอบว่าไปป์ไลน์การเทรนและประเมินผลทำงานได้สมบูรณ์:
 ```bash
-python run_pipeline.py --phase 1 --skip-download
+# เทรนโมเดลสำหรับ PM2.5 (ค่าเริ่มต้น)
+python run_pipeline.py --phase 4 --pollutant pm25
+
+# เทรนโมเดลสำหรับ PM10
+python run_pipeline.py --phase 4 --pollutant pm10
+
+# เทรนทั้ง PM2.5 และ PM10 แยกโฟลเดอร์อัตโนมัติ
+python run_pipeline.py --phase 4 --pollutant all
+```
+*ระบบจะทำการฝึกสอนโมเดล 4 ขุนพล (LightGBM, CatBoost, XGBoost, Random Forest) และรวมโมเดลด้วย Non-Negative Stacking Ensemble ข้ามทั้ง 4 ระดับความละเอียด (3km, 2km, 1km, 500m)*
+
+#### 3.2 รันการประเมินผล Benchmark และสร้างแผนที่ Nowcast (Phase 5)
+หลังจากโมเดลได้รับการฝึกสอนแล้ว สามารถรันเฟส 5 เพื่อคำนวณ Cross-Validation, Leaderboard, และ Export แผนที่ทั้ง 4 ระดับกริด:
+```bash
+# ประเมินและสร้างแผนที่ Nowcast สำหรับ PM2.5
+python run_pipeline.py --phase 5 --pollutant pm25
+
+# ประเมินและสร้างแผนที่ Nowcast สำหรับ PM10
+python run_pipeline.py --phase 5 --pollutant pm10
+
+# ประเมินและสร้างแผนที่สำหรับทั้งคู่
+python run_pipeline.py --phase 5 --pollutant all
 ```
 
-### 3. รันชุดทดสอบอัตโนมัติ (Automated Test Suite)
-
+#### 3.3 รันครบวงจร End-to-End ทุกเฟส (Phase 1 ถึง Phase 5)
+รันรวดเดียวตั้งแต่เตรียมข้อมูล, สกัดฟีเจอร์, เทรนโมเดล, จนถึงสร้างแผนที่ Nowcast:
 ```bash
+# รันครบวงจรสำหรับ PM2.5
+python run_pipeline.py --phase all --pollutant pm25
+
+# รันครบวงจรสำหรับทั้ง PM2.5 และ PM10
+python run_pipeline.py --phase all --pollutant all
+```
+
+#### 3.4 รัน Ingestion และ Train บนข้อมูลย้อนหลังหลายปี (Full Production Mode: 2024–2026)
+สำหรับการดึงข้อมูลขนาดใหญ่หลายปี โดยแบ่ง Train (ปี 2024–2025) และ Test (ปี 2026):
+```bash
+# รัน Full Mode (ดาวน์โหลดดาวเทียม Himawari ทุกๆ 3 ชั่วโมง พร้อมดึงสถานีตรวจวัด)
+python run_pipeline.py --full --pollutant pm25
+
+# ระบุช่วงวันเวลาและ Cadence ที่ต้องการเอง
+python run_pipeline.py --start-date 2024-01-01 --end-date 2025-12-31 --cadence-hours 3 --pollutant pm25
+```
+
+#### 3.5 การรันบน Google Colab หรือเซิร์ฟเวอร์ภายนอก (Google Colab & External Storage)
+หากต้องการรันบน Google Colab และเซฟข้อมูลหรือผลลัพธ์โมเดลลง Google Drive เพื่อป้องกันข้อมูลหายเมื่อ Session ตัดการเชื่อมต่อ สามารถระบุพาธผ่าน `--dir-data` และ `--dir-output`:
+```bash
+# ตัวอย่างการเทรนบน Google Colab โดยบันทึกตรงสู่ Google Drive
+python run_pipeline.py --phase 4 --pollutant pm25 \
+    --dir-data /content/drive/MyDrive/dust_project/data \
+    --dir-output /content/drive/MyDrive/dust_project/outputs
+
+# รันประเมินผลและสร้างแผนที่ Nowcast ลง Google Drive
+python run_pipeline.py --phase 5 --pollutant pm25 \
+    --dir-data /content/drive/MyDrive/dust_project/data \
+    --dir-output /content/drive/MyDrive/dust_project/outputs
+```
+
+---
+
+### 4. คำสั่งการตรวจสอบและทดสอบระบบ (Auditing & Testing)
+
+#### 4.1 ตรวจสอบความถูกต้องของข้อมูล (Zero-Mock Verification Gate)
+ตรวจสอบว่าไม่มีข้อมูลจำลอง (Mock/Synthetic data) ปะปน และข้อมูลทั้งหมดเป็นของจริง 100%:
+```bash
+python run_pipeline.py --audit
+```
+
+#### 4.2 รันชุดทดสอบอัตโนมัติ (Automated Tests)
+รัน Unit Tests และ Integration Tests ทั้งหมดด้วย pytest:
+```bash
+# รันการทดสอบทั้งหมด
 pytest -v tests/
+
+# รันเฉพาะการทดสอบ Phase 4 (การฝึกสอนโมเดล)
+pytest -v tests/test_phase4.py
+
+# รันเฉพาะการทดสอบ Phase 5 (การประเมินผลและสร้างแผนที่)
+pytest -v tests/test_phase5.py
+
+# รันเฉพาะการทดสอบโมเดล PM10
+pytest -v tests/test_pm10.py
 ```
 
-### 4. รันการเทรนและประเมินผลสำหรับกริดที่ต้องการ
+---
 
-สามารถเลือกขนาดกริดที่ต้องการทดสอบได้ตามความเหมาะสม:
+### 5. ตารางสรุปพารามิเตอร์ CLI ทั้งหมด (`run_pipeline.py`)
 
-```bash
-# ทดสอบกริดขนาด 2 กม. (Baseline)
-python run_pipeline.py --phase 4 --resolution 2km
+| พารามิเตอร์ (Flag) | ตัวเลือก / รูปแบบ | ค่าเริ่มต้น | รายละเอียด |
+| :--- | :--- | :---: | :--- |
+| `--phase` | `1`, `1b`, `2`, `3`, `4`, `5`, `all` | `1` | เลือกเฟสของไปป์ไลน์ที่ต้องการรัน (`4`: เทรนโมเดล, `5`: ประเมินผล/ทำแผนที่, `all`: ครบวงจร) |
+| `--pollutant` | `pm25`, `pm10`, `all` | `pm25` | มลพิษเป้าหมายที่ต้องการเทรนและประเมิน |
+| `--resolution` | `3.0`, `2.0`, `1.0`, `0.5` | `2.0` | ขนาดกริดเชิงพื้นที่ที่ต้องการเจาะจงวิเคราะห์ (กิโลเมตร) |
+| `--model` | `ensemble`, `lightgbm`, `catboost`, `xgboost`, `random_forest` | `ensemble` | สถาปัตยกรรมโมเดลที่ต้องการใช้ |
+| `--smoke-test` | *flag (ไม่ต้องใส่ค่า)* | - | รันแบบรวดเร็วบนเครื่อง Dev ด้วยข้อมูลตัวอย่างของจริง |
+| `--full` | *flag (ไม่ต้องใส่ค่า)* | - | รันโหมด Full Multi-Year (2024–2026: Train 2024-2025 / Test 2026) |
+| `--start-date` | `YYYY-MM-DD` หรือ `YYYY-MM-DD HH:MM:SS` | `None` | วันที่เริ่มต้นดึงข้อมูล |
+| `--end-date` | `YYYY-MM-DD` หรือ `YYYY-MM-DD HH:MM:SS` | `None` | วันที่สิ้นสุดดึงข้อมูล |
+| `--split-date` | `YYYY-MM-DD` | `2026-01-01` | วันที่ใช้ตัดแบ่ง Train และ Test set |
+| `--cadence-hours` | ตัวเลขจำนวนเต็ม เช่น `1`, `3`, `6` | `3` | ความถี่ในการดาวน์โหลดภาพดาวเทียม (ชั่วโมง) |
+| `--audit` | *flag (ไม่ต้องใส่ค่า)* | - | ตรวจสอบ Data Provenance และ Code Integrity Gate (Phase 1B) |
+| `--dir-data` | Path โฟลเดอร์ เช่น `/content/data` | `data/` | กำหนดโฟลเดอร์เก็บข้อมูลดิบ, แคชดาวเทียม และฟีเจอร์ (รองรับ Google Drive / Colab) |
+| `--dir-output` | Path โฟลเดอร์ เช่น `/content/outputs` | `outputs/` | กำหนดโฟลเดอร์บันทึกผลลัพธ์โมเดล, แผนที่ Nowcast และรายงานผลประเมิน |
 
-# รันการประเมินผลและสร้างแผนที่ Nowcast ประเทศไทย
-python run_pipeline.py --phase 5 --resolution 2km
-```
+---
 
-หากต้องการรันการทดลองเปรียบเทียบ Benchmark ครบทั้ง 4 ขนาดกริด (500m, 1km, 2km, 3km) แบบอัตโนมัติ:
+### 6. ผลลัพธ์ที่ได้หลังจากการเทรน (Output Artifacts)
 
-```bash
-python run_pipeline.py --all
-```
+เมื่อรันไปป์ไลน์สำเร็จ ไฟล์ผลลัพธ์จะถูกจัดเก็บแยกตามชนิดสารมลพิษใน `outputs/<pollutant>/`:
+
+- **โมเดลที่ฝึกสอนแล้ว (`outputs/<pollutant>/models/`)**:
+  - `ensemble_<pollutant>_2km.joblib`: ไฟล์ Stacking Ensemble พร้อมน้ำหนัก NNLS
+  - `oof_predictions_<pollutant>_2km.parquet`: ผลการทำนาย Out-Of-Fold สำหรับตรวจสอบ
+  - `model_metadata.json`: ข้อมูลบันทึกประวัติการเทรนและไฮเปอร์พารามิเตอร์
+- **แผนที่ผลการพยากรณ์ (`outputs/<pollutant>/maps/`)**:
+  - `nowcast_<pollutant>_500m.tif`, `nowcast_<pollutant>_1km.tif`, `2km.tif`, `3km.tif`: ไฟล์ราสเตอร์ GeoTIFF พิกัด UTM 47N
+  - `nowcast_<pollutant>_<res>.parquet`: พิกัดกริดพร้อมค่าทำนายละเอียด
+  - `nowcast_<pollutant>_<res>.html`: แผนที่แบบ Interactive ส่องดูระดับค่าฝุ่นผ่านเบราว์เซอร์
+  - `nowcast_<pollutant>_<res>.png`: แผนที่ภาพนิ่งระดับประเทศ
+- **รายงานและแผนภูมิประเมินผล (`outputs/<pollutant>/evaluation/` และ `reports/`)**:
+  - กราฟ Parity Scatter Plot, Residual Analysis, AQI Confusion Matrix, Feature Importance Consensus
+  - `multi_resolution_benchmark_<pollutant>.csv`: สรุปตัวชี้วัด $R^2$, MAE, RMSE, Latency เปรียบเทียบครบ 4 ขนาดกริด
 
 ---
 

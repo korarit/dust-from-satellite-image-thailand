@@ -7,7 +7,7 @@ geographic grids, caches, and report outputs.
 import os
 import sys
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Union
 import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -73,6 +73,43 @@ def load_yaml_config(config_path: Path) -> dict:
         raise FileNotFoundError(f"Configuration file not found: {config_path}")
     with open(config_path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
+
+
+def configure_paths(
+    data_dir: Optional[Union[Path, str]] = None,
+    outputs_dir: Optional[Union[Path, str]] = None,
+) -> None:
+    """
+    Dynamically reconfigures DATA_DIR and OUTPUTS_DIR and all dependent subdirectories.
+    Designed for Google Colab and cloud instances with custom storage volumes.
+    """
+    global DATA_DIR, OUTPUTS_DIR
+    global CACHE_DIR, HIMAWARI_CACHE_DIR, HIMAWARI_DIR, HII_DIR, TARGET_DIR, GEO_DIR, METADATA_DIR, FEATURES_DIR
+    global OUTPUTS_PM25_DIR, OUTPUTS_PM10_DIR, REPORTS_DIR, MODELS_DIR, MAPS_DIR, EVALUATION_DIR
+
+    if data_dir is not None:
+        DATA_DIR = Path(data_dir).resolve()
+        os.environ["DUST_DATA_DIR"] = str(DATA_DIR)
+        CACHE_DIR = DATA_DIR / "cache"
+        HIMAWARI_CACHE_DIR = CACHE_DIR / "himawari_s3"
+        HIMAWARI_DIR = DATA_DIR / "himawari9"
+        HII_DIR = DATA_DIR / "hii"
+        TARGET_DIR = DATA_DIR / "target"
+        GEO_DIR = DATA_DIR / "geo"
+        METADATA_DIR = DATA_DIR / "metadata"
+        FEATURES_DIR = DATA_DIR / "features"
+
+    if outputs_dir is not None:
+        OUTPUTS_DIR = Path(outputs_dir).resolve()
+        os.environ["DUST_OUTPUTS_DIR"] = str(OUTPUTS_DIR)
+        OUTPUTS_PM25_DIR = OUTPUTS_DIR / "pm25"
+        OUTPUTS_PM10_DIR = OUTPUTS_DIR / "pm10"
+        REPORTS_DIR = OUTPUTS_PM25_DIR / "reports"
+        MODELS_DIR = OUTPUTS_PM25_DIR / "models"
+        MAPS_DIR = OUTPUTS_PM25_DIR / "maps"
+        EVALUATION_DIR = OUTPUTS_PM25_DIR / "evaluation"
+
+    ensure_directories()
 
 
 def ensure_directories() -> None:
