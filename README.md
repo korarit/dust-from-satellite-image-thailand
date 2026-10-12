@@ -443,9 +443,9 @@ python run_pipeline.py --phase all --pollutant all
 ---
 
 #### 3.8 การรันข้อมูลย้อนหลังหลายปีระดับ Production (Full Production Mode: 2024–2026)
-สำหรับการดึงข้อมูลขนาดใหญ่หลายปี โดยระบบจะแบ่งชุดข้อมูล Train (ปี 2024–2025) และ Out-of-Time Test (ปี 2026) โดยอัตโนมัติ:
+สำหรับการดึงข้อมูลขนาดใหญ่หลายปี โดยระบบจะแบ่งชุดข้อมูล Train (ปี 2024–2025: `2024-01-01` ถึง `2025-12-31`) และ Out-of-Time Test (ปี 2026: `2026-01-01` ถึง `2026-09-30`) โดยอัตโนมัติตามข้อมูลจริงที่เผยแพร่ล่าสุดบนคลังข้อมูลเปิด:
 ```bash
-# รัน Full Mode พื้นฐาน (ดาวน์โหลดดาวเทียม Himawari ทุกๆ 3 ชั่วโมง พร้อมดึงสถานี Benchmark ทั่วประเทศ)
+# รัน Full Mode พื้นฐาน (Train: 2024–2025, Test: 01–09/2026 ดาวน์โหลดดาวเทียม Himawari ทุกๆ 3 ชั่วโมง)
 python run_pipeline.py --full --pollutant pm25
 
 # ดึงสถานีตรวจวัดคุณภาพอากาศทุกสถานีทั่วประเทศไทย (--region all ครอบคลุม 262+ สถานีของ กรมควบคุมมลพิษ / Air4Thai)
@@ -463,8 +463,8 @@ python run_pipeline.py --full --region central --pollutant pm25
 # ระบุรหัส Location ID ของ OpenAQ ที่ต้องการเจาะจงเอง (เช่น กรมประชาสัมพันธ์, บางพลัด, รพ.สวนดอก)
 python run_pipeline.py --full --location-ids 225642,368399,6266258 --pollutant pm25
 
-# ระบุช่วงวันเวลาและ Satellite Cadence ที่ต้องการเจาะจง
-python run_pipeline.py --start-date 2024-01-01 --end-date 2025-12-31 --cadence-hours 3 --pollutant pm25
+# ระบุช่วงวันเวลาและ Satellite Cadence ที่ต้องการเจาะจงเอง
+python run_pipeline.py --start-date 2024-01-01 --end-date 2026-09-30 --cadence-hours 3 --pollutant pm25
 ```
 
 > [!NOTE]

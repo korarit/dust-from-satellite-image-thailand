@@ -1078,7 +1078,7 @@ def main():
         "--end-date",
         type=str,
         default=None,
-        help="Custom end observation timestamp (e.g. '2026-12-31' or '2026-10-12 23:00:00')"
+        help="Custom end observation timestamp (e.g. '2026-09-30' or '2026-09-30 23:59:59')"
     )
     parser.add_argument(
         "--split-date",
@@ -1193,9 +1193,9 @@ def main():
     custom_loc_ids = [int(x.strip()) for x in args.location_ids.split(",") if x.strip()] if args.location_ids else None
 
     if args.full:
-        # Full multi-year run 2024 - 2026
+        # Full multi-year run: 2024 to September 2026 (Train: 2024-2025, Test: 2026-01-01 to 2026-09-30)
         start_dt = pd.Timestamp(args.start_date or "2024-01-01 00:00:00", tz="UTC")
-        end_dt = pd.Timestamp(args.end_date or "2026-12-31 23:59:59", tz="UTC")
+        end_dt = pd.Timestamp(args.end_date or "2026-09-30 23:59:59", tz="UTC")
         for p in pollutants:
             run_phase_1_full(
                 start_date=start_dt,
