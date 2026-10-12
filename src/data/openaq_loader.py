@@ -35,13 +35,29 @@ OPENAQ_S3_BUCKET = "openaq-data-archive"
 OPENAQ_API_BASE = "https://api.openaq.org/v3"
 DEFAULT_OPENAQ_API_KEY = "3e9769688ce05126a2db31d3abbe82c672c3eec5c135013d3ab498cf1017e950"
 
-# Official Thailand Air4Thai Benchmark Location IDs on OpenAQ (Default Fallback Subset)
+# Official Thailand Air4Thai Benchmark Location IDs on OpenAQ (Geographically Diverse Nationwide Subset)
 DEFAULT_THAILAND_OPENAQ_LOCATIONS = {
+    # 1. Central & Bangkok Metropolitan Region
     225642: "Bang Phlat District Office, Bangkok",
+    368399: "Benjakitti Park, Bangkok",
     225672: "Suan Sayam-Ram Intra Intersection, Bangkok",
     351927: "Le Thai Community Park, Bangkok",
-    368399: "Benjakitti Park, Bangkok",
     5554536: "Chalermprakiat Rama IX Park, Bangkok",
+    # 2. Northern Mountainous Region (Chiang Mai, Chiang Rai, Mae Hong Son, Phitsanulok)
+    6266258: "Doi Tung Royal Palace, Mae Fah Luang, Chiang Rai",
+    1861095: "Wiang Disaster Prevention Center, Chiang Mai",
+    1896059: "Pai Airport, Mae Hong Son",
+    6251785: "King Naresuan Camp, Phitsanulok",
+    # 3. Northeastern Region / Isan (Roi Et, Sisaket)
+    1993936: "Somdet Phra Srinagarindra Park, Roi Et",
+    1785693: "Sisaket Meteorological Center, Sisaket",
+    # 4. Eastern Seaboard & Western Coast (Rayong, Phetchaburi)
+    3345345: "Rayong Provincial Stadium, Rayong",
+    2132593: "Phetchaburi Municipality, Phetchaburi",
+    # 5. Southern Peninsula (Chumphon, Ranong, Pattani)
+    3047300: "Sports Stadium, Chumphon",
+    1290682: "Ranong Municipal Office, Ranong",
+    5554538: "Pattani Provincial Forestry Center, Pattani",
 }
 
 PHYSICAL_PM25_MIN = 0.0

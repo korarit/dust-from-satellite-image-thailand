@@ -450,6 +450,15 @@ python run_pipeline.py --full --pollutant pm25
 
 # ระบุช่วงวันเวลาและ Cadence ที่ต้องการเอง
 python run_pipeline.py --start-date 2024-01-01 --end-date 2025-12-31 --cadence-hours 3 --pollutant pm25
+
+# กรองดึงเฉพาะสถานีภาคเหนือ (เชียงใหม่, เชียงราย, แม่ฮ่องสอน, ลำปาง ฯลฯ)
+python run_pipeline.py --full --region north --pollutant pm25
+
+# กำหนดจำนวนสถานีประวัติศาสตร์ย้อนหลังที่ต้องการดึง (เช่น 20 สถานี)
+python run_pipeline.py --full --max-stations 20 --pollutant pm25
+
+# ระบุรหัส Location ID ของ OpenAQ ที่ต้องการเจาะจงเอง
+python run_pipeline.py --full --location-ids 225642,368399,6266258 --pollutant pm25
 ```
 
 ---
@@ -515,6 +524,9 @@ pytest -v tests/test_pm10.py
 | `--end-date` | `YYYY-MM-DD` หรือ `YYYY-MM-DD HH:MM:SS` | `None` | วันที่สิ้นสุดดึงข้อมูล |
 | `--split-date` | `YYYY-MM-DD` | `2026-01-01` | วันที่ใช้ตัดแบ่ง Train และ Test set |
 | `--cadence-hours` | ตัวเลขจำนวนเต็ม เช่น `1`, `3`, `6` | `3` | ความถี่ในการดาวน์โหลดภาพดาวเทียม (ชั่วโมง) |
+| `--region` | `all`, `north`, `northeast`, `central`, `east`, `south`, `bangkok` | `None` | กรองสถานีตรวจวัดตามภูมิภาคของไทย |
+| `--max-stations` | ตัวเลขจำนวนเต็ม เช่น `10`, `20`, `50` | `None` | กำหนดจำนวนสถานี OpenAQ สูงสุดที่ต้องการดึง |
+| `--location-ids` | รหัสคั่นด้วยจุลภาค เช่น `225642,368399` | `None` | กำหนดรหัส Location ID ของ OpenAQ ที่ต้องการเจาะจง |
 | `--audit` | *flag (ไม่ต้องใส่ค่า)* | - | ตรวจสอบ Data Provenance และ Code Integrity Gate (Phase 1B) |
 | `--dir-data` | Path โฟลเดอร์ เช่น `/content/data` | `data/` | กำหนดโฟลเดอร์เก็บข้อมูลดิบ, แคชดาวเทียม และฟีเจอร์ (รองรับ Google Drive / Colab) |
 | `--dir-output` | Path โฟลเดอร์ เช่น `/content/outputs` | `outputs/` | กำหนดโฟลเดอร์บันทึกผลลัพธ์โมเดล, แผนที่ Nowcast และรายงานผลประเมิน |

@@ -884,6 +884,9 @@ def run_phase_1_full(
     bands: Optional[List[str]] = None,
     stations: Optional[List[str]] = None,
     pollutant: str = "pm25",
+    location_ids: Optional[List[int]] = None,
+    region: Optional[str] = None,
+    max_locations: Optional[int] = None,
 ) -> None:
     """
     Executes Phase 1 Full Multi-Year Data Ingestion & Audit (2024 - 2026):
@@ -908,10 +911,25 @@ def run_phase_1_full(
     # 1. Historical Ground Truth Target Ingestion & Temporal Split
     # ---------------------------------------------------------
     logger.info("\n--- Step 1: Ingesting Historical %s from OpenAQ & Live Air4Thai ---", tgt_name)
+    if location_ids:
+        query_locs = location_ids
+    elif region and region.lower() != "all":
+        region_df = target_loader.openaq_loader.get_thailand_stations(region=region)
+        query_locs = region_df["location_id"].dropna().astype(int).tolist()
+        if max_locations:
+            query_locs = query_locs[:max_locations]
+    elif max_locations:
+        all_stns = target_loader.openaq_loader.get_thailand_stations()
+        air4thai_stns = all_stns[all_stns["provider"].str.contains("Air4Thai", case=False, na=False)]
+        stns_pool = air4thai_stns if not air4thai_stns.empty else all_stns
+        query_locs = stns_pool["location_id"].dropna().astype(int).head(max_locations).tolist()
+    else:
+        query_locs = list(DEFAULT_THAILAND_OPENAQ_LOCATIONS.keys())
+
     openaq_df = target_loader.fetch_openaq_historical(
         start_date=start_date,
         end_date=end_date,
-        location_ids=list(DEFAULT_THAILAND_OPENAQ_LOCATIONS.keys()),
+        location_ids=query_locs,
         pollutant=pol,
     )
 
@@ -1084,6 +1102,27 @@ def main():
         dest="dir_output",
         help="Custom storage directory path for models, maps, evaluation & reports (e.g. for Google Colab: /content/outputs)"
     )
+    parser.add_argument(
+        "--region",
+        type=str,
+        default=None,
+        choices=["all", "north", "northeast", "central", "east", "south", "bangkok"],
+        help="Filter OpenAQ ground stations by region: 'north', 'northeast', 'central', 'east', 'south', or 'all'"
+    )
+    parser.add_argument(
+        "--max-stations", "--max-locations",
+        type=int,
+        default=None,
+        dest="max_stations",
+        help="Maximum number of historical OpenAQ ground stations to query (e.g. 10, 20, 50)"
+    )
+    parser.add_argument(
+        "--location-ids", "--locations",
+        type=str,
+        default=None,
+        dest="location_ids",
+        help="Comma-separated custom OpenAQ location IDs (e.g. '225642,368399,6266258')"
+    )
 
     args = parser.parse_args()
 
@@ -1141,6 +1180,9 @@ def main():
             run_phase_5_smoke_test(sample_dt, pollutant=p)
         sys.exit(0)
 
+    # Parse custom location IDs if provided
+    custom_loc_ids = [int(x.strip()) for x in args.location_ids.split(",") if x.strip()] if args.location_ids else None
+
     if args.full:
         # Full multi-year run 2024 - 2026
         start_dt = pd.Timestamp(args.start_date or "2024-01-01 00:00:00", tz="UTC")
@@ -1152,6 +1194,9 @@ def main():
                 split_date=args.split_date,
                 cadence_hours=args.cadence_hours,
                 pollutant=p,
+                location_ids=custom_loc_ids,
+                region=args.region,
+                max_locations=args.max_stations,
             )
     elif args.start_date and args.end_date:
         start_dt = pd.Timestamp(args.start_date, tz="UTC")
@@ -1163,6 +1208,9 @@ def main():
                 split_date=args.split_date,
                 cadence_hours=args.cadence_hours,
                 pollutant=p,
+                location_ids=custom_loc_ids,
+                region=args.region,
+                max_locations=args.max_stations,
             )
     else:
         # Default or smoke-test
