@@ -1,0 +1,374 @@
+"""
+Himawari Satellite 10 IR Bands AWS S3 Loader & Brightness Temperature Calibrator
+Fetches authentic Himawari-8 & Himawari-9 AHI Level 1b (HSD) observation data
+from NOAA Open Data on AWS S3 (s3://noaa-himawari9/ and s3://noaa-himawari8/).
+
+Features:
+- Segment pruning (Segments 3, 4, 5 for Thailand: Lat 5.5°N - 21.0°N)
+- All 10 Infrared Bands (B07 through B16)
+- Physics-based Satpy calibration into Brightness Temperature (Kelvin)
+- Physical boundary assertion (150K - 350K)
+- Strict Zero-Mock: never invents, simulates, or randomly generates pixel values.
+"""
+
+import os
+import sys
+import bz2
+import logging
+from pathlib import Path
+from typing import List, Dict, Tuple, Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import warnings
+
+import boto3
+from botocore import UNSIGNED
+from botocore.config import Config
+import numpy as np
+import pandas as pd
+from satpy import Scene
+
+# Filter expected satpy / dask runtime warnings
+warnings.filterwarnings("ignore", category=RuntimeWarning, message=".*invalid value encountered in log.*")
+warnings.filterwarnings("ignore", category=RuntimeWarning, message=".*All-NaN slice.*")
+
+from src.config.paths import HIMAWARI_CACHE_DIR, HIMAWARI_DIR, load_yaml_config, DATA_CONFIG_PATH
+
+logger = logging.getLogger(__name__)
+
+# NOAA S3 Buckets
+BUCKET_H8 = "noaa-himawari8"
+BUCKET_H9 = "noaa-himawari9"
+
+# Satellite Operational Cutover timestamp (Dec 13, 2022 ~05:00 UTC)
+HIMAWARI_CUTOVER_UTC = pd.Timestamp("2022-12-13 05:00:00", tz="UTC")
+
+# 10 IR Bands defined in Master Plan
+ALL_IR_BANDS = ["B07", "B08", "B09", "B10", "B11", "B12", "B13", "B14", "B15", "B16"]
+
+# Segments covering Thailand (Lat 5.5 - 21.0 N)
+DEFAULT_SEGS = [3, 4, 5]
+
+PHYSICAL_BT_MIN_K = 150.0
+PHYSICAL_BT_MAX_K = 350.0
+
+
+def get_himawari_bucket_and_sat(target_dt: pd.Timestamp) -> Tuple[str, str]:
+    """Determines whether to use Himawari-8 or Himawari-9 based on timestamp."""
+    ts = target_dt
+    if ts.tzinfo is None:
+        ts = ts.tz_localize("UTC")
+    else:
+        ts = ts.tz_convert("UTC")
+
+    if ts < HIMAWARI_CUTOVER_UTC:
+        return BUCKET_H8, "H08"
+    return BUCKET_H9, "H09"
+
+
+def round_to_himawari_10m(dt: pd.Timestamp, mode: str = "nearest") -> pd.Timestamp:
+    """
+    Rounds timestamp to a 10-minute observation cycle.
+    Supports mode='nearest' (closest cycle) and mode='floor' (past completed cycle, anti-leakage).
+    """
+    minute = dt.minute
+    rem = minute % 10
+
+    if mode == "floor":
+        rounded_m = minute - rem
+    elif rem < 5:
+        rounded_m = minute - rem
+    else:
+        rounded_m = minute + (10 - rem)
+
+    if rounded_m == 60:
+        return dt.replace(minute=0, second=0, microsecond=0) + pd.Timedelta(hours=1)
+    return dt.replace(minute=rounded_m, second=0, microsecond=0)
+
+
+def floor_to_himawari_10m(dt: pd.Timestamp) -> pd.Timestamp:
+    """Floors timestamp to the most recent completed 10-minute cycle to guarantee zero look-ahead bias."""
+    return round_to_himawari_10m(dt, mode="floor")
+
+
+def build_s3_prefix_and_keys(
+    target_dt: pd.Timestamp,
+    band: str,
+    segments: Optional[List[int]] = None
+) -> Tuple[str, List[str]]:
+    """
+    Constructs the S3 bucket name and list of keys for the requested observation.
+    band format: 'B07', 'B13', etc.
+    """
+    segments = segments or DEFAULT_SEGS
+    dt = round_to_himawari_10m(target_dt)
+    bucket, sat_id = get_himawari_bucket_and_sat(dt)
+
+    date_str = dt.strftime("%Y/%m/%d")
+    hhmm = dt.strftime("%H%M")
+    ymd = dt.strftime("%Y%m%d")
+
+    prefix = f"AHI-L1b-FLDK/{date_str}/{hhmm}/"
+    keys = [
+        f"{prefix}HS_{sat_id}_{ymd}_{hhmm}_{band}_FLDK_R20_S{seg:02d}10.DAT.bz2"
+        for seg in segments
+    ]
+    return bucket, keys
+
+
+def _download_and_extract_single_key(bucket: str, k: str, cache_dir: Path) -> Optional[Path]:
+    """Downloads a single .DAT.bz2 segment and decompresses it to cache_dir."""
+    fname = Path(k).name
+    dat_fname = fname[:-4] if fname.endswith(".bz2") else fname
+    dat_path = cache_dir / dat_fname
+    bz2_path = cache_dir / fname
+
+    # If uncompressed file exists and has content, reuse it
+    if dat_path.exists() and dat_path.stat().st_size > 0:
+        return dat_path
+
+    s3_client = boto3.client(
+        "s3",
+        region_name="us-east-1",
+        config=Config(signature_version=UNSIGNED)
+    )
+    try:
+        logger.debug("Downloading s3://%s/%s -> %s", bucket, k, bz2_path.name)
+        s3_client.download_file(bucket, k, str(bz2_path))
+    except Exception as e:
+        logger.warning("Could not download s3://%s/%s: %s", bucket, k, e)
+        if bz2_path.exists():
+            try:
+                bz2_path.unlink()
+            except OSError:
+                pass
+        return None
+
+    try:
+        with bz2.open(bz2_path, "rb") as fin, open(dat_path, "wb") as fout:
+            fout.write(fin.read())
+        try:
+            bz2_path.unlink()  # remove compressed archive to save disk space
+        except OSError:
+            pass
+        return dat_path
+    except Exception as e:
+        logger.warning("Failed decompressing %s: %s", bz2_path.name, e)
+        if bz2_path.exists():
+            try:
+                bz2_path.unlink()
+            except OSError:
+                pass
+        if dat_path.exists():
+            try:
+                dat_path.unlink()
+            except OSError:
+                pass
+        return None
+
+
+def download_and_extract_hsd_segments(
+    bucket: str,
+    keys: List[str],
+    cache_dir: Path = HIMAWARI_CACHE_DIR,
+    max_workers: int = 4
+) -> List[Path]:
+    """Downloads and extracts HSD segments concurrently."""
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    if not keys:
+        return []
+
+    workers = min(len(keys), max_workers)
+    results_map: Dict[str, Path] = {}
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futs = {executor.submit(_download_and_extract_single_key, bucket, k, cache_dir): k for k in keys}
+        for fut in as_completed(futs):
+            key = futs[fut]
+            try:
+                res = fut.result()
+                if res is not None:
+                    results_map[key] = res
+            except Exception as e:
+                logger.warning("Error downloading segment %s: %s", key, e)
+
+    return [results_map[k] for k in keys if k in results_map]
+
+
+class HimawariIRLoader:
+    """
+    Manages downloading, caching, and satpy calibration for all 10 IR Bands
+    (B07, B08, B09, B10, B11, B12, B13, B14, B15, B16).
+    """
+
+    def __init__(
+        self,
+        cache_dir: Path = HIMAWARI_CACHE_DIR,
+        bands: Optional[List[str]] = None,
+        segments: Optional[List[int]] = None
+    ):
+        self.cache_dir = cache_dir
+        self.bands = bands or ALL_IR_BANDS
+        self.segments = segments or DEFAULT_SEGS
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+
+    def fetch_snapshot_files(
+        self,
+        target_dt: pd.Timestamp,
+        bands: Optional[List[str]] = None
+    ) -> Dict[str, List[Path]]:
+        """
+        Downloads all segment files for the specified bands for target_dt.
+        Returns mapping from band name to list of extracted DAT paths.
+        """
+        bands = bands or self.bands
+        dt = round_to_himawari_10m(target_dt)
+        files_by_band: Dict[str, List[Path]] = {}
+
+        for band in bands:
+            bucket, keys = build_s3_prefix_and_keys(dt, band=band, segments=self.segments)
+            dat_files = download_and_extract_hsd_segments(bucket, keys, self.cache_dir)
+            if dat_files:
+                files_by_band[band] = dat_files
+            else:
+                logger.warning("No files downloaded for band %s at %s", band, dt)
+
+        return files_by_band
+
+    def load_scene(
+        self,
+        files_by_band: Dict[str, List[Path]],
+        bands_to_load: Optional[List[str]] = None
+    ) -> Scene:
+        """
+        Creates a Satpy Scene and calibrates the specified IR bands into
+        Brightness Temperature (Kelvin).
+        """
+        all_files: List[str] = []
+        for file_list in files_by_band.values():
+            all_files.extend([str(p) for p in file_list])
+
+        if not all_files:
+            raise ValueError("Cannot load Satpy Scene: file list is empty")
+
+        bands = bands_to_load or list(files_by_band.keys())
+        scn = Scene(filenames=all_files, reader="ahi_hsd")
+        scn.load(bands)
+        return scn
+
+    def validate_physical_bounds(
+        self,
+        bt_values: np.ndarray,
+        band_name: str
+    ) -> Tuple[np.ndarray, Dict[str, float]]:
+        """
+        Validates that Brightness Temperature falls within physical limits (150K - 350K).
+        Returns sanitized array with NaN for out-of-bound values, and audit statistics.
+        Strict zero-mock rule: out-of-bound values are set to NaN, NEVER synthesized.
+        """
+        valid_mask = ~np.isnan(bt_values)
+        total_pixels = int(valid_mask.sum())
+        if total_pixels == 0:
+            return bt_values, {"valid_count": 0, "oob_count": 0, "min_k": np.nan, "max_k": np.nan, "mean_k": np.nan}
+
+        oob_mask = (bt_values < PHYSICAL_BT_MIN_K) | (bt_values > PHYSICAL_BT_MAX_K)
+        oob_count = int((valid_mask & oob_mask).sum())
+
+        cleaned = bt_values.copy()
+        cleaned[oob_mask] = np.nan
+
+        valid_clean = cleaned[~np.isnan(cleaned)]
+        stats = {
+            "valid_count": int(len(valid_clean)),
+            "oob_count": oob_count,
+            "min_k": float(valid_clean.min()) if len(valid_clean) > 0 else np.nan,
+            "max_k": float(valid_clean.max()) if len(valid_clean) > 0 else np.nan,
+            "mean_k": float(valid_clean.mean()) if len(valid_clean) > 0 else np.nan,
+        }
+        return cleaned, stats
+
+    def sample_at_coordinates(
+        self,
+        scene: Scene,
+        coords_df: pd.DataFrame,
+        bands: Optional[List[str]] = None,
+        lat_col: str = "centroid_lat",
+        lon_col: str = "centroid_lon"
+    ) -> pd.DataFrame:
+        """
+        Extracts centroid Brightness Temperature for given lat/lon coordinates
+        (e.g., from the Master Grid or Ground Stations).
+        """
+        bands = bands or self.bands
+        result_df = coords_df.copy()
+
+        # Extract area coordinate arrays from the first available band
+        sample_band = bands[0]
+        ds_sample = scene[sample_band]
+        area = ds_sample.attrs["area"]
+        lons_sat, lats_sat = area.get_lonlats()
+
+        query_lats = coords_df[lat_col].to_numpy()
+        query_lons = coords_df[lon_col].to_numpy()
+
+        # For spatial sampling, construct a nearest-pixel KDTree or grid lookup
+        # Since AHI geostationary grid is regular in scan angle, we can use nearest lookup
+        from scipy.spatial import cKDTree
+        # Subsample sat coordinates within bounding box to keep KDTree lean
+        margin = 0.2
+        bbox_mask = (
+            (lats_sat >= query_lats.min() - margin) &
+            (lats_sat <= query_lats.max() + margin) &
+            (lons_sat >= query_lons.min() - margin) &
+            (lons_sat <= query_lons.max() + margin)
+        )
+        sub_lats = lats_sat[bbox_mask]
+        sub_lons = lons_sat[bbox_mask]
+
+        if len(sub_lats) == 0:
+            raise ValueError("No satellite pixels intersect the query bounding box")
+
+        tree = cKDTree(np.column_stack([sub_lats, sub_lons]))
+        _, idxs = tree.query(np.column_stack([query_lats, query_lons]), k=1)
+
+        # For each band, extract the pixel values at idxs
+        for b in bands:
+            col_name = f"bt_{b.lower()}"
+            ds = scene[b]
+            raw_vals = ds.values[bbox_mask]
+            sampled_vals = raw_vals[idxs]
+            cleaned_vals, _ = self.validate_physical_bounds(sampled_vals, b)
+            result_df[col_name] = cleaned_vals
+
+        return result_df
+
+    def fetch_range_snapshots(
+        self,
+        start_date: pd.Timestamp,
+        end_date: pd.Timestamp,
+        cadence_hours: int = 1,
+        bands: Optional[List[str]] = None
+    ) -> Dict[pd.Timestamp, Dict[str, List[Path]]]:
+        """
+        Downloads Himawari IR bands across a date range at regular cadence.
+        Returns mapping from timestamp to downloaded files per band.
+        """
+        start_dt = pd.to_datetime(start_date)
+        end_dt = pd.to_datetime(end_date)
+        if start_dt.tzinfo is None:
+            start_dt = start_dt.tz_localize("UTC")
+        if end_dt.tzinfo is None:
+            end_dt = end_dt.tz_localize("UTC")
+
+        timestamps = pd.date_range(start_dt, end_dt, freq=f"{cadence_hours}h")
+        logger.info("Downloading Himawari snapshots for %d timestamps from %s to %s",
+                    len(timestamps), start_dt, end_dt)
+
+        all_snapshots: Dict[pd.Timestamp, Dict[str, List[Path]]] = {}
+        for i, dt in enumerate(timestamps):
+            files = self.fetch_snapshot_files(dt, bands=bands)
+            if files:
+                all_snapshots[dt] = files
+            if (i + 1) % 10 == 0 or (i + 1) == len(timestamps):
+                logger.info("  Progress: %d/%d timestamps processed", i + 1, len(timestamps))
+
+        return all_snapshots
+
