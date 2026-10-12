@@ -1,0 +1,5 @@
+model,weight
+lightgbm,0.0
+catboost,0.36575906779664463
+xgboost,0.41347590515791643
+random_forest,0.22076502704543888

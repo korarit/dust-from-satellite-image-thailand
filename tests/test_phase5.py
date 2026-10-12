@@ -347,6 +347,16 @@ def test_evaluation_plotter_suite(regional_grid_dataset, tmp_path):
         assert p_path.exists(), f"Plot {plot_key} was not generated!"
         assert p_path.stat().st_size > 0, f"Plot {plot_key} is empty!"
 
+    # Verify evaluation csv folder and csv tables
+    csv_dir = eval_dir / "csv"
+    assert csv_dir.exists()
+    assert (csv_dir / "parity_predictions_pm25.csv").exists()
+    assert (csv_dir / "aqi_confusion_matrix_pm25.csv").exists()
+    assert (csv_dir / "multi_resolution_benchmark_pm25.csv").exists()
+    assert (csv_dir / "regional_generalization_pm25.csv").exists()
+    assert (csv_dir / "feature_importance_pm25.csv").exists()
+    assert (csv_dir / "ensemble_weights_pm25.csv").exists()
+
 
 def test_codebase_ast_scanner_compliance():
     """

@@ -24,7 +24,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-from src.config.paths import EVALUATION_DIR, REPORTS_DIR, get_evaluation_dir
+from src.config.paths import EVALUATION_DIR, REPORTS_DIR, get_evaluation_dir, get_evaluation_csv_dir
 from src.evaluation.metrics import (
     assign_aqi_category,
     compute_continuous_metrics,
@@ -74,6 +74,8 @@ class EvaluationPlotter:
         self.pollutant = pollutant.lower()
         self.output_dir = output_dir or get_evaluation_dir(self.pollutant)
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.csv_dir = self.output_dir / "csv"
+        self.csv_dir.mkdir(parents=True, exist_ok=True)
         set_custom_dark_style()
     def plot_parity_scatter(
         self,
@@ -481,6 +483,113 @@ class EvaluationPlotter:
         logger.info("Saved Ensemble Weights Donut Chart -> %s", out_path)
         return out_path
 
+    def export_all_evaluation_csvs(
+        self,
+        y_true: Union[np.ndarray, pd.Series, List[float]],
+        y_pred: Union[np.ndarray, pd.Series, List[float]],
+        leaderboard_df: pd.DataFrame,
+        regional_results: Dict[str, Any],
+        attribution_df: pd.DataFrame,
+        ensemble_weights: Dict[str, float],
+        pollutant: Optional[str] = None,
+    ) -> Dict[str, Path]:
+        """
+        Exports comprehensive evaluation dataframes as CSV files into outputs/{pollutant}/evaluation/csv/
+        for tabular analytics, spreadsheet audits, and reporting:
+        1. parity_predictions_{pol}.csv: Sample-by-sample observed, predicted, residual, and AQI tier.
+        2. aqi_confusion_matrix_{pol}.csv: 5x5 confusion matrix counts across PCD Thailand AQI bands.
+        3. multi_resolution_benchmark_{pol}.csv: Leaderboard across resolutions & models (MAE, RMSE, latency, etc.).
+        4. regional_generalization_{pol}.csv: Regional hold-out cross validation metrics across Thailand regions.
+        5. feature_importance_{pol}.csv: Ranked cross-model atmospheric and satellite feature importances.
+        6. ensemble_weights_{pol}.csv: Non-Negative Least Squares (NNLS) base model weight allocations.
+        """
+        pol = (pollutant or self.pollutant).lower()
+        self.csv_dir.mkdir(parents=True, exist_ok=True)
+        csv_files = {}
+
+        # 1. Parity & Residuals Sample CSV
+        y_t = np.asarray(y_true, dtype=np.float64).ravel()
+        y_p = np.asarray(y_pred, dtype=np.float64).ravel()
+        valid = (~np.isnan(y_t)) & (~np.isnan(y_p))
+        y_t, y_p = y_t[valid], y_p[valid]
+        residuals = y_p - y_t
+        obs_cats = assign_aqi_category(y_t, pollutant=pol)
+        pred_cats = assign_aqi_category(y_p, pollutant=pol)
+
+        parity_df = pd.DataFrame({
+            "sample_index": np.arange(len(y_t)),
+            f"observed_{pol}": y_t,
+            f"predicted_{pol}": y_p,
+            "residual_error": residuals,
+            "absolute_error": np.abs(residuals),
+            "observed_aqi_tier": obs_cats,
+            "predicted_aqi_tier": pred_cats,
+            "aqi_tier_match": (obs_cats == pred_cats).astype(int),
+        })
+        p_path = self.csv_dir / f"parity_predictions_{pol}.csv"
+        parity_df.to_csv(p_path, index=False)
+        csv_files["parity_predictions"] = p_path
+        logger.info("Saved Evaluation CSV -> %s", p_path)
+
+        # 2. AQI Confusion Matrix CSV
+        aqi_res = compute_aqi_classification_metrics(y_t, y_p, pollutant=pol)
+        cm = np.array(aqi_res["confusion_matrix"])
+        tier_names = ["Tier_0_Very_Good", "Tier_1_Good", "Tier_2_Moderate", "Tier_3_Orange", "Tier_4_Red"]
+        cm_df = pd.DataFrame(cm, index=[f"Actual_{t}" for t in tier_names], columns=[f"Pred_{t}" for t in tier_names])
+        cm_path = self.csv_dir / f"aqi_confusion_matrix_{pol}.csv"
+        cm_df.to_csv(cm_path)
+        csv_files["aqi_confusion_matrix"] = cm_path
+        logger.info("Saved Evaluation CSV -> %s", cm_path)
+
+        # 3. Multi-Resolution Benchmark Leaderboard CSV
+        if not leaderboard_df.empty:
+            bench_path = self.csv_dir / f"multi_resolution_benchmark_{pol}.csv"
+            leaderboard_df.to_csv(bench_path, index=False)
+            csv_files["multi_resolution_benchmark"] = bench_path
+            logger.info("Saved Evaluation CSV -> %s", bench_path)
+
+        # 4. Regional Generalization CSV
+        by_reg = regional_results.get("by_region", {})
+        reg_rows = []
+        for reg_k, reg_data in by_reg.items():
+            m = reg_data.get("metrics", {})
+            reg_rows.append({
+                "region": reg_k,
+                "region_name_th": reg_data.get("region_th", reg_k),
+                "n_samples": m.get("n_samples", 0),
+                "mae": m.get("mae", 0.0),
+                "rmse": m.get("rmse", 0.0),
+                "mean_bias": m.get("mean_bias", 0.0),
+                "r2": m.get("r2", 0.0),
+                "aqi_accuracy": m.get("aqi_accuracy", 0.0),
+                "aqi_macro_f1": m.get("aqi_macro_f1", 0.0),
+                "high_risk_recall": m.get("high_risk_recall", 0.0),
+            })
+        if reg_rows:
+            reg_df = pd.DataFrame(reg_rows)
+            reg_path = self.csv_dir / f"regional_generalization_{pol}.csv"
+            reg_df.to_csv(reg_path, index=False)
+            csv_files["regional_generalization"] = reg_path
+            logger.info("Saved Evaluation CSV -> %s", reg_path)
+
+        # 5. Feature Importance CSV
+        if not attribution_df.empty:
+            feat_path = self.csv_dir / f"feature_importance_{pol}.csv"
+            attribution_df.to_csv(feat_path, index=False)
+            csv_files["feature_importance"] = feat_path
+            logger.info("Saved Evaluation CSV -> %s", feat_path)
+
+        # 6. Ensemble Meta-Learner Weights CSV
+        if ensemble_weights:
+            w_rows = [{"model": k, "weight": float(v)} for k, v in ensemble_weights.items()]
+            w_df = pd.DataFrame(w_rows)
+            w_path = self.csv_dir / f"ensemble_weights_{pol}.csv"
+            w_df.to_csv(w_path, index=False)
+            csv_files["ensemble_weights"] = w_path
+            logger.info("Saved Evaluation CSV -> %s", w_path)
+
+        return csv_files
+
     def generate_all_evaluation_plots(
         self,
         y_true: Union[np.ndarray, pd.Series, List[float]],
@@ -500,6 +609,17 @@ class EvaluationPlotter:
         p_reg = self.plot_regional_generalization(regional_results, pollutant=pol)
         p_feat = self.plot_feature_importance_consensus(attribution_df, pollutant=pol)
         p_w = self.plot_ensemble_weights_pie(ensemble_weights, pollutant=pol)
+
+        # Also automatically export corresponding evaluation CSVs into outputs/{pol}/evaluation/csv/
+        _ = self.export_all_evaluation_csvs(
+            y_true=y_true,
+            y_pred=y_pred,
+            leaderboard_df=leaderboard_df,
+            regional_results=regional_results,
+            attribution_df=attribution_df,
+            ensemble_weights=ensemble_weights,
+            pollutant=pol,
+        )
 
         return {
             "parity_scatter": p_parity,

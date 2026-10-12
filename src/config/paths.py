@@ -51,6 +51,10 @@ def get_evaluation_dir(pollutant: str = "pm25") -> Path:
     """Returns the dedicated evaluation directory for a specific pollutant."""
     return get_pollutant_dir(pollutant) / "evaluation"
 
+def get_evaluation_csv_dir(pollutant: str = "pm25") -> Path:
+    """Returns the dedicated evaluation/csv directory for a specific pollutant."""
+    return get_evaluation_dir(pollutant) / "csv"
+
 # Default subdirectories (defaulting to pm25 for backward compatibility)
 REPORTS_DIR = OUTPUTS_PM25_DIR / "reports"
 MODELS_DIR = OUTPUTS_PM25_DIR / "models"
@@ -95,6 +99,8 @@ def ensure_directories() -> None:
         OUTPUTS_PM10_DIR / "maps",
         OUTPUTS_PM10_DIR / "reports",
         OUTPUTS_PM10_DIR / "evaluation",
+        OUTPUTS_PM10_DIR / "evaluation" / "csv",
+        OUTPUTS_PM25_DIR / "evaluation" / "csv",
         OUTPUTS_DIR / "reports",
         OUTPUTS_DIR / "models",
         OUTPUTS_DIR / "maps",
