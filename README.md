@@ -262,12 +262,98 @@ pip install -r requirements.txt
 
 ---
 
-### 3. คำสั่งสำหรับรันการเทรนโมเดล (Model Training Pipeline)
+### 3. คำสั่งสำหรับรันระบบและขั้นตอนของไปป์ไลน์ (Pipeline Execution by Phase)
 
-การเทรนโมเดลและรันไปป์ไลน์สั่งการผ่าน `run_pipeline.py` ได้อย่างยืดหยุ่น:
+ระบบแบ่งการทำงานออกเป็นเฟสที่เชื่อมโยงกันอย่างเป็นระบบและสั่งการผ่าน `run_pipeline.py` ได้อย่างยืดหยุ่น โดยสามารถเลือกรันทีละเฟสเพื่อตรวจสอบความถูกต้อง หรือรันต่อเนื่องทุกเฟสแบบครบวงจร:
 
-#### 3.1 รันเทรนแบบ Fast Smoke-Test (แนะนำสำหรับการทดสอบเริ่มต้น)
-ใช้ข้อมูลสังเกตการณ์จริงตัวอย่างเพื่อทดสอบว่าไปป์ไลน์การเทรนและประเมินผลทำงานได้สมบูรณ์:
+```
+┌─────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
+│   Phase 1   │ ──> │   Phase 1b   │ ──> │   Phase 2    │ ──> │   Phase 3    │ ──> │   Phase 4    │ ──> │   Phase 5    │
+│  Data Ingest│     │  Audit Gate  │     │ Feature Eng. │     │ Unified Mat. │     │ Model Train  │     │ Nowcast Map  │
+└─────────────┘     └──────────────┘     └──────────────┘     └──────────────┘     └──────────────┘     └──────────────┘
+```
+
+---
+
+#### 3.1 การรัน Phase 1: การดาวน์โหลดและจัดเตรียมข้อมูลจริง (Data Acquisition & Ingestion)
+ดึงข้อมูลสังเกตการณ์ทางกายภาพจริงจากแหล่งข้อมูลภายนอก (NOAA AWS S3, สถาบันสารสนเทศทรัพยากรน้ำ HII, กรมควบคุมมลพิษ PCD Air4Thai, และ OpenAQ):
+```bash
+# รัน Ingestion สำหรับ PM2.5 (ค่าเริ่มต้น)
+python run_pipeline.py --phase 1 --pollutant pm25
+
+# รัน Ingestion สำหรับ PM10
+python run_pipeline.py --phase 1 --pollutant pm10
+
+# รัน Ingestion ทั้ง PM2.5 และ PM10
+python run_pipeline.py --phase 1 --pollutant all
+
+# ระบุวันที่สังเกตการณ์ที่ต้องการดึง
+python run_pipeline.py --phase 1 --start-date "2023-01-01 00:00:00" --pollutant pm25
+```
+**การทำงานใน Phase 1:**
+1. ดาวน์โหลดภาพดาวเทียม Himawari-9 แถบคลื่นอินฟราเรด B13 ($10.4\,\mu\text{m}$) และ B15 ($12.4\,\mu\text{m}$) จาก AWS S3 Open Data และแปลงเป็นอุณหภูมิความสว่าง (Kelvin) ผ่าน Satpy
+2. ดึงข้อมูลโทรมาตรความกดอากาศบรรยากาศและความชื้นจากสถานีตรวจวัด HII
+3. ดึงข้อมูลตรวจวัดฝุ่นจริงภาคพื้นดินจาก PCD Air4Thai (Live API) และ OpenAQ Historical Archive
+4. ทำการบันทึกลงในไดเรกทอรี `data/` และทดสอบผ่านเกต Phase 1b
+
+---
+
+#### 3.2 การรัน Phase 1b: เกตตรวจสอบความถูกต้องของข้อมูล (Zero-Mock Verification Gate)
+ตรวจสอบความโปร่งใสของข้อมูล รหัสโค้ด และการพิสูจน์แหล่งที่มา (Provenance Audit) เพื่อการันตีว่าระบบไม่มี Mock Data หรือ Synthetic Data ปะปน:
+```bash
+# รันตรวจสอบผ่านแฟล็ก --phase 1b
+python run_pipeline.py --phase 1b
+
+# หรือรันผ่านคำสั่งย่อ --audit
+python run_pipeline.py --audit
+```
+**การทำงานใน Phase 1b:**
+1. รัน **AST Code Scanner** ตรวจจับคำสั่งต้องห้าม (เช่น `np.random`, `synthetic`, `mock`) ทั่วทั้งโปรเจกต์
+2. ตรวจสอบ Checksum และ Provenance Metadata ของดาวเทียม Himawari, ข้อมูล HII, และเป้าหมายฝุ่น
+3. สรุปผลการประเมินลงใน `reports/provenance_audit_report.json` โดยผลรวมต้องเป็น `PASS` 100%
+
+---
+
+#### 3.3 การรัน Phase 2: การสร้างกริดเชิงพื้นที่และการสกัดฟีเจอร์ (Spatial Grid & Feature Engineering)
+ประมวลผลกริดเชิงพื้นที่ 4 ระดับความละเอียด และสกัดฟีเจอร์ทางอุตุนิยมวิทยา ธรณีสัณฐานวิทยา และดาวเทียม:
+```bash
+# รันการสร้างฟีเจอร์เชิงพื้นที่และอุตุนิยมวิทยา
+python run_pipeline.py --phase 2
+
+# ระบุช่วงวันเวลาของภาพถ่ายดาวเทียม
+python run_pipeline.py --phase 2 --start-date "2023-01-01 00:00:00"
+```
+**การทำงานใน Phase 2:**
+1. สร้างและโหลดกริดพิกัด UTM Zone 47N (EPSG:32647) ครอบคลุมประเทศไทย
+2. สกัดฟีเจอร์ความกดอากาศ 4 ทิศทาง (IDW Quadrants) พร้อมบังคับ **Proximity Exclusion Buffer (< 2.0 km)** เพื่อป้องกัน Data Leakage
+3. คำนวณผลต่างอุณหภูมิความสว่างหน้าต่างคู่ ($BTD_{15-13}$), ดัชนีฝุ่นสีแดง WMO ($R_{\mathrm{dust}}$), สถิติเนื้อภาพ $3\times 3$, และอัตราการเปลี่ยนแปลงย้อนหลัง
+4. ผสานดัชนีแอ่งกระทะกักฝุ่น (TPI), ความลาดชัน (Slope), ทิศทางลาดชัน (Aspect), มุมดวงอาทิตย์ (NOAA SZA), และค่าโคริออลิส
+5. บันทึกตัวอย่างฟีเจอร์ลง `reports/phase2_feature_sample.parquet`
+
+---
+
+#### 3.4 การรัน Phase 3: การประกอบเมทริกซ์ฟีเจอร์รวมและการป้องกันการรั่วไหล (Unified Feature Pipeline)
+ผสานข้อมูลฟีเจอร์ทั้งหมดเข้ากับค่าตรวจวัดจริงภาคพื้นดิน พร้อมการป้องกัน Data Leakage อย่างเข้มงวด:
+```bash
+# รวมเมทริกซ์ฟีเจอร์สำหรับ PM2.5
+python run_pipeline.py --phase 3 --pollutant pm25
+
+# รวมเมทริกซ์ฟีเจอร์สำหรับ PM10
+python run_pipeline.py --phase 3 --pollutant pm10
+
+# รวมเมทริกซ์ฟีเจอร์สำหรับทั้งคู่
+python run_pipeline.py --phase 3 --pollutant all
+```
+**การทำงานใน Phase 3:**
+1. จับคู่พิกัดสถานีตรวจวัดภาคพื้นดินเข้ากับกริดเซลล์ด้วยโครงสร้าง cKDTree
+2. บังคับใช้ **Strict Temporal Anti-Leakage (Zero Look-Ahead Bias)** โดยใช้เฉพาะข้อมูลก่อนหน้าเวลาสังเกตการณ์
+3. จัดการค่าสูญหายด้วย **Physics Fallback Imputer** รับประกันฟีเจอร์ครบ 52+ คอลัมน์โดยไม่มีค่า NaN
+4. เซฟข้อมูลในฟอร์แมต Apache Parquet (บีบอัด Snappy) พร้อมแบ่งชุดข้อมูล Train/Test
+
+---
+
+#### 3.5 การรัน Phase 4: การเทรนโมเดล 4 ขุนพลและการรวมโมเดล (Model Training & Stacking Ensemble)
+ฝึกสอนโมเดล Machine Learning Quartet ร่วมกับข้อจำกัดฟิสิกส์ทางเดียว และหาค่าน้ำหนักรวมด้วย Non-Negative Least Squares:
 ```bash
 # เทรนโมเดลสำหรับ PM2.5 (ค่าเริ่มต้น)
 python run_pipeline.py --phase 4 --pollutant pm25
@@ -278,10 +364,16 @@ python run_pipeline.py --phase 4 --pollutant pm10
 # เทรนทั้ง PM2.5 และ PM10 แยกโฟลเดอร์อัตโนมัติ
 python run_pipeline.py --phase 4 --pollutant all
 ```
-*ระบบจะทำการฝึกสอนโมเดล 4 ขุนพล (LightGBM, CatBoost, XGBoost, Random Forest) และรวมโมเดลด้วย Non-Negative Stacking Ensemble ข้ามทั้ง 4 ระดับความละเอียด (3km, 2km, 1km, 500m)*
+**การทำงานใน Phase 4:**
+1. ฝึกสอนโมเดล 4 อัลกอริทึม: LightGBM, CatBoost, XGBoost, Random Forest
+2. กำหนด **Monotonic Constraints** บังคับทิศทางตามกฎฟิสิกส์บรรยากาศ (ห้ามทำนายสวนทางกับความเป็นจริง)
+3. รวมโมเดลด้วย **Non-Negative Stacking Meta-Learner (NNLS)** ป้องกันค่าน้ำหนักติดลบ
+4. ส่งออกโมเดลและ Metadata ของแต่ละระดับความละเอียด (3km, 2km, 1km, 500m) สู่โฟลเดอร์ `models/`
 
-#### 3.2 รันการประเมินผล Benchmark และสร้างแผนที่ Nowcast (Phase 5)
-หลังจากโมเดลได้รับการฝึกสอนแล้ว สามารถรันเฟส 5 เพื่อคำนวณ Cross-Validation, Leaderboard, และ Export แผนที่ทั้ง 4 ระดับกริด:
+---
+
+#### 3.6 การรัน Phase 5: การประเมินผลและการสร้างแผนที่ Nowcast (Evaluation & Nowcast Maps)
+ทดสอบวัดผลประสิทธิภาพ และสร้างแผนที่ความเข้มข้นของฝุ่นระดับความละเอียดสูงทั่วประเทศไทย:
 ```bash
 # ประเมินและสร้างแผนที่ Nowcast สำหรับ PM2.5
 python run_pipeline.py --phase 5 --pollutant pm25
@@ -292,9 +384,15 @@ python run_pipeline.py --phase 5 --pollutant pm10
 # ประเมินและสร้างแผนที่สำหรับทั้งคู่
 python run_pipeline.py --phase 5 --pollutant all
 ```
+**การทำงานใน Phase 5:**
+1. ประเมินผล 5-Fold Spatial CV คำนวณเมทริกซ์ $R^2$, MAE, RMSE, Mean Bias, และ Pearson $r$
+2. สร้างรายงาน Model Comparison Leaderboard ในโฟลเดอร์ `reports/`
+3. พยากรณ์ค่าความเข้มข้นแบบครอบคลุมทั้งประเทศ (Nowcast) และส่งออกแผนที่ Parquet ครบทั้ง 4 ระดับกริด (3km, 2km, 1km, 500m)
 
-#### 3.3 รันครบวงจร End-to-End ทุกเฟส (Phase 1 ถึง Phase 5)
-รันรวดเดียวตั้งแต่เตรียมข้อมูล, สกัดฟีเจอร์, เทรนโมเดล, จนถึงสร้างแผนที่ Nowcast:
+---
+
+#### 3.7 การรันครบวงจร End-to-End ทุกเฟส (Phase 1 ถึง Phase 5)
+รันรวดเดียวตั้งแต่ต้นจนจบ (Ingestion -> Audit -> Features -> Matrix -> Train -> Map):
 ```bash
 # รันครบวงจรสำหรับ PM2.5
 python run_pipeline.py --phase all --pollutant pm25
@@ -303,7 +401,9 @@ python run_pipeline.py --phase all --pollutant pm25
 python run_pipeline.py --phase all --pollutant all
 ```
 
-#### 3.4 รัน Ingestion และ Train บนข้อมูลย้อนหลังหลายปี (Full Production Mode: 2024–2026)
+---
+
+#### 3.8 การรันข้อมูลย้อนหลังหลายปีระดับ Production (Full Production Mode: 2024–2026)
 สำหรับการดึงข้อมูลขนาดใหญ่หลายปี โดยแบ่ง Train (ปี 2024–2025) และ Test (ปี 2026):
 ```bash
 # รัน Full Mode (ดาวน์โหลดดาวเทียม Himawari ทุกๆ 3 ชั่วโมง พร้อมดึงสถานีตรวจวัด)
@@ -313,10 +413,17 @@ python run_pipeline.py --full --pollutant pm25
 python run_pipeline.py --start-date 2024-01-01 --end-date 2025-12-31 --cadence-hours 3 --pollutant pm25
 ```
 
-#### 3.5 การรันบน Google Colab หรือเซิร์ฟเวอร์ภายนอก (Google Colab & External Storage)
+---
+
+#### 3.9 การรันบน Google Colab หรือเซิร์ฟเวอร์ภายนอก (Google Colab & External Storage)
 หากต้องการรันบน Google Colab และเซฟข้อมูลหรือผลลัพธ์โมเดลลง Google Drive เพื่อป้องกันข้อมูลหายเมื่อ Session ตัดการเชื่อมต่อ สามารถระบุพาธผ่าน `--dir-data` และ `--dir-output`:
 ```bash
-# ตัวอย่างการเทรนบน Google Colab โดยบันทึกตรงสู่ Google Drive
+# รัน Ingestion และ Features ลง Google Drive
+python run_pipeline.py --phase 1 --pollutant pm25 \
+    --dir-data /content/drive/MyDrive/dust_project/data \
+    --dir-output /content/drive/MyDrive/dust_project/outputs
+
+# เทรนโมเดลบน Google Colab โดยบันทึกโมเดลตรงสู่ Google Drive
 python run_pipeline.py --phase 4 --pollutant pm25 \
     --dir-data /content/drive/MyDrive/dust_project/data \
     --dir-output /content/drive/MyDrive/dust_project/outputs

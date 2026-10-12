@@ -1102,6 +1102,12 @@ def main():
 
     pollutants = ["pm25", "pm10"] if args.pollutant == "all" else [args.pollutant]
 
+    if args.phase == "1" and not args.full and not (args.start_date and args.end_date):
+        sample_dt = pd.Timestamp(args.start_date or "2023-01-01 00:00:00", tz="UTC")
+        for p in pollutants:
+            run_phase_1_smoke_test(sample_dt, pollutant=p)
+        sys.exit(0)
+
     if args.phase == "2":
         sample_dt = pd.Timestamp(args.start_date or "2023-01-01 00:00:00", tz="UTC")
         run_phase_2_smoke_test(sample_dt)
