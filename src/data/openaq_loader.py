@@ -244,8 +244,13 @@ class OpenAQLoader:
 
             meta = data.get("meta", {})
             found = meta.get("found")
-            if found is not None and len(rows) >= found:
-                break
+            if found is not None:
+                try:
+                    found_digits = "".join(ch for ch in str(found) if ch.isdigit())
+                    if found_digits and len(rows) >= int(found_digits):
+                        break
+                except Exception:
+                    pass
 
             page += 1
             if page > 50:  # safety ceiling (up to 50,000 records)
