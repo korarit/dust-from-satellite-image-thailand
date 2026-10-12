@@ -99,8 +99,8 @@ $$BTD_{13-07} = T_b(\text{B13}, 10.4\,\mu\text{m}) - T_b(\text{B07}, 3.9\,\mu\te
 
 ### 4.4 ช่องสัญญาณสีแดงของมาตรฐาน WMO Dust RGB (Normalized Dust RGB Red)
 ตามข้อกำหนดขององค์การอุตุนิยมวิทยาโลก (WMO) และ EUMETSAT สำหรับภาพผสมสี Dust RGB (Lensky & Rosenfeld, 2008):
-$$\text{dust\_rgb\_red} = \text{clip}\left( \frac{BTD_{15-13} - (-4.0\,\text{K})}{2.0\,\text{K} - (-4.0\,\text{K})}, \, 0.0, \, 1.0 \right)$$
-- สมการนี้ทำการแปลงค่าช่วง $BTD_{15-13}$ จาก $-4.0\,\text{K}$ ถึง $+2.0\,\text{K}$ ให้อยู่ในช่วงมาตรฐาน $[0.0, 1.0]$ ช่วยให้โมเดล Machine Learning เรียนรู้สัดส่วนของฝุ่นได้เป็นเส้นตรงโดยไม่มีปัญหาความแปรปรวนของสเกล
+$$R_{\mathrm{dust}} = \min\left( 1.0, \, \max\left( 0.0, \, \frac{\Delta T_{15, 13} - (-4.0\,\mathrm{K})}{2.0\,\mathrm{K} - (-4.0\,\mathrm{K})} \right) \right)$$
+- สมการนี้ทำการแปลงค่าช่วง $\Delta T_{15, 13}$ จาก $-4.0\,\mathrm{K}$ ถึง $+2.0\,\mathrm{K}$ ให้อยู่ในช่วงมาตรฐาน $[0.0, 1.0]$ (บันทึกในคอลัมน์ `dust_rgb_red`) ช่วยให้โมเดล Machine Learning เรียนรู้สัดส่วนของฝุ่นได้เป็นเส้นตรงโดยไม่มีปัญหาความแปรปรวนของสเกล
 
 ---
 
@@ -146,9 +146,8 @@ $$TPI(r) = z_0 - \bar{z}_r$$
 ความชันและทิศทางลาดชันคำนวณจากเกรเดียนต์ 3 มิติ:
 $$p = \frac{\partial z}{\partial x}, \quad q = \frac{\partial z}{\partial y}$$
 $$\text{Slope} = \arctan\left(\sqrt{p^2 + q^2}\right)$$
-$$\text{Aspect} = \arctan2(-q, -p)$$
-เพื่อป้องกันปัญหาความไม่ต่อเนื่องที่มุม $0^\circ$ และ $360^\circ$ จึงทำการแปลงทิศทางลาดชันด้วยเวกเตอร์ไซน์และโคไซน์:
-$$\text{aspect\_sin} = \sin(\text{Aspect}), \quad \text{aspect\_cos} = \cos(\text{Aspect})$$
+$$u_{\mathrm{aspect}} = \sin\psi, \quad v_{\mathrm{aspect}} = \cos\psi$$
+โดยบันทึกลงในคอลัมน์ `aspect_sin` และ `aspect_cos` เพื่อให้โมเดลประมวลผลมุมทิศทางได้อย่างต่อเนื่อง
 
 ---
 
