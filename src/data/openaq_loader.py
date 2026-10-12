@@ -96,7 +96,7 @@ class OpenAQLoader:
         self._s3_client = boto3.client(
             "s3",
             region_name="us-east-1",
-            config=Config(signature_version=UNSIGNED)
+            config=Config(signature_version=UNSIGNED, max_pool_connections=50)
         )
         self._stations_df: Optional[pd.DataFrame] = None
         self._stations_dict: Dict[int, str] = dict(DEFAULT_THAILAND_OPENAQ_LOCATIONS)
@@ -110,22 +110,30 @@ class OpenAQLoader:
         - 'northeast': Isan region (Khon Kaen, Nakhon Ratchasima, Udon Thani, etc.)
         - 'east': Eastern seaboard (Rayong, Chonburi, Trat, etc.)
         - 'south': Southern peninsula (Phuket, Surat Thani, Songkhla, etc.)
+        - 'all': Nationwide (all regions)
         """
         if self._stations_df is None:
-            parquet_path = self.metadata_dir / "openaq_thailand_stations.parquet"
-            csv_path = self.metadata_dir / "openaq_thailand_stations.csv"
             from src.config.paths import PROJECT_ROOT
-            fallback_parquet = PROJECT_ROOT / "data" / "metadata" / "openaq_thailand_stations.parquet"
-            fallback_csv = PROJECT_ROOT / "data" / "metadata" / "openaq_thailand_stations.csv"
+            candidates_parquet = [
+                self.metadata_dir / "openaq_thailand_stations.parquet",
+                PROJECT_ROOT / "data" / "metadata" / "openaq_thailand_stations.parquet",
+                Path.cwd() / "data" / "metadata" / "openaq_thailand_stations.parquet",
+                Path(__file__).resolve().parent.parent.parent / "data" / "metadata" / "openaq_thailand_stations.parquet",
+            ]
+            candidates_csv = [
+                self.metadata_dir / "openaq_thailand_stations.csv",
+                PROJECT_ROOT / "data" / "metadata" / "openaq_thailand_stations.csv",
+                Path.cwd() / "data" / "metadata" / "openaq_thailand_stations.csv",
+                Path(__file__).resolve().parent.parent.parent / "data" / "metadata" / "openaq_thailand_stations.csv",
+            ]
 
-            if parquet_path.exists():
-                self._stations_df = pd.read_parquet(parquet_path)
-            elif csv_path.exists():
-                self._stations_df = pd.read_csv(csv_path)
-            elif fallback_parquet.exists():
-                self._stations_df = pd.read_parquet(fallback_parquet)
-            elif fallback_csv.exists():
-                self._stations_df = pd.read_csv(fallback_csv)
+            p_found = next((p for p in candidates_parquet if p and p.exists()), None)
+            c_found = next((p for p in candidates_csv if p and p.exists()), None)
+
+            if p_found is not None:
+                self._stations_df = pd.read_parquet(p_found)
+            elif c_found is not None:
+                self._stations_df = pd.read_csv(c_found)
             else:
                 records = [
                     {
@@ -142,7 +150,7 @@ class OpenAQLoader:
                 self._stations_df = pd.DataFrame(records)
 
         df = self._stations_df.copy()
-        if not region:
+        if not region or region.lower() == "all":
             return df
 
         region_lower = region.lower()
@@ -178,7 +186,8 @@ class OpenAQLoader:
         pollutant: str = "pm25",
     ) -> pd.DataFrame:
         """
-        Fetches hourly particulate matter measurements directly from OpenAQ v3 API.
+        Fetches hourly particulate matter measurements directly from OpenAQ v3 API
+        with multi-page pagination for full multi-year series.
         Endpoint: /v3/sensors/{sensor_id}/hours
         """
         start_ts = pd.to_datetime(start_date, utc=True)
@@ -192,40 +201,55 @@ class OpenAQLoader:
         if self.api_key:
             headers["X-API-Key"] = self.api_key
 
-        url = (
-            f"{OPENAQ_API_BASE}/sensors/{sensor_id}/hours?"
-            f"datetime_from={start_iso}&datetime_to={end_iso}&limit={page_limit}"
-        )
-
-        try:
-            req = urllib.request.Request(url, headers=headers)
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-        except Exception as e:
-            logger.warning("OpenAQ API request failed for sensor %s: %s", sensor_id, e)
-            return pd.DataFrame()
-
-        results = data.get("results", [])
-        if not results:
-            return pd.DataFrame()
-
         target_col = "observed_pm10" if "pm10" in pollutant.lower() else "observed_pm25"
         rows = []
-        for item in results:
-            val = item.get("value")
-            period = item.get("period", {})
-            dt_to = period.get("datetimeTo", {})
-            utc_str = dt_to.get("utc") if isinstance(dt_to, dict) else None
+        page = 1
 
-            if val is not None and utc_str:
-                try:
-                    ts = pd.to_datetime(utc_str, utc=True).tz_localize(None)
-                    rows.append({
-                        "timestamp_utc": ts,
-                        target_col: float(val)
-                    })
-                except Exception:
-                    continue
+        while True:
+            url = (
+                f"{OPENAQ_API_BASE}/sensors/{sensor_id}/hours?"
+                f"datetime_from={start_iso}&datetime_to={end_iso}&limit={page_limit}&page={page}"
+            )
+            try:
+                req = urllib.request.Request(url, headers=headers)
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+            except Exception as e:
+                if page == 1:
+                    logger.warning("OpenAQ API request failed for sensor %s: %s", sensor_id, e)
+                break
+
+            results = data.get("results", [])
+            if not results:
+                break
+
+            for item in results:
+                val = item.get("value")
+                period = item.get("period", {})
+                dt_to = period.get("datetimeTo", {})
+                utc_str = dt_to.get("utc") if isinstance(dt_to, dict) else None
+
+                if val is not None and utc_str:
+                    try:
+                        ts = pd.to_datetime(utc_str, utc=True).tz_localize(None)
+                        rows.append({
+                            "timestamp_utc": ts,
+                            target_col: float(val)
+                        })
+                    except Exception:
+                        continue
+
+            if len(results) < page_limit:
+                break
+
+            meta = data.get("meta", {})
+            found = meta.get("found")
+            if found is not None and len(rows) >= found:
+                break
+
+            page += 1
+            if page > 50:  # safety ceiling (up to 50,000 records)
+                break
 
         if not rows:
             return pd.DataFrame()

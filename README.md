@@ -443,44 +443,59 @@ python run_pipeline.py --phase all --pollutant all
 ---
 
 #### 3.8 การรันข้อมูลย้อนหลังหลายปีระดับ Production (Full Production Mode: 2024–2026)
-สำหรับการดึงข้อมูลขนาดใหญ่หลายปี โดยแบ่ง Train (ปี 2024–2025) และ Test (ปี 2026):
+สำหรับการดึงข้อมูลขนาดใหญ่หลายปี โดยระบบจะแบ่งชุดข้อมูล Train (ปี 2024–2025) และ Out-of-Time Test (ปี 2026) โดยอัตโนมัติ:
 ```bash
-# รัน Full Mode (ดาวน์โหลดดาวเทียม Himawari ทุกๆ 3 ชั่วโมง พร้อมดึงสถานีตรวจวัด)
+# รัน Full Mode พื้นฐาน (ดาวน์โหลดดาวเทียม Himawari ทุกๆ 3 ชั่วโมง พร้อมดึงสถานี Benchmark ทั่วประเทศ)
 python run_pipeline.py --full --pollutant pm25
 
-# ระบุช่วงวันเวลาและ Cadence ที่ต้องการเอง
-python run_pipeline.py --start-date 2024-01-01 --end-date 2025-12-31 --cadence-hours 3 --pollutant pm25
+# ดึงสถานีตรวจวัดคุณภาพอากาศทุกสถานีทั่วประเทศไทย (--region all ครอบคลุม 262+ สถานีของ กรมควบคุมมลพิษ / Air4Thai)
+python run_pipeline.py --full --region all --pollutant pm25
+
+# ดึงทุกภูมิภาคทั่วไทยแต่จำกัดสถานีสำหรับการทดสอบแบบรวดเร็ว (เช่น 25 สถานี)
+python run_pipeline.py --full --region all --max-stations 25 --pollutant pm25
 
 # กรองดึงเฉพาะสถานีภาคเหนือ (เชียงใหม่, เชียงราย, แม่ฮ่องสอน, ลำปาง ฯลฯ)
 python run_pipeline.py --full --region north --pollutant pm25
 
-# กำหนดจำนวนสถานีประวัติศาสตร์ย้อนหลังที่ต้องการดึง (เช่น 20 สถานี)
-python run_pipeline.py --full --max-stations 20 --pollutant pm25
+# กรองดึงเฉพาะสถานีภาคกลาง / กรุงเทพฯ และปริมณฑล
+python run_pipeline.py --full --region central --pollutant pm25
 
-# ระบุรหัส Location ID ของ OpenAQ ที่ต้องการเจาะจงเอง
+# ระบุรหัส Location ID ของ OpenAQ ที่ต้องการเจาะจงเอง (เช่น กรมประชาสัมพันธ์, บางพลัด, รพ.สวนดอก)
 python run_pipeline.py --full --location-ids 225642,368399,6266258 --pollutant pm25
+
+# ระบุช่วงวันเวลาและ Satellite Cadence ที่ต้องการเจาะจง
+python run_pipeline.py --start-date 2024-01-01 --end-date 2025-12-31 --cadence-hours 3 --pollutant pm25
 ```
+
+> [!NOTE]
+> - **OpenAQ Multi-Page Pagination**: ระบบรองรับการดึงข้อมูลย้อนหลังแบบ Pagination อัตโนมัติ (ข้ามขีดจำกัดเดิม 1,000 แถวต่อสถานี) ทำให้ดึงข้อมูลย้อนหลัง 2024–2026 ได้ครบทุกชั่วโมง (~20,000+ บันทึกต่อสถานี)
+> - **Cadence Hours**: สำหรับการรัน 3 ปีย้อนหลังบน Google Colab แนะนำให้ใช้ `--cadence-hours 3` หรือ `6` เพื่อประหยัดพื้นที่ดิสก์และความเร็วในการดาวน์โหลดดาวเทียม Himawari-9
 
 ---
 
 #### 3.9 การรันบน Google Colab หรือเซิร์ฟเวอร์ภายนอก (Google Colab & External Storage)
 หากต้องการรันบน Google Colab และเซฟข้อมูลหรือผลลัพธ์โมเดลลง Google Drive เพื่อป้องกันข้อมูลหายเมื่อ Session ตัดการเชื่อมต่อ สามารถระบุพาธผ่าน `--dir-data` และ `--dir-output`:
+
 ```bash
-# รัน Ingestion และ Features ลง Google Drive
-python run_pipeline.py --phase 1 --pollutant pm25 \
+# ตัวอย่างคำสั่งรัน Phase 1 Full Mode บันทึกลง Google Drive โดยตรง
+!python run_pipeline.py --phase 1 --full --pollutant pm25 \
+    --region all --max-stations 30 --cadence-hours 3 \
     --dir-data /content/drive/MyDrive/dust_project/data \
     --dir-output /content/drive/MyDrive/dust_project/outputs
 
-# เทรนโมเดลบน Google Colab โดยบันทึกโมเดลตรงสู่ Google Drive
-python run_pipeline.py --phase 4 --pollutant pm25 \
+# เทรนโมเดล (Phase 4) บน Google Colab และเซฟน้ำหนักโมเดลลง Google Drive
+!python run_pipeline.py --phase 4 --pollutant pm25 \
     --dir-data /content/drive/MyDrive/dust_project/data \
     --dir-output /content/drive/MyDrive/dust_project/outputs
 
-# รันประเมินผลและสร้างแผนที่ Nowcast ลง Google Drive
-python run_pipeline.py --phase 5 --pollutant pm25 \
+# ประเมินผลและสร้างแผนที่ Nowcast (Phase 5) ลง Google Drive
+!python run_pipeline.py --phase 5 --pollutant pm25 \
     --dir-data /content/drive/MyDrive/dust_project/data \
     --dir-output /content/drive/MyDrive/dust_project/outputs
 ```
+
+> [!TIP]
+> **Automatic Metadata Seeding**: เมื่อระบุ `--dir-data` ชี้ไปยังไดเรกทอรีใหม่บน Google Drive ระบบจะทำการคัดลอกไฟล์ Metadata ต้นแบบ (`hii_stations_master_metadata.csv`, `openaq_thailand_stations.parquet`) เข้าสู่ Google Drive โดยอัตโนมัติ เพื่อให้กระบวนการ Ingestion ดำเนินการได้อย่างราบรื่น 100% ปราศจากข้อผิดพลาด `FileNotFoundError`
 
 ---
 

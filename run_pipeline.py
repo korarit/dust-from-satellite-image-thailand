@@ -910,19 +910,22 @@ def run_phase_1_full(
     # ---------------------------------------------------------
     # 1. Historical Ground Truth Target Ingestion & Temporal Split
     # ---------------------------------------------------------
-    logger.info("\n--- Step 1: Ingesting Historical %s from OpenAQ & Live Air4Thai ---", tgt_name)
+    logger.info("--- Step 1: Ingesting Historical %s from OpenAQ & Live Air4Thai ---", tgt_name)
     if location_ids:
         query_locs = location_ids
-    elif region and region.lower() != "all":
-        region_df = target_loader.openaq_loader.get_thailand_stations(region=region)
-        query_locs = region_df["location_id"].dropna().astype(int).tolist()
+    elif region:
+        reg_filter = None if region.lower() == "all" else region
+        region_df = target_loader.openaq_loader.get_thailand_stations(region=reg_filter)
+        air4thai = region_df[region_df["provider"].str.contains("Air4Thai", case=False, na=False)]
+        pool = air4thai if not air4thai.empty else region_df
+        query_locs = pool["location_id"].dropna().astype(int).unique().tolist()
         if max_locations:
             query_locs = query_locs[:max_locations]
     elif max_locations:
         all_stns = target_loader.openaq_loader.get_thailand_stations()
         air4thai_stns = all_stns[all_stns["provider"].str.contains("Air4Thai", case=False, na=False)]
         stns_pool = air4thai_stns if not air4thai_stns.empty else all_stns
-        query_locs = stns_pool["location_id"].dropna().astype(int).head(max_locations).tolist()
+        query_locs = stns_pool["location_id"].dropna().astype(int).unique().tolist()[:max_locations]
     else:
         query_locs = list(DEFAULT_THAILAND_OPENAQ_LOCATIONS.keys())
 
@@ -960,47 +963,53 @@ def run_phase_1_full(
     # ---------------------------------------------------------
     # 2. HII Ground Weather Telemetry & Temporal Split
     # ---------------------------------------------------------
-    logger.info("\n--- Step 2: Ingesting HII Weather Telemetry (Pressure & Humidity) ---")
-    meta = hii_loader.get_metadata()
-    query_stations = stations or meta["station_code"].head(20).tolist()  # Benchmark set or full
+    logger.info("--- Step 2: Ingesting HII Weather Telemetry (Pressure & Humidity) ---")
+    try:
+        meta = hii_loader.get_metadata()
+        query_stations = stations or meta["station_code"].head(20).tolist()  # Benchmark set or full
 
-    for var in ["pressure", "humidity"]:
-        logger.info("Fetching HII %s (%s to %s)...", var, start_date.date(), end_date.date())
-        hii_var_df = hii_loader.fetch_date_range(
-            variable=var,
-            start_date=start_date,
-            end_date=end_date,
-            station_codes=query_stations
-        )
-        if not hii_var_df.empty:
-            train_hii, test_hii = HIIWeatherLoader.split_train_test(hii_var_df, split_date=split_date)
-            logger.info("HII %s Split Summary:", var)
-            logger.info("  • Train (2024-2025): %d records", len(train_hii))
-            logger.info("  • Test  (2026)     : %d records", len(test_hii))
+        for var in ["pressure", "humidity"]:
+            logger.info("Fetching HII %s (%s to %s)...", var, start_date.date(), end_date.date())
+            hii_var_df = hii_loader.fetch_date_range(
+                variable=var,
+                start_date=start_date,
+                end_date=end_date,
+                station_codes=query_stations
+            )
+            if not hii_var_df.empty:
+                train_hii, test_hii = HIIWeatherLoader.split_train_test(hii_var_df, split_date=split_date)
+                logger.info("HII %s Split Summary:", var)
+                logger.info("  • Train (2024-2025): %d records", len(train_hii))
+                logger.info("  • Test  (2026)     : %d records", len(test_hii))
 
-            if not train_hii.empty:
-                hii_loader.save_to_parquet(train_hii, var, f"hii_{var}_train_2024_2025.parquet")
-            if not test_hii.empty:
-                hii_loader.save_to_parquet(test_hii, var, f"hii_{var}_test_2026.parquet")
+                if not train_hii.empty:
+                    hii_loader.save_to_parquet(train_hii, var, f"hii_{var}_train_2024_2025.parquet")
+                if not test_hii.empty:
+                    hii_loader.save_to_parquet(test_hii, var, f"hii_{var}_test_2026.parquet")
+    except Exception as e:
+        logger.error("Error during Step 2 HII telemetry ingestion: %s", e, exc_info=True)
 
     # ---------------------------------------------------------
     # 3. Himawari-9 Satellite IR Bands Ingestion
     # ---------------------------------------------------------
-    logger.info("\n--- Step 3: Fetching Himawari-9 IR Bands at Cadence=%dh ---", cadence_hours)
-    sat_loader = HimawariIRLoader(cache_dir=HIMAWARI_CACHE_DIR, bands=bands, segments=[3, 4, 5])
-    # Fetch snapshots across the range
-    snapshots = sat_loader.fetch_range_snapshots(
-        start_date=start_date,
-        end_date=end_date,
-        cadence_hours=cadence_hours,
-        bands=bands
-    )
-    logger.info("Downloaded satellite snapshots: %d observation cycles", len(snapshots))
+    logger.info("--- Step 3: Fetching Himawari-9 IR Bands at Cadence=%dh ---", cadence_hours)
+    try:
+        sat_loader = HimawariIRLoader(cache_dir=HIMAWARI_CACHE_DIR, bands=bands, segments=[3, 4, 5])
+        # Fetch snapshots across the range
+        snapshots = sat_loader.fetch_range_snapshots(
+            start_date=start_date,
+            end_date=end_date,
+            cadence_hours=cadence_hours,
+            bands=bands
+        )
+        logger.info("Downloaded satellite snapshots: %d observation cycles", len(snapshots))
+    except Exception as e:
+        logger.error("Error during Step 3 Himawari satellite ingestion: %s", e, exc_info=True)
 
     # ---------------------------------------------------------
     # 4. Strict Zero-Mock Verification Gate
     # ---------------------------------------------------------
-    logger.info("\n--- Step 4: Executing Phase 1B Zero-Mock Verification Gate ---")
+    logger.info("--- Step 4: Executing Phase 1B Zero-Mock Verification Gate ---")
     gate_passed = run_phase_1b_verification()
     if gate_passed:
         logger.info("\n🎉 PHASE 1 FULL INGESTION (2024-2026) COMPLETED SUCCESSFULLY (%s)!", tgt_name)

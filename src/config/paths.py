@@ -112,6 +112,29 @@ def configure_paths(
     ensure_directories()
 
 
+def seed_metadata_if_needed() -> None:
+    """
+    If METADATA_DIR points to custom external storage (e.g. Google Drive),
+    automatically seed essential reference metadata files from the repository.
+    """
+    import shutil
+    candidate_sources = [
+        PROJECT_ROOT / "data" / "metadata",
+        Path(__file__).resolve().parent.parent.parent / "data" / "metadata",
+        Path.cwd() / "data" / "metadata",
+    ]
+    source_dir = next((p for p in candidate_sources if p.exists() and p.is_dir()), None)
+    if source_dir and source_dir.resolve() != METADATA_DIR.resolve():
+        METADATA_DIR.mkdir(parents=True, exist_ok=True)
+        for f in source_dir.glob("*"):
+            dest_file = METADATA_DIR / f.name
+            if not dest_file.exists() and f.is_file():
+                try:
+                    shutil.copy2(f, dest_file)
+                except Exception:
+                    pass
+
+
 def ensure_directories() -> None:
     """Ensures all required project directories exist."""
     dirs = [
@@ -146,6 +169,9 @@ def ensure_directories() -> None:
     for d in dirs:
         d.mkdir(parents=True, exist_ok=True)
 
+    seed_metadata_if_needed()
+
 
 # Initialize directories on import
 ensure_directories()
+
