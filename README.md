@@ -67,7 +67,7 @@ flowchart TD
         H9["ดาวเทียม Himawari-9 AHI (AWS S3 Open Data)<br>แถบคลื่น IR 10 แบนด์: B07 - B16<br>ความถี่เวลา: t, t-10m, t-30m, t-60m"]
         HII["โทรมาตรสภาพอากาศภาคพื้นดิน สสน. (HII)<br>ความกดอากาศบรรยากาศ และ ความชื้นสัมพัทธ์"]
         DEM["แบบจำลองความสูงภูมิประเทศ Copernicus DEM 30m<br>Elevation, Slope, Aspect, TPI แอ่งกระทะ"]
-        GT["สถานีตรวจวัดฝุ่นมาตรฐานภาคพื้นดิน<br>คพ. (PCD) / Air4Thai / DustBoy / OpenAQ"]
+        GT["สถานีตรวจวัดฝุ่นภาคพื้นดิน OpenAQ Data<br>(มาตรฐานสากล รวบรวมข้อมูล Air4Thai / PCD / DustBoy)"]
     end
 
     subgraph FeatureEngineering ["2. วิศวกรรมฟีเจอร์และสร้างกริดเชิงพื้นที่ (Feature Engineering)"]
@@ -186,7 +186,7 @@ dust-prediction-satelite/
 │   ├── geo/                        # มาสเตอร์กริดเชิงพื้นที่ของประเทศไทย (EPSG:32647)
 │   ├── hii/                        # ข้อมูลโทรมาตรความกดอากาศและความชื้นจาก สสน.
 │   ├── metadata/                   # พิกัดและรายละเอียดของสถานีตรวจวัดทั้งหมด
-│   └── target/                     # ข้อมูลฝุ่น PM2.5 ภาคพื้นดินจาก คพ. / Air4Thai / OpenAQ
+│   └── target/                     # ข้อมูลฝุ่น PM2.5 ภาคพื้นดินจาก OpenAQ Data (รวบรวม Air4Thai / DustBoy)
 ├── outputs/
 │   ├── evaluation/                 # แผนภูมิประเมินผล กราฟ Parity และ Confusion Matrix
 │   ├── maps/                       # แผนที่ Nowcast รายชั่วโมง (GeoTIFF, Parquet, Interactive HTML)
@@ -275,4 +275,4 @@ python run_pipeline.py --all
 - **สัญญาอนุญาต (License)**: เผยแพร่ภายใต้สัญญาอนุญาต [MIT License](LICENSE)
 - **ข้อมูลภาพถ่ายดาวเทียม**: ขอขอบคุณสำนักงานอุตุนิยมวิทยาแห่งประเทศญี่ปุ่น (JMA) ผ่านโครงการ NOAA / AWS Open Data Program
 - **ข้อมูลภูมิประเทศ**: ข้อมูล Copernicus DEM GLO-30 จากองค์การอวกาศยุโรป (ESA)
-- **ข้อมูลโทรมาตรและคุณภาพอากาศภาคพื้นดิน**: สถาบันสารสนเทศทรัพยากรน้ำ (องค์การมหาชน) (สสน. - HII), กรมควบคุมมลพิษ (คพ. - PCD Thailand), โครงการ Air4Thai, และ OpenAQ
+- **ข้อมูลโทรมาตรและคุณภาพอากาศภาคพื้นดิน**: สถาบันสารสนเทศทรัพยากรน้ำ (องค์การมหาชน) (สสน. - HII) และแพลตฟอร์ม OpenAQ Data (ซึ่งเป็นศูนย์รวมข้อมูลสถานีตรวจวัดคุณภาพอากาศมาตรฐานของไทย ทั้ง Air4Thai ของกรมควบคุมมลพิษ และเครือข่าย DustBoy)
