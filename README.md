@@ -540,6 +540,7 @@ pytest -v tests/test_pm10.py
 | `--split-date` | `YYYY-MM-DD` | `2026-01-01` | วันที่ใช้ตัดแบ่ง Train และ Test set |
 | `--cadence-hours` | ตัวเลขจำนวนเต็ม เช่น `1`, `3`, `6` | `3` | ความถี่ในการดาวน์โหลดภาพดาวเทียม (ชั่วโมง) |
 | `--region` | `all`, `north`, `northeast`, `central`, `east`, `south`, `bangkok` | `None` | กรองสถานีตรวจวัดตามภูมิภาคของไทย |
+| `--provider` | `all`, `air4thai` | `all` | กรองแหล่งข้อมูลสถานีภาคพื้นดิน: `all` (ทุกสถานีทั่วไทย 618+ แห่ง ทั้ง Air4Thai และเซ็นเซอร์เครือข่าย) หรือ `air4thai` (เฉพาะสถานีมาตรฐาน คพ. 262 แห่ง) |
 | `--max-stations` | ตัวเลขจำนวนเต็ม เช่น `10`, `20`, `50` | `None` | กำหนดจำนวนสถานี OpenAQ สูงสุดที่ต้องการดึง |
 | `--location-ids` | รหัสคั่นด้วยจุลภาค เช่น `225642,368399` | `None` | กำหนดรหัส Location ID ของ OpenAQ ที่ต้องการเจาะจง |
 | `--audit` | *flag (ไม่ต้องใส่ค่า)* | - | ตรวจสอบ Data Provenance และ Code Integrity Gate (Phase 1B) |

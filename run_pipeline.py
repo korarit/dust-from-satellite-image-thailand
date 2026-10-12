@@ -887,6 +887,7 @@ def run_phase_1_full(
     location_ids: Optional[List[int]] = None,
     region: Optional[str] = None,
     max_locations: Optional[int] = None,
+    provider: str = "all",
 ) -> None:
     """
     Executes Phase 1 Full Multi-Year Data Ingestion & Audit (2024 - 2026):
@@ -916,15 +917,21 @@ def run_phase_1_full(
     elif region:
         reg_filter = None if region.lower() == "all" else region
         region_df = target_loader.openaq_loader.get_thailand_stations(region=reg_filter)
-        air4thai = region_df[region_df["provider"].str.contains("Air4Thai", case=False, na=False)]
-        pool = air4thai if not air4thai.empty else region_df
+        if provider and provider.lower() == "air4thai":
+            air4thai = region_df[region_df["provider"].str.contains("Air4Thai", case=False, na=False)]
+            pool = air4thai if not air4thai.empty else region_df
+        else:
+            pool = region_df
         query_locs = pool["location_id"].dropna().astype(int).unique().tolist()
         if max_locations:
             query_locs = query_locs[:max_locations]
     elif max_locations:
         all_stns = target_loader.openaq_loader.get_thailand_stations()
-        air4thai_stns = all_stns[all_stns["provider"].str.contains("Air4Thai", case=False, na=False)]
-        stns_pool = air4thai_stns if not air4thai_stns.empty else all_stns
+        if provider and provider.lower() == "air4thai":
+            air4thai_stns = all_stns[all_stns["provider"].str.contains("Air4Thai", case=False, na=False)]
+            stns_pool = air4thai_stns if not air4thai_stns.empty else all_stns
+        else:
+            stns_pool = all_stns
         query_locs = stns_pool["location_id"].dropna().astype(int).unique().tolist()[:max_locations]
     else:
         query_locs = list(DEFAULT_THAILAND_OPENAQ_LOCATIONS.keys())
@@ -1132,6 +1139,13 @@ def main():
         dest="location_ids",
         help="Comma-separated custom OpenAQ location IDs (e.g. '225642,368399,6266258')"
     )
+    parser.add_argument(
+        "--provider",
+        type=str,
+        default="all",
+        choices=["all", "air4thai"],
+        help="Provider filter for ground stations: 'all' (all 618+ stations nationwide) or 'air4thai' (262 official PCD benchmark stations, default: all)"
+    )
 
     args = parser.parse_args()
 
@@ -1206,6 +1220,7 @@ def main():
                 location_ids=custom_loc_ids,
                 region=args.region,
                 max_locations=args.max_stations,
+                provider=args.provider,
             )
     elif args.start_date and args.end_date:
         start_dt = pd.Timestamp(args.start_date, tz="UTC")
@@ -1220,6 +1235,7 @@ def main():
                 location_ids=custom_loc_ids,
                 region=args.region,
                 max_locations=args.max_stations,
+                provider=args.provider,
             )
     else:
         # Default or smoke-test
