@@ -1,0 +1,26 @@
+# 📋 รายการประเด็นปัญหาและจุดบกพร่องที่ต้องแก้ไข (Issues & Remediation Backlog)
+
+> **เอกสารฉบับเต็มและรายละเอียดเชิงลึก**: ดูที่ [`code_audit_issues_and_remediation.md`](file:///e:/water-analysis-project/dust-prediction-satelite/ai-docs/code_audit_issues_and_remediation.md)
+
+---
+
+## สรุปย่อ 12 ประเด็นปัญหาที่ตรวจพบจากการตรวจสอบโค้ด `src/`
+
+| ลำดับ | ระดับความรุนแรง | ประเด็นปัญหา | ไฟล์ที่เกี่ยวข้อง | ทำไมถึงทำให้โมเดลผิด | สถานะการแก้ไข |
+| :---: | :---: | :--- | :--- | :--- | :---: |
+| **#1** | 🔴 P1 วิกฤต | **Target Label Misalignment (`loc` vs `iloc`)** | [`src/features/feature_matrix_builder.py`](file:///e:/water-analysis-project/dust-prediction-satelite/src/features/feature_matrix_builder.py) | KDTree คืนค่าแถว แต่ `loc[idx]` ทำงานกับ Index Label ทำให้เฉลยค่าฝุ่นถูกเขียนลงผิดเซลล์กริด โมเดลเทรนกับเฉลยผิดพิกัด | ✅ **แก้ไขแล้ว** (ใช้ positional `.iloc`) |
+| **#2** | 🔴 P1 วิกฤต | **Target Matching ขาด Time Window Filter** | [`src/features/feature_matrix_builder.py`](file:///e:/water-analysis-project/dust-prediction-satelite/src/features/feature_matrix_builder.py) | ไม่มีตัวกรองเวลา ทำให้ค่าฝุ่นของทุกวัน/เดือนถูกเฉลี่ยรวมกันลงใน Snapshot เดียว ทำลายไดนามิกรายชั่วโมงของ Nowcasting | ✅ **แก้ไขแล้ว** (เพิ่ม `target_dt` ±60 นาที) |
+| **#3** | 🔴 P1 วิกฤต | **$\|\nabla P\| = 0$ ลวงตาเมื่อสถานีรอบข้างไม่ครบ 4 ทิศ** | [`src/features/spatial_directional.py`](file:///e:/water-analysis-project/dust-prediction-satelite/src/features/spatial_directional.py) | ทิศที่ไม่มีสถานี fallback ค่าเฉลี่ย ทำให้ $\Delta P = 0$ และ $\|\nabla P\| = 0$ โมเดล XGBoost โดนหลอกว่าลมสงบ จึงทำนายฝุ่นพุ่งสูงผิดปกติ | ✅ **แก้ไขแล้ว** (แนวทาง B: Barometric Radial Gradient เทียบระดับความสูงกริด ISA + Climatology bounds [0.2, 5.0]) |
+| **#4** | 🔴 P1 วิกฤต | **ปัดเศษเวลาดาวเทียมขึ้นในอนาคต (`round_to_himawari_10m`)** | [`src/data/himawari_ir_loader.py`](file:///e:/water-analysis-project/dust-prediction-satelite/src/data/himawari_ir_loader.py) | ปัดเศษขึ้นทำให้เรียกไฟล์รอบในอนาคตที่ยังไม่เกิด ส่งผลให้ S3 404 หรือเกิด Look-ahead Data Leakage | ✅ **แก้ไขแล้ว** (เพิ่ม `mode='floor'` & `floor_to_himawari_10m`) |
+| **#5** | 🔴 P1 วิกฤต | **Post-hoc Normalization ใน Stacking NNLS** | [`src/models/ensemble_model.py`](file:///e:/water-analysis-project/dust-prediction-satelite/src/models/ensemble_model.py) | การหารด้วยผลรวมน้ำหนักหลังรันเสร็จโดยไม่คุมใน Objective Function บิดเบือน Scale ทำให้ Ensemble ทำนายค่าฝุ่นสูงเกินจริง | ✅ **แก้ไขแล้ว** (ใช้ SLSQP Constrained Optimization) |
+| **#6** | 🟡 P2 สูง | **Multi-Resolution Grids (1k, 500m) ยังไม่ได้สร้างกริดจริง** | [`src/features/grid_engine.py`](file:///e:/water-analysis-project/dust-prediction-satelite/src/features/grid_engine.py), [`run_pipeline.py`](file:///e:/water-analysis-project/dust-prediction-satelite/run_pipeline.py) | กริด 1km และ 500m ก๊อปปี้ตาราง 2km มาใช้ซ้ำ ทำให้ผลการทดลองใน Benchmark Report ได้ตัวเลขเท่ากันทุกช่อง ไม่สะท้อนความจริง | ✅ **แก้ไขแล้ว** (สร้าง UTM grid ย่อย 1km/500m จริง) |
+| **#7** | 🟡 P2 สูง | **GeoTIFF พิกัดเลื่อนตำแหน่ง 1 กิโลเมตร** | [`src/evaluation/visualizer.py`](file:///e:/water-analysis-project/dust-prediction-satelite/src/evaluation/visualizer.py) | ใช้ Centroid ใน `from_origin` ทำให้แผนที่ GeoTIFF เลื่อนตำแหน่งไปครึ่งพิกเซล (1,000m) เมื่อเปิดซ้อนกับภาพดาวเทียม | ✅ **แก้ไขแล้ว** (คำนวณ Outer Bounding Corner) |
+| **#8** | 🟡 P2 สูง | **สูตร `dist_coast_km` ใช้พิกัดสมมุติหยาบ** | [`src/features/grid_engine.py`](file:///e:/water-analysis-project/dust-prediction-satelite/src/features/grid_engine.py) | คำนวณระยะจากจุดเดียว ทำให้ภาคตะวันออกที่ติดทะเลถูกมองเป็นพื้นที่แผ่นดินลึก 100-180 กม. | ✅ **แก้ไขแล้ว** (ใช้ Polyline KDTree 362 จุด) |
+| **#9** | 🟢 P3 ปานกลาง | **DEM 30m Zonal Stats ยังไม่ได้สกัดจาก GeoTIFF จริง** | [`src/features/grid_engine.py`](file:///e:/water-analysis-project/dust-prediction-satelite/src/features/grid_engine.py) | ขาดการสกัด `elevation_std` (Roughness) และเวกเตอร์ลาดชันจาก GeoTIFF 30m ตามแผนงาน | ✅ **แก้ไขแล้ว** (สกัดจาก Copernicus DEM DSM จริง) |
+| **#10** | 🟢 P3 ปานกลาง | **OpenAQ มีเฉพาะสถานีใน กทม. 5 แห่ง** | [`src/data/openaq_loader.py`](file:///e:/water-analysis-project/dust-prediction-satelite/src/data/openaq_loader.py) | ขาดแคลนสถานีย้อนหลังในภาคเหนือ (เชียงใหม่, ลำปาง) ทำให้โมเดล Overfit กับพื้นที่กรุงเทพฯ | ✅ **แก้ไขแล้ว** (เชื่อมต่อ API Key ดึง 618 สถานีทั่วประเทศ) |
+| **#11** | 🟢 P3 ปานกลาง | **ขาดโมดูลเชื่อมต่อ DustBoy CCDC API** | [`src/data/ground_truth_loader.py`](file:///e:/water-analysis-project/dust-prediction-satelite/src/data/ground_truth_loader.py) | เซนเซอร์ขนาดเล็กของ DustBoy มีความคลาดเคลื่อนสูง ไม่เสถียรเท่าเครื่องวัดมาตรฐาน คพ. | 🚫 **ยกเลิกไม่ใช้งาน** (อิงข้อมูล Air4Thai + OpenAQ 100%) |
+| **#12** | 🟢 P3 ปานกลาง | **LightGBM Deprecation Warning (`eval_set`)** | [`src/models/lgbm_model.py`](file:///e:/water-analysis-project/dust-prediction-satelite/src/models/lgbm_model.py) | มีคำเตือนเตือน Deprecation 25 จุดขณะรัน Fit | ✅ **แก้ไขแล้ว** (ใช้ `eval_X` และ `eval_y`) |
+
+---
+
+> สำหรับคำอธิบายเชิงลึก, ตัวอย่างโค้ดที่มีปัญหา, ผลกระทบทางฟิสิกส์บรรยากาศ และแนวทางแก้ไขโค้ด อ่านฉบับเต็มได้ที่ [`code_audit_issues_and_remediation.md`](file:///e:/water-analysis-project/dust-prediction-satelite/ai-docs/code_audit_issues_and_remediation.md)
