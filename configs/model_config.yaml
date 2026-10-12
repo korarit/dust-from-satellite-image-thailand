@@ -1,0 +1,86 @@
+# ==============================================================================
+# Model Suite & Ensemble Hyperparameters (Phase 4)
+# Thailand Dust Prediction Satellite (Multi-Resolution PM2.5 Nowcasting)
+# ==============================================================================
+
+general:
+  target_column: "observed_pm25"
+  random_state: 42
+  cv_splits: 5
+  eval_metric: "mae"
+  train_split_cutoff: "2026-01-01"
+
+features:
+  # Physics Monotonicity Constraints:
+  # -1 : Feature increase -> Predicted PM2.5 decrease
+  # +1 : Feature increase -> Predicted PM2.5 increase
+  monotonic_constraints:
+    pressure_grad_mag: -1   # Calm atmospheric conditions (lower ||∇P||) -> higher dust accumulation
+    btd_15_13: -1           # Stronger negative split-window (dust absorption signature) -> higher PM2.5
+
+models:
+  lightgbm:
+    objective: "regression_l1"
+    metric: "mae"
+    learning_rate: 0.03
+    num_leaves: 63
+    max_depth: -1
+    feature_fraction: 0.8
+    bagging_fraction: 0.8
+    bagging_freq: 5
+    min_child_samples: 20
+    n_estimators: 800
+    random_state: 42
+    n_jobs: -1
+    verbose: -1
+
+  catboost:
+    loss_function: "MAE"
+    eval_metric: "MAE"
+    learning_rate: 0.04
+    depth: 6
+    l2_leaf_reg: 5.0
+    iterations: 800
+    random_seed: 42
+    thread_count: -1
+    verbose: 0
+
+  xgboost:
+    objective: "reg:absoluteerror"
+    eval_metric: "mae"
+    learning_rate: 0.03
+    max_depth: 6
+    subsample: 0.85
+    colsample_bytree: 0.8
+    tree_method: "hist"
+    n_estimators: 800
+    random_state: 42
+    n_jobs: -1
+
+  random_forest:
+    n_estimators: 300
+    max_depth: 16
+    max_features: "sqrt"
+    min_samples_split: 5
+    min_samples_leaf: 2
+    random_state: 42
+    n_jobs: -1
+
+ensemble:
+  method: "stacking"          # Stacking with Non-Negative Least Squares (NNLS)
+  meta_learner: "nnls"        # Options: "nnls", "ridge"
+  enforce_non_negative: true  # Enforce w_i >= 0
+  enforce_sum_to_one: true    # Enforce sum(w_i) = 1.0
+  ridge_alpha: 1.0
+
+benchmark:
+  resolutions:
+    - 3.0
+    - 2.0
+    - 1.0
+    - 0.5
+  experiment_names:
+    "3.0": "EXP-3KM"
+    "2.0": "EXP-2KM"
+    "1.0": "EXP-1KM"
+    "0.5": "EXP-500M"

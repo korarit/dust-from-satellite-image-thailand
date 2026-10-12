@@ -1,0 +1,30 @@
+spatial:
+  crs: "EPSG:32647"
+  region_name: "thailand"
+  bbox:
+    lat_min: 5.5
+    lat_max: 20.5
+    lon_min: 97.0
+    lon_max: 106.0
+  resolution_km: 2.0
+  resolutions_benchmark:
+    - 3.0
+    - 2.0
+    - 1.0
+    - 0.5
+
+himawari:
+  satellite_default: "H09"
+  cutover_utc: "2022-12-13 05:00:00"
+  segments: [3, 4, 5]
+  bands:
+    - "B07"
+    - "B08"
+    - "B09"
+    - "B10"
+    - "B11"
+    - "B12"
+    - "B13"
+    - "B14"
+    - "B15"
+    - "B16"

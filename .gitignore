@@ -1,0 +1,24 @@
+# Byte-compiled / optimized / test caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+catboost_info/
+*.log
+
+# Virtual environment & IDE
+.venv/
+venv/
+env/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Heavy data caches and raw raster downloads
+data/cache/
+data/geo/dem/
+*.DAT
+
+# Model binaries (weights)
+*.joblib

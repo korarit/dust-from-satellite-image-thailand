@@ -1,0 +1,60 @@
+himawari:
+  s3_bucket_h9: "noaa-himawari9"
+  s3_bucket_h8: "noaa-himawari8"
+  region: "us-east-1"
+  bands:
+    - "B07"
+    - "B08"
+    - "B09"
+    - "B10"
+    - "B11"
+    - "B12"
+    - "B13"
+    - "B14"
+    - "B15"
+    - "B16"
+  segments: [3, 4, 5]
+  physical_bounds:
+    kelvin_min: 150.0
+    kelvin_max: 350.0
+
+hii:
+  catalog_urls:
+    pressure: "https://tiservice.hii.or.th/opendata/data_catalog/pressure"
+    humidity: "https://tiservice.hii.or.th/opendata/data_catalog/humidity"
+  timezone_offset_hours: 7.0  # ICT = UTC + 7 -> UTC = ICT - 7
+  physical_bounds:
+    pressure_min_hpa: 850.0
+    pressure_max_hpa: 1050.0
+    humidity_min_pct: 0.0
+    humidity_max_pct: 100.0
+  sentinel_values:
+    - -999.0
+    - -9999.0
+    - 9999.0
+
+target:
+  pcd_api_url: "http://air4thai.pcd.go.th/services/getNewAQI_JSON.php"
+  dustboy_api_url: "https://www.cmuccdc.org/api/ccdc/stations"
+  openaq:
+    s3_bucket: "openaq-data-archive"
+    api_url: "https://api.openaq.org/v3"
+    api_key: "3e9769688ce05126a2db31d3abbe82c672c3eec5c135013d3ab498cf1017e950"
+    country_id: 111
+    region: "us-east-1"
+  physical_bounds:
+    pm25_min: 0.0
+    pm25_max: 500.0
+  stuck_sensor_max_hours: 6
+  hourly_aggregation: true
+
+provenance:
+  enforce_zero_mock: true
+  allowed_sources:
+    - "noaa-himawari9"
+    - "noaa-himawari8"
+    - "tiservice.hii.or.th"
+    - "air4thai.pcd.go.th"
+    - "openaq-data-archive"
+    - "cmuccdc.org"
+    - "Copernicus_GLO_30"
