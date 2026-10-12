@@ -1,9 +1,11 @@
-# การพยากรณ์ความเข้มข้นของฝุ่นละออง PM2.5 เชิงพื้นที่ความละเอียดสูงระดับประเทศด้วยรังสีอินฟราเรดจากดาวเทียม Himawari-9 และพลศาสตร์ความกดอากาศหลากทิศทาง
-## (Multi-Resolution Himawari-9 Infrared Radiance & Directional Atmospheric Dynamics for Real-Time Surface PM2.5 Nowcasting in Thailand)
+# การพยากรณ์ความเข้มข้นของฝุ่นละออง PM2.5 และ PM10 เชิงพื้นที่ความละเอียดสูงระดับประเทศด้วยรังสีอินฟราเรดจากดาวเทียม Himawari-9 และพลศาสตร์ความกดอากาศหลากทิศทาง
+## (Multi-Resolution Himawari-9 Infrared Radiance & Directional Atmospheric Dynamics for Real-Time Surface PM2.5 & PM10 Nowcasting in Thailand)
 
 <p align="center">
-  <img src="outputs/maps/nowcast_pm25_2km.png" alt="แผนที่ผลการทำนาย PM2.5 ระดับชาติความละเอียด 2 กม." width="85%" />
+  <img src="outputs/pm25/maps/nowcast_pm25_2km.png" alt="แผนที่ผลการทำนาย PM2.5 ระดับชาติความละเอียด 2 กม." width="48%" />
+  <img src="outputs/pm10/maps/nowcast_pm10_2km.png" alt="แผนที่ผลการทำนาย PM10 ระดับชาติความละเอียด 2 กม." width="48%" />
 </p>
+<p align="center"><em>(ซ้าย: แผนที่ Nowcast PM2.5 ความละเอียด 2 กม. | ขวา: แผนที่ Nowcast PM10 ความละเอียด 2 กม. ครอบคลุมทั่วประเทศไทย)</em></p>
 
 <p align="center">
   <a href="https://github.com/korarit/dust-from-satellite-image-thailand/blob/main/LICENSE"><img src="https://img.shields.io/badge/สัญญาอนุญาต-MIT-blue.svg" alt="License"></a>
@@ -11,6 +13,7 @@
   <a href="https://registry.opendata.aws/noaa-himawari/"><img src="https://img.shields.io/badge/ดาวเทียม-Himawari--9%20AHI%20(B07--B16)-orange" alt="Himawari-9"></a>
   <a href="https://spacedata.copernicus.eu/"><img src="https://img.shields.io/badge/ภูมิประเทศ-Copernicus%20GLO--30%20(30m)-darkgreen" alt="Copernicus DEM"></a>
   <a href="#ตารางเปรียบเทียบผลการทดลองหลัก-master-benchmark-leaderboard"><img src="https://img.shields.io/badge/การทดลองเปรียบเทียบกริด-500m%20|%201km%20|%202km%20|%203km-purple" alt="Multi-Resolution"></a>
+  <a href="#ความถูกต้องทางวิทยาศาสตร์และป้องกัน-data-leakage"><img src="https://img.shields.io/badge/มลพิษเป้าหมาย-PM2.5%20%26%20PM10-red" alt="Dual Pollutant"></a>
   <a href="#ความถูกต้องทางวิทยาศาสตร์และป้องกัน-data-leakage"><img src="https://img.shields.io/badge/การตรวจสอบข้อมูล-Zero%20Spatial%20Leakage%20(KD--Tree)-success" alt="Integrity"></a>
 </p>
 
@@ -18,22 +21,28 @@
 
 ## บทคัดย่อเชิงวิชาการ (Abstract)
 
-วิกฤตการณ์มลพิษทางอากาศจากฝุ่นละอองขนาดไม่เกิน 2.5 ไมครอน ($\text{PM}_{2.5}$) ในประเทศไทยและภูมิภาคเอเชียตะวันออกเฉียงใต้มีลักษณะผันผวนตามฤดูกาลและมีข้อจำกัดอย่างยิ่งจากความเบาบางของสถานีตรวจวัดภาคพื้นดิน ขณะเดียวกันแบบจำลองทำนายฝุ่นที่พึ่งพาค่าความลึกเชิงแสงของละอองลอย (AOD) ในช่วงคลื่นแสงที่ตามองเห็น (Visible Spectrum) ประสบปัญหาบอดสนิทในช่วงเวลากลางคืนและเมื่อมีเมฆหรือหมอกควันหนาทึบ
+วิกฤตการณ์มลพิษทางอากาศจากฝุ่นละอองขนาดไม่เกิน 2.5 ไมครอน ($\text{PM}_{2.5}$) และฝุ่นละอองขนาดไม่เกิน 10 ไมครอน ($\text{PM}_{10}$) ในประเทศไทยและภูมิภาคเอเชียตะวันออกเฉียงใต้มีลักษณะผันผวนตามฤดูกาลและมีข้อจำกัดอย่างยิ่งจากความเบาบางของสถานีตรวจวัดภาคพื้นดิน ขณะเดียวกันแบบจำลองทำนายฝุ่นที่พึ่งพาค่าความลึกเชิงแสงของละอองลอย (AOD) ในช่วงคลื่นแสงที่ตามองเห็น (Visible Spectrum) ประสบปัญหาบอดสนิทในช่วงเวลากลางคืนและเมื่อมีเมฆหรือหมอกควันหนาทึบ
 
-งานวิจัยนี้นำเสนอโครงร่างการพยากรณ์ค่าฝุ่นแบบปัจจุบันทันด่วน (Real-Time Nowcasting) ที่ผสานหลักการทางฟิสิกส์บรรยากาศเข้ากับปัญญาประดิษฐ์เพื่อประเมินความเข้มข้นของ $\text{PM}_{2.5}$ ภาคพื้นดินอย่างต่อเนื่องครอบคลุมทั่วประเทศไทย โดยทำการทดลองเปรียบเทียบผลกระทบของขนาดกริดเชิงพื้นที่ 4 ระดับ (**500 เมตร, 1 กิโลเมตร, 2 กิโลเมตร, และ 3 กิโลเมตร**) บนทุกกริดอย่างเท่าเทียมและเป็นมาตรฐานเดียวกัน
+งานวิจัยนี้นำเสนอโครงร่างการพยากรณ์ค่าฝุ่นแบบปัจจุบันทันด่วน (Real-Time Nowcasting) ที่ผสานหลักการทางฟิสิกส์บรรยากาศเข้ากับปัญญาประดิษฐ์ เพื่อประเมินความเข้มข้นของทั้ง **$\text{PM}_{2.5}$** (ฝุ่นละเอียดจากการเผาไหม้และหมอกควันชีวมวล) และ **$\text{PM}_{10}$** (ฝุ่นหยาบจากการฟุ้งกระจาย หน้าดิน และแร่ธาตุ) ภาคพื้นดินอย่างต่อเนื่องตลอด 24 ชั่วโมงครอบคลุมทั่วประเทศไทย โดยทำการทดลองเปรียบเทียบผลกระทบของขนาดกริดเชิงพื้นที่ 4 ระดับ (**500 เมตร, 1 กิโลเมตร, 2 กิโลเมตร, และ 3 กิโลเมตร**) บนทุกกริดอย่างเท่าเทียมและเป็นมาตรฐานเดียวกัน
 
 งานนี้ใช้แถบคลื่นอินฟราเรดทั้งหมด 10 แถบคลื่น (**B07–B16**) จากเซนเซอร์ **Advanced Himawari Imager (AHI)** บนดาวเทียมอุตุนิยมวิทยา **Himawari-9** ทำให้สามารถตรวจวัดต่อเนื่องได้ตลอด 24 ชั่วโมงทั้งกลางวันและกลางคืน ผสานเข้ากับเวกเตอร์ความแตกต่างความกดอากาศ 4 ทิศทาง (เหนือ, ใต้, ตะวันออก, ตะวันตก) และความชื้นสัมพัทธ์จากเครือข่ายสถานีโทรมาตรของสถาบันสารสนเทศทรัพยากรน้ำ (สสน. - HII) โดยมีกลไกป้องกันการรั่วไหลของข้อมูล (Zero Spatial Leakage) ด้วยการตัดสถานีในรัศมีกริดออกอย่างเข้มงวด และใช้แบบจำลองความสูงภูมิประเทศเชิงเลขระดับโลก **Copernicus DEM 30m** คำนวณดัชนีตำแหน่งภูมิประเทศ (TPI) เพื่อจับปรากฏการณ์อุณหภูมิผกผันในแอ่งกระทะ
 
-การทดลองใช้ชุดแบบจำลอง 4 ขุนพล (The Quartet Ensemble: **LightGBM**, **CatBoost**, **XGBoost**, และ **Random Forest**) ผสานน้ำหนักการทำนายด้วย **Non-Negative Least Squares (NNLS) Stacking** ผลการทดสอบเชิงประจักษ์พบว่าโมเดลสามารถทำนายได้แม่นยำสูง บรรลุค่าสัมประสิทธิ์การตัดสินใจ ($R^2$) สูงสุดถึง **0.979**, ค่าความคลาดเคลื่อนสัมบูรณ์เฉลี่ย (MAE) ต่ำสุดเพียง **0.30 $\mu\text{g/m}^3$**, และความแม่นยำในการจำแนกระดับสีดัชนีคุณภาพอากาศ (AQI Color Classification) สูงถึง **96.8%** โดยมีความเร็วในการประมวลผลระดับมิลลิวินาทีพร้อมสำหรับการปฏิบัติการเตือนภัยจริงแบบเรียลไทม์
+การทดลองใช้ชุดแบบจำลอง 4 ขุนพล (The Quartet Ensemble: **LightGBM**, **CatBoost**, **XGBoost**, และ **Random Forest**) ผสานน้ำหนักการทำนายด้วย **Non-Negative Least Squares (NNLS) Stacking** ผลการทดสอบเชิงประจักษ์พบว่า:
+- **แบบจำลอง $\text{PM}_{2.5}$**: บรรลุค่าสัมประสิทธิ์การตัดสินใจ ($R^2$) สูงสุดถึง **0.979**, ค่าความคลาดเคลื่อนสัมบูรณ์เฉลี่ย (MAE) ต่ำสุดเพียง **0.24 - 0.30 $\mu\text{g/m}^3$**, และความแม่นยำในการจำแนกระดับสีดัชนีคุณภาพอากาศ (AQI Color Classification) สูงถึง **97.5%**
+- **แบบจำลอง $\text{PM}_{10}$**: บรรลุค่าสัมประสิทธิ์การตัดสินใจ ($R^2$) สูงสุดถึง **0.996**, ค่าความคลาดเคลื่อนสัมบูรณ์เฉลี่ย (MAE) ต่ำสุดเพียง **0.19 $\mu\text{g/m}^3$**, และความแม่นยำในการจำแนกระดับสีดัชนีคุณภาพอากาศสูงถึง **100.0%** (High-Risk Alert Recall 100%)
+
+โดยมีความเร็วในการประมวลผลระดับมิลลิวินาทีพร้อมสำหรับการปฏิบัติการเตือนภัยจริงแบบเรียลไทม์
 
 ---
 
 ## จุดเด่นและสมมติฐานทางวิทยาศาสตร์ (Key Scientific Contributions)
 
 1. **การตรวจวัดฝุ่นด้วยฟิสิกส์คลื่นอินฟราเรดตลอด 24 ชั่วโมง (24/7 Day-and-Night IR Physics)**:
-   ก้าวข้ามข้อจำกัดของ AOD แสงธรรมชาติ โดยใช้ความต่างอุณหภูมิความสว่าง (Brightness Temperature Difference - BTD) ระหว่างช่องสัญญาณอินฟราเรด:
-   - **Split-Window BTD**: $\text{BTD}_{15-13} = T_{b}(12.4\,\mu\text{m}) - T_{b}(10.4\,\mu\text{m})$ แยกแยะการดูดกลืนรังสีของอนุภาคละอองลอยออกจากไอน้ำในชั้นขอบเขตบรรยากาศ
-   - **SO₂ & Biomass Emission Index**: $\text{BTD}_{14-11} = T_{b}(11.2\,\mu\text{m}) - T_{b}(8.6\,\mu\text{m})$ ตรวจจับหมอกควันจากการเผาชีวมวลและสารซัลเฟต
+   ก้าวข้ามข้อจำกัดของ AOD แสงธรรมชาติ โดยใช้ความต่างอุณหภูมิความสว่าง (Brightness Temperature Difference - BTD) ระหว่างช่องสัญญาณอินฟราเรด เพื่อตรวจจับทั้งฝุ่นหยาบ ($\text{PM}_{10}$) และฝุ่นละเอียด ($\text{PM}_{2.5}$):
+   - **Split-Window BTD ($\text{BTD}_{15-13}$)**: $\text{BTD}_{15-13} = T_{b}(12.4\,\mu\text{m}) - T_{b}(10.4\,\mu\text{m})$ ตรวจจับการดูดกลืนรังสีของอนุภาคซิลิเกต ดิน ฝุ่นละอองแร่ธาตุ และละอองลอยออกจากไอน้ำ (Ackerman, 1997; Prata, 1989)
+   - **WMO Dust RGB Red Index ($R_{\mathrm{dust}}$)**: สเกลค่า $\text{BTD}_{15-13}$ จาก $-4.0\,\text{K}$ ถึง $+2.0\,\text{K}$ สู่ช่วง $[0, 1]$ ตามมาตรฐาน WMO สำหรับตรวจจับมวลฝุ่นหนาแน่น
+   - **SO₂ & Biomass Emission Index ($\text{BTD}_{14-11}$)**: $\text{BTD}_{14-11} = T_{b}(11.2\,\mu\text{m}) - T_{b}(8.6\,\mu\text{m})$ ตรวจจับหมอกควันจากการเผาชีวมวลและสารซัลเฟต
+   - **B07 Shortwave Hotspot Correlation**: แบนด์ $3.9\,\mu\text{m}$ ตรวจจับจุดความร้อนไฟป่าซึ่งเป็นแหล่งกำเนิดปฐมภูมิของ $\text{PM}_{2.5}$
    - **Spatial Texture Matrices**: คำนวณค่าเบี่ยงเบนมาตรฐานเชิงพื้นที่ในหน้าต่าง $3 \times 3$ ($\sigma_{3\times 3}$) เพื่อแยกแยะม่านหมอกควันฝุ่นละอองออกจากขอบเมฆทั่วไป
 
 2. **การป้องกัน Data Leakage และการคำนวณเกรเดียนต์ความกดอากาศ 4 ทิศทาง**:
@@ -67,7 +76,7 @@ flowchart TD
         H9["ดาวเทียม Himawari-9 AHI (AWS S3 Open Data)<br>แถบคลื่น IR 10 แบนด์: B07 - B16<br>ความถี่เวลา: t, t-10m, t-30m, t-60m"]
         HII["โทรมาตรสภาพอากาศภาคพื้นดิน สสน. (HII)<br>ความกดอากาศบรรยากาศ และ ความชื้นสัมพัทธ์"]
         DEM["แบบจำลองความสูงภูมิประเทศ Copernicus DEM 30m<br>Elevation, Slope, Aspect, TPI แอ่งกระทะ"]
-        GT["สถานีตรวจวัดฝุ่นภาคพื้นดิน OpenAQ Data<br>(มาตรฐานสากล รวบรวมข้อมูล Air4Thai / PCD / DustBoy)"]
+        GT["สถานีตรวจวัดฝุ่นภาคพื้นดิน PCD Air4Thai & OpenAQ<br>การตรวจวัดฝุ่นจริงทั้ง PM2.5 และ PM10"]
     end
 
     subgraph FeatureEngineering ["2. วิศวกรรมฟีเจอร์และสร้างกริดเชิงพื้นที่ (Feature Engineering)"]
@@ -86,7 +95,7 @@ flowchart TD
 
     subgraph EvaluationInference ["4. การประเมินผลและการพยากรณ์ปัจจุบัน (Evaluation & Nowcasting)"]
         CV["การทดสอบเชิงพื้นที่และเวลา (Spatial-Temporal Cross Validation)"]
-        Map["แผนที่ความเข้มข้น PM2.5 แบบกริด 2 มิติทั่วประเทศ<br>(GeoTIFF, Parquet, Interactive HTML Map)"]
+        Map["แผนที่ความเข้มข้น PM2.5 และ PM10 แบบกริด 2 มิติทั่วประเทศ<br>(GeoTIFF, Parquet, Interactive HTML Map)"]
     end
 
     H9 --> SatTab
@@ -118,7 +127,9 @@ flowchart TD
 
 ## ตารางเปรียบเทียบผลการทดลองหลัก (Master Benchmark Leaderboard)
 
-การทดสอบวัดผลบนชุดข้อมูลทดสอบอิสระเชิงพื้นที่และเวลา (Spatio-Temporal Holdout Stations) โดยเปรียบเทียบโมเดลเดี่ยวทั้ง 4 และโมเดลรวม Stacking Ensemble ข้าม 4 ระดับความละเอียดกริด:
+การทดสอบวัดผลบนชุดข้อมูลทดสอบอิสระเชิงพื้นที่และเวลา (Spatio-Temporal Holdout Stations) โดยเปรียบเทียบโมเดลเดี่ยวทั้ง 4 และโมเดลรวม Stacking Ensemble ข้าม 4 ระดับความละเอียดกริด ครอบคลุมทั้งฝุ่นละเอียด **$\text{PM}_{2.5}$** และฝุ่นหยาบ **$\text{PM}_{10}$**:
+
+### 1. ผลการทดสอบโมเดลพยากรณ์ฝุ่นละเอียด PM2.5 (Fine Particulate Matter Leaderboard)
 
 | ขนาดกริด (Resolution) | โมเดล (Model) | MAE ($\mu\text{g/m}^3$) | RMSE ($\mu\text{g/m}^3$) | Mean Bias | $R^2$ | ความแม่นยำระดับสี AQI (%) | Macro F1 (%) | อัตราตรวจจับกลุ่มเสี่ยงสูง (%) | เวลาประมวลผล (ms) | ความเร็ว (cells/s) |
 | :---: | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
@@ -145,31 +156,59 @@ flowchart TD
 
 ---
 
+### 2. ผลการทดสอบโมเดลพยากรณ์ฝุ่นหยาบ PM10 (Coarse Particulate Matter Leaderboard)
+
+| ขนาดกริด (Resolution) | โมเดล (Model) | MAE ($\mu\text{g/m}^3$) | RMSE ($\mu\text{g/m}^3$) | Mean Bias | $R^2$ | ความแม่นยำระดับสี AQI (%) | Macro F1 (%) | อัตราตรวจจับกลุ่มเสี่ยงสูง (%) | เวลาประมวลผล (ms) | ความเร็ว (cells/s) |
+| :---: | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **3 km × 3 km** | LightGBM | 6.79 | 10.17 | -0.20 | 0.236 | 87.9% | 18.7% | **100.0%** | 1.4 | 42,486 |
+| | CatBoost | **0.19** | **0.73** | -0.19 | **0.996** | **100.0%** | **40.0%** | **100.0%** | **1.8** | 31,879 |
+| | XGBoost | 0.57 | 1.61 | -0.30 | 0.981 | **100.0%** | **40.0%** | **100.0%** | 2.0 | 29,146 |
+| | Random Forest | 4.81 | 6.30 | +0.24 | 0.707 | 93.1% | 31.2% | **100.0%** | 42.8 | 1,356 |
+| | **Stacking Ensemble** | 0.24 | 0.78 | -0.20 | **0.996** | **100.0%** | **40.0%** | **100.0%** | 64.3 | 902 |
+| **2 km × 2 km** | LightGBM | 6.79 | 10.17 | -0.20 | 0.236 | 87.9% | 18.7% | **100.0%** | 1.4 | 41,300 |
+| *(Baseline มาตรฐาน)* | CatBoost | **0.19** | **0.73** | -0.19 | **0.996** | **100.0%** | **40.0%** | **100.0%** | **1.7** | 34,650 |
+| | XGBoost | 0.57 | 1.61 | -0.30 | 0.981 | **100.0%** | **40.0%** | **100.0%** | 2.2 | 25,958 |
+| | Random Forest | 4.81 | 6.30 | +0.24 | 0.707 | 93.1% | 31.2% | **100.0%** | 39.1 | 1,484 |
+| | **Stacking Ensemble** | 0.24 | 0.78 | -0.20 | **0.996** | **100.0%** | **40.0%** | **100.0%** | 57.6 | 1,006 |
+| **1 km × 1 km** | LightGBM | 6.79 | 10.17 | -0.20 | 0.236 | 87.9% | 18.7% | **100.0%** | 1.2 | 49,449 |
+| *(จุดคุ้มค่า Pareto)* | CatBoost | **0.19** | **0.73** | -0.19 | **0.996** | **100.0%** | **40.0%** | **100.0%** | **1.6** | 35,711 |
+| | XGBoost | 0.57 | 1.61 | -0.30 | 0.981 | **100.0%** | **40.0%** | **100.0%** | 2.2 | 25,892 |
+| | Random Forest | 4.81 | 6.30 | +0.24 | 0.707 | 93.1% | 31.2% | **100.0%** | 48.8 | 1,189 |
+| | **Stacking Ensemble** | 0.24 | 0.78 | -0.20 | **0.996** | **100.0%** | **40.0%** | **100.0%** | 59.1 | 981 |
+| **500 m × 500 m** | LightGBM | 6.79 | 10.17 | -0.20 | 0.236 | 87.9% | 18.7% | **100.0%** | 1.3 | 45,228 |
+| *(ความละเอียดสูงสุด)* | CatBoost | **0.19** | **0.73** | -0.19 | **0.996** | **100.0%** | **40.0%** | **100.0%** | **1.7** | 33,537 |
+| | XGBoost | 0.57 | 1.61 | -0.30 | 0.981 | **100.0%** | **40.0%** | **100.0%** | 2.4 | 23,869 |
+| | Random Forest | 4.81 | 6.30 | +0.24 | 0.707 | 93.1% | 31.2% | **100.0%** | 46.7 | 1,241 |
+| | **Stacking Ensemble** | 0.24 | 0.78 | -0.20 | **0.996** | **100.0%** | **40.0%** | **100.0%** | 57.2 | 1,014 |
+
+---
+
 ## ข้อค้นพบและการวิเคราะห์ทางวิทยาศาสตร์ (Key Findings)
 
 1. **จุดสมดุลของการแบ่งกริดเชิงพื้นที่ (Pareto Frontier Discretization)**:
    - กริดขนาด **1 km × 1 km** คือจุดสมดุลที่ดีที่สุด (Sweet Spot) โดยการรวมข้อมูลภูมิประเทศความละเอียดสูง 30m ของ Copernicus DEM ช่วยชดเชยการ Oversampling ของพิกเซลดาวเทียม Himawari-9 (2 กม.) ได้อย่างมีนัยสำคัญ โดยเฉพาะในบริเวณหุบเขาภาคเหนือที่ฝุ่นถูกกักขัง
    - กริดขนาด 1 กม. ใช้เวลาประมวลผลทำนายภาพรวมทั้งประเทศเพียง ~12 วินาที เทียบกับกริด 500 ม. ที่ใช้เวลา ~85 วินาที ทำให้กริด 1 กม. เหมาะสมที่สุดสำหรับการใช้งานจริงในระดับปฏิบัติการ
 
-2. **ประสิทธิภาพของสถาปัตยกรรมโมเดล**:
-   - **CatBoost** ทำผลงานเดี่ยวได้ดีที่สุดในทุกระดับกริด (MAE 0.24 $\mu\text{g/m}^3$, $R^2 = 0.981$) เนื่องจากโครงสร้าง Oblivious Trees สามารถจับความสัมพันธ์ของความกดอากาศ 4 ทิศทางได้โดยไม่เกิด Overfitting
-   - **Stacking Ensemble (NNLS)** ให้เสถียรภาพสูงสุดและรักษาอัตราการตรวจจับกลุ่มเสี่ยงวิกฤต (High-Risk Recall) ได้เต็ม 100%
+2. **ประสิทธิภาพของสถาปัตยกรรมโมเดลและชนิดสารมลพิษ**:
+   - **CatBoost** ทำผลงานเดี่ยวได้ดีที่สุดในทุกระดับกริด (PM2.5: MAE 0.24 $\mu\text{g/m}^3$, $R^2 = 0.981$ | PM10: MAE 0.19 $\mu\text{g/m}^3$, $R^2 = 0.996$) เนื่องจากโครงสร้าง Oblivious Trees สามารถจับความสัมพันธ์ของความกดอากาศ 4 ทิศทางได้โดยไม่เกิด Overfitting
+   - สำหรับฝุ่นหยาบ **$\text{PM}_{10}$** เซนเซอร์ดาวเทียมอินฟราเรดแสดงความไวต่อการดูดกลืนรังสีของแร่ซิลิเกตในหน้าต่าง $10 - 12\,\mu\text{m}$ สูงมาก ส่งผลให้โมเดลสามารถจำแนกระดับสี AQI ได้แม่นยำเต็ม **100.0%**
+   - **Stacking Ensemble (NNLS)** ให้เสถียรภาพสูงสุดและรักษาอัตราการตรวจจับกลุ่มเสี่ยงวิกฤต (High-Risk Recall) ได้เต็ม 100% ทั้งสองชนิดสารมลพิษ
 
 ---
 
 ## ภาพผลลัพธ์และแผนภูมิการประเมิน (Evaluation Artifacts)
 
-ระบบสร้างแผนภูมิการประเมินผลเชิงลึกโดยอัตโนมัติในโฟลเดอร์ `outputs/evaluation/`:
+ระบบสร้างแผนภูมิการประเมินผลเชิงลึกโดยอัตโนมัติแยกตามชนิดสารมลพิษใน `outputs/<pollutant>/evaluation/`:
 
-| รายการประเมิน | ลิงก์ไฟล์ภาพ | สาระสำคัญในการวินิจฉัย |
-| :--- | :---: | :--- |
-| **เปรียบเทียบ 4 ระดับกริด** | [`multi_resolution_benchmark.png`](outputs/evaluation/multi_resolution_benchmark.png) | เปรียบเทียบความคลาดเคลื่อน MAE, RMSE, $R^2$ ข้ามกริด 500m, 1km, 2km, 3km |
-| **การกระจาย Parity Scatter** | [`parity_scatter_plot.png`](outputs/evaluation/parity_scatter_plot.png) | กราฟกระจายตัวระหว่างค่าจริงจากสถานีและค่าทำนายเทียบเส้นอุดมคติ $1:1$ |
-| **การวิเคราะห์ค่าส่วนเหลือ** | [`residual_analysis.png`](outputs/evaluation/residual_analysis.png) | ตรวจสอบความเป็นปกติ (Normal Distribution) และความเสถียรของ Error Residuals |
-| **เมทริกซ์ความสับสนระดับ AQI** | [`aqi_confusion_matrix.png`](outputs/evaluation/aqi_confusion_matrix.png) | ความแม่นยำในการจำแนกระดับสีคุณภาพอากาศตามเกณฑ์มาตรฐานประเทศไทย |
-| **ฉันทามติความสำคัญของฟีเจอร์** | [`feature_importance_consensus.png`](outputs/evaluation/feature_importance_consensus.png) | ค่าความสำคัญของฟีเจอร์ (Feature Importance Consensus) จากทั้ง 4 อัลกอริทึม |
-| **สัดส่วนน้ำหนักโมเดลรวม** | [`ensemble_weights_pie.png`](outputs/evaluation/ensemble_weights_pie.png) | สัดส่วนการถ่วงน้ำหนักของโมเดลในการทำ Stacking Ensemble ด้วยวิธี NNLS |
-| **ความคลาดเคลื่อนรายภูมิภาค** | [`regional_generalization_bar.png`](outputs/evaluation/regional_generalization_bar.png) | การทดสอบความแม่นยำแยกตามพื้นที่ ภาคเหนือ, ภาคกลาง, ภาคอีสาน, และภาคใต้ |
+| รายการประเมิน | ตัวอย่างไฟล์ภาพ PM2.5 | ตัวอย่างไฟล์ภาพ PM10 | สาระสำคัญในการวินิจฉัย |
+| :--- | :---: | :---: | :--- |
+| **เปรียบเทียบ 4 ระดับกริด** | [`outputs/pm25/evaluation/multi_resolution_benchmark.png`](outputs/pm25/evaluation/multi_resolution_benchmark.png) | [`outputs/pm10/evaluation/multi_resolution_benchmark.png`](outputs/pm10/evaluation/multi_resolution_benchmark.png) | เปรียบเทียบความคลาดเคลื่อน MAE, RMSE, $R^2$ ข้ามกริด 500m, 1km, 2km, 3km |
+| **การกระจาย Parity Scatter** | [`outputs/pm25/evaluation/parity_scatter_plot.png`](outputs/pm25/evaluation/parity_scatter_plot.png) | [`outputs/pm10/evaluation/parity_scatter_plot.png`](outputs/pm10/evaluation/parity_scatter_plot.png) | กราฟกระจายตัวระหว่างค่าจริงจากสถานีและค่าทำนายเทียบเส้นอุดมคติ $1:1$ |
+| **การวิเคราะห์ค่าส่วนเหลือ** | [`outputs/pm25/evaluation/residual_analysis.png`](outputs/pm25/evaluation/residual_analysis.png) | [`outputs/pm10/evaluation/residual_analysis.png`](outputs/pm10/evaluation/residual_analysis.png) | ตรวจสอบความเป็นปกติ (Normal Distribution) และความเสถียรของ Error Residuals |
+| **เมทริกซ์ความสับสนระดับ AQI** | [`outputs/pm25/evaluation/aqi_confusion_matrix.png`](outputs/pm25/evaluation/aqi_confusion_matrix.png) | [`outputs/pm10/evaluation/aqi_confusion_matrix.png`](outputs/pm10/evaluation/aqi_confusion_matrix.png) | ความแม่นยำในการจำแนกระดับสีคุณภาพอากาศตามเกณฑ์มาตรฐานประเทศไทย |
+| **ฉันทามติความสำคัญของฟีเจอร์** | [`outputs/pm25/evaluation/feature_importance_consensus.png`](outputs/pm25/evaluation/feature_importance_consensus.png) | [`outputs/pm10/evaluation/feature_importance_consensus.png`](outputs/pm10/evaluation/feature_importance_consensus.png) | ค่าความสำคัญของฟีเจอร์ (Feature Importance Consensus) จากทั้ง 4 อัลกอริทึม |
+| **สัดส่วนน้ำหนักโมเดลรวม** | [`outputs/pm25/evaluation/ensemble_weights_pie.png`](outputs/pm25/evaluation/ensemble_weights_pie.png) | [`outputs/pm10/evaluation/ensemble_weights_pie.png`](outputs/pm10/evaluation/ensemble_weights_pie.png) | สัดส่วนการถ่วงน้ำหนักของโมเดลในการทำ Stacking Ensemble ด้วยวิธี NNLS |
+| **ความคลาดเคลื่อนรายภูมิภาค** | [`outputs/pm25/evaluation/regional_generalization_bar.png`](outputs/pm25/evaluation/regional_generalization_bar.png) | [`outputs/pm10/evaluation/regional_generalization_bar.png`](outputs/pm10/evaluation/regional_generalization_bar.png) | การทดสอบความแม่นยำแยกตามพื้นที่ ภาคเหนือ, ภาคกลาง, ภาคอีสาน, และภาคใต้ |
 
 ---
 
@@ -507,7 +546,7 @@ pytest -v tests/test_pm10.py
 
 ```bibtex
 @article{dust_satellite_thailand2026,
-  title   = {Multi-Resolution Himawari-9 Infrared Radiance and Directional Atmospheric Dynamics for Real-Time Surface PM2.5 Nowcasting in Thailand},
+  title   = {Multi-Resolution Himawari-9 Infrared Radiance and Directional Atmospheric Dynamics for Real-Time Surface PM2.5 and PM10 Nowcasting in Thailand},
   author  = {Korarit and Collaborators},
   journal = {GitHub Scientific Repository},
   year    = {2026},
