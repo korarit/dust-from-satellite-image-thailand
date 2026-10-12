@@ -114,6 +114,23 @@ def test_hii_loader_parsing_and_utc_alignment():
     assert first_row["value"] == 1012.5
 
 
+def test_hii_loader_2026_unified_schema():
+    """Verifies HII 2026 schema parsing with measure_datetime, pressure/humidity, and quality_flag."""
+    loader = HIIWeatherLoader()
+    sample_2026_csv = (
+        b"station_code,measure_datetime,pressure,quality_flag\n"
+        b"ACRU,2026-01-01 07:00:00,992.7,N\n"
+        b"ACRU,2026-01-01 08:00:00,-999.0,N\n"
+        b"ACRU,2026-01-01 09:00:00,993.1,N\n"
+    )
+    df = loader.parse_and_clean_csv(sample_2026_csv, "ACRU", "pressure")
+    assert len(df) == 2
+    assert df.iloc[0]["timestamp_utc"] == pd.Timestamp("2026-01-01 00:00:00")
+    assert df.iloc[0]["value"] == 992.7
+    assert df.iloc[1]["value"] == 993.1
+
+
+
 def test_ground_truth_stuck_sensor_detection():
     """Verifies stuck sensor filter drops identical values exceeding 6 consecutive hours."""
     loader = GroundTruthLoader()

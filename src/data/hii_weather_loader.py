@@ -152,10 +152,27 @@ class HIIWeatherLoader:
         if df.empty:
             return pd.DataFrame()
 
-        # Find date and time columns
+        # Find date and time columns (supports 2024-2025 separate date/time and 2026 unified measure_datetime)
         cols_lower = {c.lower().strip(): c for c in df.columns}
-        date_col = next((cols_lower[k] for k in ["date", "datetime", "timestamp"] if k in cols_lower), None)
-        time_col = next((cols_lower[k] for k in ["time"] if k in cols_lower), None)
+        
+        datetime_col = None
+        for k in ["measure_datetime", "measuredatetime", "datetime", "date_time", "timestamp"]:
+            if k in cols_lower:
+                datetime_col = cols_lower[k]
+                break
+
+        if datetime_col is None:
+            for k, orig in cols_lower.items():
+                if "datetime" in k or "timestamp" in k:
+                    datetime_col = orig
+                    break
+
+        if datetime_col is not None:
+            date_col = datetime_col
+            time_col = None
+        else:
+            date_col = next((cols_lower[k] for k in ["date", "dat", "date_str"] if k in cols_lower), None)
+            time_col = next((cols_lower[k] for k in ["time", "time_str"] if k in cols_lower), None)
 
         # Find value column
         val_col = None
@@ -165,9 +182,11 @@ class HIIWeatherLoader:
                 break
 
         if val_col is None:
-            # Fallback: choose the first numeric column other than date/time
+            # Fallback: choose first non-metadata column
+            excluded_names = {"station_code", "station", "quality_flag", "flag", "code"}
             for c in df.columns:
-                if c not in (date_col, time_col):
+                c_lower = c.lower().strip()
+                if c not in (date_col, time_col) and c_lower not in excluded_names:
                     val_col = c
                     break
 
