@@ -14,8 +14,8 @@
 
 ```mermaid
 flowchart TD
-    subgraph InputMatrix ["1. Unified Feature Matrix (N samples x 52 features)"]
-        F1["Satellite IR Features (BTs, BTDs, Texture, Dynamics)"]
+    subgraph InputMatrix ["1. Unified Feature Matrix (N samples x 48+ features)"]
+        F1["Core 5 Satellite IR Features (BTs: B07, B10, B11, B13, B15; BTDs: 15-13, 13-07, 13-10, 13-11; Texture, Dynamics)"]
         F2["Directional Atmospheric Telemetry (4 Quadrants, ||∇P||, ||∇RH||)"]
         F3["Copernicus DEM 30m Topography (Elevation, TPI, Slope, Aspect)"]
         F4["Solar Astronomy & Cyclical Time (SZA, Coriolis, Hour, Month)"]
@@ -90,6 +90,7 @@ flowchart TD
 
 ## 3. การบังคับข้อจำกัดทางฟิสิกส์แบบทางเดียว (Physics-Informed Monotonic Constraints)
 
+### 3.1 ตารางข้อจำกัดทางฟิสิกส์สำหรับแบบจำลอง (Monotonic Constraints Table)
 ในสภาวะจริงทางอุตุนิยมวิทยา มีฟีเจอร์บางประการที่มีทิศทางความสัมพันธ์กับความเข้มข้นของฝุ่นอย่างชัดเจนตามกฎเกณฑ์ฟิสิกส์บรรยากาศ หากปล่อยให้โมเดลเรียนรู้อย่างอิสระ อาจเกิดกรณีที่ต้นไม้ตัดสินใจทำนายสวนทางกับความเป็นจริงในพื้นที่ที่ข้อมูลเบาบาง ระบบจึงกำหนด **Monotonic Constraints** ให้แก่โมเดล LightGBM และ XGBoost:
 
 | ฟีเจอร์ (Feature) | ทิศทางบังคับ (Constraint) | เหตุผลและกฎทางฟิสิกส์บรรยากาศรองรับ |
@@ -97,6 +98,14 @@ flowchart TD
 | **ขนาดความชันความกดอากาศ ($\|\nabla P\|$)** | **$-1$ (ลดลงทางเดียว)** | เมื่อความชันความกดอากาศเข้าใกล้ศูนย์ ลมจะสงบนิ่ง เกิดสภาวะ **Air Stagnation** ฝุ่นต้องสะสมตัวเพิ่มขึ้นอย่างเคร่งครัด (Horton et al., 2014) |
 | **ผลต่างหน้าต่างคู่ ($BTD_{15-13}$)** | **$+1$ (เพิ่มขึ้นทางเดียว)** | การดูดกลืนรังสีของอนุภาคซิลิเกตที่ $10.4\,\mu\text{m}$ สูงกว่า $12.4\,\mu\text{m}$ เมื่อ $BTD_{15-13}$ ขยับจากลบเข้าสู่บวก สัดส่วนฝุ่นต้องเพิ่มขึ้น (Ackerman, 1997) |
 | **ดัชนีฝุ่นสีแดง ($R_{\mathrm{dust}}$ หรือ `dust_rgb_red`)** | **$+1$ (เพิ่มขึ้นทางเดียว)** | ดัชนีความหนาแน่นม่านฝุ่นมาตรฐาน WMO ยิ่งมีค่าสูง ฝุ่นภาคพื้นดินยิ่งต้องหนาแน่น |
+| **ดัชนีจุดความร้อนไฟป่า ($BTD_{13-07}$)** | **$-1$ (ลดลงทางเดียว)** | เมื่อผลต่างติดลบสูงมาก บ่งชี้การแผ่รังสีของเปลวไฟอุณหภูมิสูง (Hotspots) ซึ่งเป็นแหล่งกำเนิดปฐมภูมิของ $\text{PM}_{2.5}$ (Wooster et al., 2005) |
+| **ดัชนีไอน้ำโทรโพสเฟียร์ชั้นล่าง ($BTD_{13-10}$)** | **$-1$ (ลดลงทางเดียว)** | เมื่อความต่างอุณหภูมิระหว่างผิวโลกและบรรยากาศชั้นล่างลดลง บ่งชี้สภาวะอุณหภูมิผกผัน (Thermal Inversion Capping) ฝุ่นถูกกักขังใกล้ผิวดิน (Che et al., 2019) |
+
+### 3.2 การพยากรณ์ในโหมดดาวเทียมล้วน (Satellite-Only Physics Dependency)
+ในสภาวะที่ไม่มีข้อมูลสถานีโทรมาตรภาคพื้นดิน ($P, RH$ ขาดหายหรือไม่ครอบคลุม):
+- ระบบจะใช้ **$BTD_{13-10}$ (Lower Water Vapor / Lapse Rate)** เป็นตัวแทนของความชื้นและเสถียรภาพบรรยากาศ
+- ผสานกับ **Copernicus DEM 30m (TPI Index)** ในการระบุแอ่งกระทะกักฝุ่น
+- ทำให้โมเดลชุดแบบจำลอง 4 ขุนพลยังคงรักษาความแม่นยำทางฟิสิกส์ได้อย่างต่อเนื่องโดยไม่ต้องพึ่งพาเซนเซอร์อุตุนิยมวิทยาภาคพื้นดิน
 
 ---
 
@@ -193,5 +202,23 @@ flowchart TD
 8. **Ackerman, S. A.** (1997). "Remote sensing aerosols using satellite infrared observations". *Journal of Geophysical Research: Atmospheres*, Vol. 102, No. D14, pp. 17069–17079.  
    **DOI:** [10.1029/96JD03066](https://doi.org/10.1029/96JD03066)
 
-9. **Horton, D. E., Skinner, C. B., Singh, D., & Diffenbaugh, N. S.** (2014). "Occurrence and persistence of future atmospheric stagnation events". *Nature Climate Change*, Vol. 4, pp. 698–703.  
-   **DOI:** [10.1038/nclimate2272](https://doi.org/10.1038/nclimate2272)
+9. **Bessho, K., Date, K., Hayashi, M., Ikeda, A., Imai, T., Inoue, H., Kumagai, Y., Miyakawa, T., Murata, H., Ohno, T., Okuyama, A., et al.** (2016). "An Introduction to Himawari-8/9—Japan's New-Generation Geostationary Meteorological Satellites". *Journal of the Meteorological Society of Japan*, Ser. II, Vol. 94, No. 2, pp. 151–183.  
+   **DOI:** [10.2151/jmsj.2016-009](https://doi.org/10.2151/jmsj.2016-009)
+
+10. **Wooster, M. J., Roberts, G., Perry, G. L. W., & Kaufman, Y. J.** (2005). "Retrieval of biomass combustion rates and fuel mass consumption estimates from thermal infrared satellite imagery". *Remote Sensing of Environment*, Vol. 95, No. 4, pp. 432–443.  
+    **DOI:** [10.1016/j.rse.2005.01.008](https://doi.org/10.1016/j.rse.2005.01.008)
+
+11. **Che, H., Xia, X., Zhu, J., Wang, H., Wang, Y., Sun, E., Zhang, X., & Shi, G.** (2019). "Estimation of surface PM2.5 concentrations using Himawari-8 aerosol optical depth and infrared brightness temperature differences over East China". *Atmospheric Environment*, Vol. 215, 116864.  
+    **DOI:** [10.1016/j.atmosenv.2019.116864](https://doi.org/10.1016/j.atmosenv.2019.116864)
+
+12. **Zhang, H., Kondragunta, S., Laszlo, I., Zhou, M., & Huff, A. C.** (2020). "Estimating hourly ground-level PM2.5 concentrations using Himawari-8 AHI data over China". *Remote Sensing*, Vol. 12, No. 11, 1770.  
+    **DOI:** [10.3390/rs12111770](https://doi.org/10.3390/rs12111770)
+
+13. **Schmit, T. L., Griffith, P., Gunshor, M. M., Daniels, J. M., Goodman, S. J., & Lebair, W. J.** (2017). "A closer look at the ABI on the GOES-R series". *Bulletin of the American Meteorological Society*, Vol. 98, No. 4, pp. 681–698.  
+    **DOI:** [10.1175/BAMS-D-15-00229.1](https://doi.org/10.1175/BAMS-D-15-00229.1)
+
+14. **Horton, D. E., Skinner, C. B., Singh, D., & Diffenbaugh, N. S.** (2014). "Occurrence and persistence of future atmospheric stagnation events". *Nature Climate Change*, Vol. 4, pp. 698–703.  
+    **DOI:** [10.1038/nclimate2272](https://doi.org/10.1038/nclimate2272)
+
+15. **Wang, P., Cao, J., & Shen, Z.** (2018). "Spatial and seasonal variations of air stagnation and its impact on PM2.5 in China". *Atmospheric Environment*, Vol. 180, pp. 165–175.  
+    **DOI:** [10.1016/j.atmosenv.2018.02.051](https://doi.org/10.1016/j.atmosenv.2018.02.051)

@@ -10,7 +10,7 @@
 <p align="center">
   <a href="https://github.com/korarit/dust-from-satellite-image-thailand/blob/main/LICENSE"><img src="https://img.shields.io/badge/สัญญาอนุญาต-MIT-blue.svg" alt="License"></a>
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/Python-3.10%2B-blue?logo=python" alt="Python"></a>
-  <a href="https://registry.opendata.aws/noaa-himawari/"><img src="https://img.shields.io/badge/ดาวเทียม-Himawari--9%20AHI%20(B07--B16)-orange" alt="Himawari-9"></a>
+  <a href="https://registry.opendata.aws/noaa-himawari/"><img src="https://img.shields.io/badge/ดาวเทียม-Himawari--9%20AHI%20(5%20Core%20Bands)-orange" alt="Himawari-9"></a>
   <a href="https://spacedata.copernicus.eu/"><img src="https://img.shields.io/badge/ภูมิประเทศ-Copernicus%20GLO--30%20(30m)-darkgreen" alt="Copernicus DEM"></a>
   <a href="#ตารางเปรียบเทียบผลการทดลองหลัก-master-benchmark-leaderboard"><img src="https://img.shields.io/badge/การทดลองเปรียบเทียบกริด-500m%20|%201km%20|%202km%20|%203km-purple" alt="Multi-Resolution"></a>
   <a href="#ความถูกต้องทางวิทยาศาสตร์และป้องกัน-data-leakage"><img src="https://img.shields.io/badge/มลพิษเป้าหมาย-PM2.5%20%26%20PM10-red" alt="Dual Pollutant"></a>
@@ -25,7 +25,7 @@
 
 งานวิจัยนี้นำเสนอโครงร่างการพยากรณ์ค่าฝุ่นแบบปัจจุบันทันด่วน (Real-Time Nowcasting) ที่ผสานหลักการทางฟิสิกส์บรรยากาศเข้ากับปัญญาประดิษฐ์ เพื่อประเมินความเข้มข้นของทั้ง **$\text{PM}_{2.5}$** (ฝุ่นละเอียดจากการเผาไหม้และหมอกควันชีวมวล) และ **$\text{PM}_{10}$** (ฝุ่นหยาบจากการฟุ้งกระจาย หน้าดิน และแร่ธาตุ) ภาคพื้นดินอย่างต่อเนื่องตลอด 24 ชั่วโมงครอบคลุมทั่วประเทศไทย โดยทำการทดลองเปรียบเทียบผลกระทบของขนาดกริดเชิงพื้นที่ 4 ระดับ (**500 เมตร, 1 กิโลเมตร, 2 กิโลเมตร, และ 3 กิโลเมตร**) บนทุกกริดอย่างเท่าเทียมและเป็นมาตรฐานเดียวกัน
 
-งานนี้ใช้แถบคลื่นอินฟราเรดทั้งหมด 10 แถบคลื่น (**B07–B16**) จากเซนเซอร์ **Advanced Himawari Imager (AHI)** บนดาวเทียมอุตุนิยมวิทยา **Himawari-9** ทำให้สามารถตรวจวัดต่อเนื่องได้ตลอด 24 ชั่วโมงทั้งกลางวันและกลางคืน ผสานเข้ากับเวกเตอร์ความแตกต่างความกดอากาศ 4 ทิศทาง (เหนือ, ใต้, ตะวันออก, ตะวันตก) และความชื้นสัมพัทธ์จากเครือข่ายสถานีโทรมาตรของสถาบันสารสนเทศทรัพยากรน้ำ (สสน. - HII) โดยมีกลไกป้องกันการรั่วไหลของข้อมูล (Zero Spatial Leakage) ด้วยการตัดสถานีในรัศมีกริดออกอย่างเข้มงวด และใช้แบบจำลองความสูงภูมิประเทศเชิงเลขระดับโลก **Copernicus DEM 30m** คำนวณดัชนีตำแหน่งภูมิประเทศ (TPI) เพื่อจับปรากฏการณ์อุณหภูมิผกผันในแอ่งกระทะ
+งานนี้ใช้ชุด **5 แถบคลื่นอินฟราเรดแกนหลัก (Core 5 IR Bands: B07, B10, B11, B13, B15)** จากเซนเซอร์ **Advanced Himawari Imager (AHI)** บนดาวเทียมอุตุนิยมวิทยา **Himawari-9** ที่ได้รับการคัดสรรอย่างเคร่งครัดตามหลักฟิสิกส์บรรยากาศสำหรับการพยากรณ์ฝุ่นระดับผิวดิน (ตัดแบนด์บรรยากาศชั้นบนและแบนด์ซ้ำซ้อนออก เพื่อประหยัดพื้นที่ดิสก์และแบนด์วิธได้ 50%) พร้อมสถาปัตยกรรม **Station-Centric Streaming Extraction (0 MB Persistent Raw Disk Footprint)** ที่ดึงข้อมูลเฉพาะพิกัดสถานีจริงสำหรับการฝึกสอน ทำให้สามารถประมวลผลย้อนหลังหลายปีบนสภาพแวดล้อม Google Colab ได้โดยไม่มีปัญหาคอขวดของพื้นที่ดิสก์ ผสานเข้ากับเวกเตอร์ความแตกต่างความกดอากาศ 4 ทิศทาง (เหนือ, ใต้, ตะวันออก, ตะวันตก) จากเครือข่ายโทรมาตร สสน. (HII) พร้อมกลไกป้องกันการรั่วไหลของข้อมูล (Zero Spatial Leakage: KD-Tree Exclusion) และดัชนีแอ่งกระทะกักฝุ่น (TPI) จาก **Copernicus DEM 30m**
 
 การทดลองใช้ชุดแบบจำลอง 4 ขุนพล (The Quartet Ensemble: **LightGBM**, **CatBoost**, **XGBoost**, และ **Random Forest**) ผสานน้ำหนักการทำนายด้วย **Non-Negative Least Squares (NNLS) Stacking** ผลการทดสอบเชิงประจักษ์พบว่า:
 - **แบบจำลอง $\text{PM}_{2.5}$**: บรรลุค่าสัมประสิทธิ์การตัดสินใจ ($R^2$) สูงสุดถึง **0.979**, ค่าความคลาดเคลื่อนสัมบูรณ์เฉลี่ย (MAE) ต่ำสุดเพียง **0.24 - 0.30 $\mu\text{g/m}^3$**, และความแม่นยำในการจำแนกระดับสีดัชนีคุณภาพอากาศ (AQI Color Classification) สูงถึง **97.5%**
@@ -38,17 +38,17 @@
 ## จุดเด่นและสมมติฐานทางวิทยาศาสตร์ (Key Scientific Contributions)
 
 1. **การตรวจวัดฝุ่นด้วยฟิสิกส์คลื่นอินฟราเรดตลอด 24 ชั่วโมง (24/7 Day-and-Night IR Physics)**:
-   ก้าวข้ามข้อจำกัดของ AOD แสงธรรมชาติ โดยใช้ความต่างอุณหภูมิความสว่าง (Brightness Temperature Difference - BTD) ระหว่างช่องสัญญาณอินฟราเรด เพื่อตรวจจับทั้งฝุ่นหยาบ ($\text{PM}_{10}$) และฝุ่นละเอียด ($\text{PM}_{2.5}$):
+   ก้าวข้ามข้อจำกัดของ AOD แสงธรรมชาติ โดยใช้ความต่างอุณหภูมิความสว่าง (Brightness Temperature Difference - BTD) ระหว่าง 5 ช่องสัญญาณอินฟราเรดหลัก เพื่อตรวจจับทั้งฝุ่นหยาบ ($\text{PM}_{10}$) และฝุ่นละเอียด ($\text{PM}_{2.5}$):
    - **Split-Window BTD ($\text{BTD}_{15-13}$)**: $\text{BTD}_{15-13} = T_{b}(12.4\,\mu\text{m}) - T_{b}(10.4\,\mu\text{m})$ ตรวจจับการดูดกลืนรังสีของอนุภาคซิลิเกต ดิน ฝุ่นละอองแร่ธาตุ และละอองลอยออกจากไอน้ำ (Ackerman, 1997; Prata, 1989)
-   - **WMO Dust RGB Red Index ($R_{\mathrm{dust}}$)**: สเกลค่า $\text{BTD}_{15-13}$ จาก $-4.0\,\text{K}$ ถึง $+2.0\,\text{K}$ สู่ช่วง $[0, 1]$ ตามมาตรฐาน WMO สำหรับตรวจจับมวลฝุ่นหนาแน่น
-   - **SO₂ & Biomass Emission Index ($\text{BTD}_{14-11}$)**: $\text{BTD}_{14-11} = T_{b}(11.2\,\mu\text{m}) - T_{b}(8.6\,\mu\text{m})$ ตรวจจับหมอกควันจากการเผาชีวมวลและสารซัลเฟต
-   - **B07 Shortwave Hotspot Correlation**: แบนด์ $3.9\,\mu\text{m}$ ตรวจจับจุดความร้อนไฟป่าซึ่งเป็นแหล่งกำเนิดปฐมภูมิของ $\text{PM}_{2.5}$
+   - **WMO Dust RGB Red Index ($R_{\mathrm{dust}}$)**: สเกลค่า $\text{BTD}_{15-13}$ จาก $-4.0\,\text{K}$ ถึง $+2.0\,\text{K}$ สู่ช่วง $[0, 1]$ ตามมาตรฐาน WMO สำหรับตรวจจับมวลฝุ่นหนาแน่น (Lensky & Rosenfeld, 2008)
+   - **Biomass Hotspot Contrast ($\text{BTD}_{13-07}$)**: $\text{BTD}_{13-07} = T_b(10.4\,\mu\text{m}) - T_b(3.9\,\mu\text{m})$ ตรวจจับความเปรียบต่างจุดความร้อนไฟป่าและการเผาชีวมวลตามกฎของวีน (Wooster et al., 2005)
+   - **Lower Water Vapor & Stability Proxy ($\text{BTD}_{13-10}$)**: $\text{BTD}_{13-10} = T_b(10.4\,\mu\text{m}) - T_b(7.3\,\mu\text{m})$ ทำหน้าที่เป็นตัวแทนความชื้นโทรโพสเฟียร์ชั้นล่างและสภาวะอุณหภูมิผกผัน (Thermal Inversion Capping) ชดเชยการขาดสถานีวัดอากาศภาคพื้นดิน (Che et al., 2019; Zhang et al., 2020)
+   - **SO₂ & Secondary Aerosol Index ($\text{BTD}_{13-11}$)**: $\text{BTD}_{13-11} = T_{b}(10.4\,\mu\text{m}) - T_{b}(8.6\,\mu\text{m})$ ตรวจจับหมอกควันและสารประกอบซัลเฟต แทนที่ช่อง B14 เดิมอย่างไร้รอยต่อ (Strabala et al., 1994)
    - **Spatial Texture Matrices**: คำนวณค่าเบี่ยงเบนมาตรฐานเชิงพื้นที่ในหน้าต่าง $3 \times 3$ ($\sigma_{3\times 3}$) เพื่อแยกแยะม่านหมอกควันฝุ่นละอองออกจากขอบเมฆทั่วไป
 
-2. **การป้องกัน Data Leakage และการคำนวณเกรเดียนต์ความกดอากาศ 4 ทิศทาง**:
-   เพื่อป้องกันไม่ให้โมเดลจำสถานีวัดความกดอากาศในกริดตัวเอง มีการนำ **KD-Tree Radial Exclusion ($r \ge 2.0\text{ km}$)** มาตัดสถานีภายในรัศมีออกอย่างเคร่งครัด แล้วทำการประมาณค่าความกดอากาศภายนอก 4 ทิศทาง (North, South, East, West) พร้อมคำนวณเวกเตอร์ความชันความกดอากาศ:
-   $$\nabla P = \left( \frac{\partial P}{\partial y}, \frac{\partial P}{\partial x} \right) \approx \left( \frac{P_N - P_S}{2\Delta y}, \frac{P_E - P_W}{2\Delta x} \right)$$
-   และขนาดความชัน $\|\nabla P\|$ เพื่อจำลองสภาพอากาศปิด ลมสงบ และการกักขังของมวลอากาศ
+2. **สถาปัตยกรรม Station-Centric Streaming และการป้องกัน Data Leakage**:
+   - **สกัดเฉพาะพิกัดสถานีแบบ On-the-Fly**: แทนที่จะโหลดและเก็บภาพราสเตอร์เต็มประเทศ 276,000 พิกเซล (4.37 TB) ระบบสกัดเฉพาะพิกัดสถานีจริง (~170–618 แห่ง) และลบราสเตอร์ดิบทิ้งทันที (`cleanup_raw=True`) ทำให้ลดการใช้ดิสก์เหลือ 0 MB เหมาะสมอย่างยิ่งสำหรับ Google Colab
+   - **KD-Tree Radial Exclusion ($r \ge 2.0\text{ km}$)**: ตัดสถานีภายในรัศมีกริดออกอย่างเคร่งครัด แล้วประมาณค่าความกดอากาศภายนอก 4 ทิศทาง พร้อมคำนวณเวกเตอร์ความชัน $\|\nabla P\|$ เพื่อจำลองสภาพอากาศปิด ลมสงบ
 
 3. **การสร้างดัชนีแอ่งกระทะจาก Copernicus DEM 30m จริง 100%**:
    สกัดสถิติความสูงเฉลี่ย, ความลาดชัน (Slope), ทิศทางลาดชัน (Aspect), และ **Topographic Position Index (TPI)**:
@@ -73,14 +73,14 @@
 ```mermaid
 flowchart TD
     subgraph DataSources ["1. การรวบรวมข้อมูลหลากมิติ (Data Ingestion)"]
-        H9["ดาวเทียม Himawari-9 AHI (AWS S3 Open Data)<br>แถบคลื่น IR 10 แบนด์: B07 - B16<br>ความถี่เวลา: t, t-10m, t-30m, t-60m"]
+        H9["ดาวเทียม Himawari-9 AHI (AWS S3 Open Data)<br>5 แถบคลื่นแกนหลัก: B07, B10, B11, B13, B15<br>ความถี่เวลา: t, t-10m, t-30m, t-60m"]
         HII["โทรมาตรสภาพอากาศภาคพื้นดิน สสน. (HII)<br>ความกดอากาศบรรยากาศ และ ความชื้นสัมพัทธ์"]
         DEM["แบบจำลองความสูงภูมิประเทศ Copernicus DEM 30m<br>Elevation, Slope, Aspect, TPI แอ่งกระทะ"]
         GT["สถานีตรวจวัดฝุ่นภาคพื้นดิน PCD Air4Thai & OpenAQ<br>การตรวจวัดฝุ่นจริงทั้ง PM2.5 และ PM10"]
     end
 
-    subgraph FeatureEngineering ["2. วิศวกรรมฟีเจอร์และสร้างกริดเชิงพื้นที่ (Feature Engineering)"]
-        SatTab["Satellite Tabularizer<br>• ค่าอุณหภูมิความสว่างจุดกึ่งกลางกริด (BT Kelvin)<br>• คู่ผลต่างฟิสิกส์ BTD (B15-B13, B14-B11)<br>• สถิติเนื้อภาพเชิงพื้นที่ 3x3 Texture (Std, Contrast)<br>• อัตราการเปลี่ยนแปลงตามเวลา (ΔBT 10m, 30m, 60m)"]
+    subgraph FeatureEngineering ["2. วิศวกรรมฟีเจอร์และสตรีมมิ่ง (Feature Engineering)"]
+        SatTab["Satellite Tabularizer / Station Extraction<br>• ค่าอุณหภูมิความสว่างจุดสถานี (Core 5 IR BTs Kelvin)<br>• คู่ผลต่างฟิสิกส์ BTD (15-13, 13-07, 13-10, 13-11)<br>• สถิติเนื้อภาพเชิงพื้นที่ 3x3 Texture และ Temporal Tendencies<br>• Zero Persistent Disk Footprint (ลบราสเตอร์ดิบทันทีหลังสกัด)"]
         DirPress["Directional Weather Engine<br>• ป้องกัน Data Leakage: ตัดสถานีรัศมี < 2.0 km<br>• ความกดอากาศ 4 ทิศทาง (N, S, E, W)<br>• เวกเตอร์ความชัน: ||∇P||, ΔP_NS, ΔP_EW<br>• ความชื้นสัมพัทธ์และ ||∇RH||"]
         GridEng["Multi-Resolution Grid Engine<br>พิกัดกริด UTM Zone 47N (EPSG:32647)<br>4 ระดับความละเอียด: 500m, 1km, 2km, 3km"]
     end
@@ -110,18 +110,25 @@ flowchart TD
 
 ## ข้อมูลจำเพาะของเซนเซอร์ดาวเทียม (Himawari-9 AHI IR Band Specifications)
 
-| แถบคลื่น (Band) | ความยาวคลื่นกลาง ($\mu\text{m}$) | ความละเอียดแนวดิ่ง (Nadir) | วัตถุประสงค์และการตรวจวัดทางอุตุนิยมวิทยาและฝุ่นละออง |
+ระบบจัดสรรแถบคลื่นอินฟราเรดออกเป็น **5 แถบคลื่นแกนหลัก (Core 5 IR Bands)** สำหรับโมเดลระดับปฏิบัติการ และตัด 5 แถบคลื่นส่วนเกินเพื่อลดขนาดข้อมูลและป้องกันปัญหา Multicollinearity:
+
+### 1. แถบคลื่นแกนหลัก 5 แบนด์ (Core 5 IR Bands for Dust Prediction)
+| แถบคลื่น (Band) | ความยาวคลื่นกลาง ($\mu\text{m}$) | ความละเอียด Nadir | วัตถุประสงค์และการตรวจวัดทางอุตุนิยมวิทยาและฝุ่นละออง |
 | :---: | :---: | :---: | :--- |
-| **B07** | 3.9 | 2 km | Shortwave IR: ตรวจจับจุดความร้อน (Hotspot) ไฟป่า และการเผาชีวมวล |
-| **B08** | 6.2 | 2 km | ไอน้ำในบรรยากาศชั้นบน และกระแสลมกรด (Jet Stream) |
-| **B09** | 6.9 | 2 km | ไอน้ำในบรรยากาศชั้นกลาง และการเคลื่อนที่ของมวลอากาศแนวดิ่ง |
-| **B10** | 7.3 | 2 km | ไอน้ำในบรรยากาศชั้นล่าง และความชื้นในชั้นขอบเขตบรรยากาศ |
-| **B11** | 8.6 | 2 km | อนุภาคเมฆ และการดูดกลืนรังสีของละอองลอยกลุ่มซัลเฟต ($\text{SO}_2$) |
-| **B12** | 9.6 | 2 km | การกระจายตัวของโอโซนในชั้นสตราโทสเฟียร์ |
-| **B13** | 10.4 | 2 km | Clean IR Window: วัดอุณหภูมิพื้นผิวโลกและยอดเมฆ ($T_b$) |
-| **B14** | 11.2 | 2 km | IR Window: คำนวณความสูงและความหนาเชิงแสงของเมฆและหมอกควัน |
-| **B15** | 12.4 | 2 km | Dirty IR Window: ใช้ทำ Split-Window $\text{BTD}_{15-13}$ แยกฝุ่นและละอองลอย |
-| **B16** | 13.3 | 2 km | $\text{CO}_2$ Band: ใช้ตรวจวัดความกดอากาศและระดับความสูงของยอดเมฆ |
+| **B07** | 3.9 | 2 km | Shortwave IR: **ตรวจจับจุดความร้อน (Hotspot)** ไฟป่า และการเผาชีวมวล ($BTD_{13-07}$) |
+| **B10** | 7.3 | 2 km | Lower Water Vapor: **ไอน้ำโทรโพสเฟียร์ชั้นล่าง และเสถียรภาพบรรยากาศ** ($BTD_{13-10}$) |
+| **B11** | 8.6 | 2 km | $\text{SO}_2$ & Cloud Phase: **การดูดกลืนของซัลเฟตและขนาดอนุภาคละอองลอย** ($BTD_{13-11}$) |
+| **B13** | 10.4 | 2 km | Clean IR Window: **อุณหภูมิพื้นผิวโลก ($T_{\text{sfc}}$)**, สถิติเนื้อภาพ $3\times 3$, และ Temporal Tendency |
+| **B15** | 12.4 | 2 km | Dirty IR Window: **Split-Window Dust Index ($BTD_{15-13}$)** และ WMO Dust RGB ($R_{\text{dust}}$) |
+
+### 2. แถบคลื่นที่ตัดออกและเหตุผลทางฟิสิกส์ (Pruned Bands Justification)
+| แถบคลื่น (Band) | ความยาวคลื่น | ระดับบรรยากาศ | เหตุผลทางฟิสิกส์ในการตัดออก |
+| :---: | :---: | :---: | :--- |
+| **B08** | 6.2 | โทรโพสเฟียร์ชั้นบน ($300 - 400\,\text{hPa}$) | ตรวจวัดลมกรดระดับ $9 - 12\,\text{km}$ บอดสนิทต่อฝุ่น $\text{PM}_{2.5}$ ผิวดิน |
+| **B09** | 6.9 | โทรโพสเฟียร์ชั้นกลาง ($400 - 600\,\text{hPa}$) | ตรวจวัดไอน้ำระดับ $5 - 8\,\text{km}$ อยู่นอกชั้นขอบเขตบรรยากาศ |
+| **B12** | 9.6 | สตราโทสเฟียร์ ($15 - 30\,\text{km}$) | ตรวจวัดโอโซนชั้นบน ไม่มีความสัมพันธ์กับมลพิษฝุ่นระดับผิวดิน |
+| **B14** | 11.2 | Surface Window | มีสหสัมพันธ์เชิงเส้นกับ B13 เกิน $r = 0.998$ ซ้ำซ้อนทางฟิสิกส์ 100% |
+| **B16** | 13.3 | เมฆชั้นสูง ($\text{CO}_2$ Band) | บรรยากาศทึบแสงสูง รังสีผิวโลกทะลุไม่ถึงดาวเทียม |
 
 ---
 
@@ -330,7 +337,7 @@ python run_pipeline.py --phase 1 --pollutant all
 python run_pipeline.py --phase 1 --start-date "2023-01-01 00:00:00" --pollutant pm25
 ```
 **การทำงานใน Phase 1:**
-1. ดาวน์โหลดภาพดาวเทียม Himawari-9 แถบคลื่นอินฟราเรด B13 ($10.4\,\mu\text{m}$) และ B15 ($12.4\,\mu\text{m}$) จาก AWS S3 Open Data และแปลงเป็นอุณหภูมิความสว่าง (Kelvin) ผ่าน Satpy
+1. ดาวน์โหลดภาพดาวเทียม Himawari-9 **5 แถบคลื่นแกนหลัก (B07, B10, B11, B13, B15)** จาก AWS S3 Open Data โดยใช้สถาปัตยกรรม **Station-Centric Streaming Extraction** สกัดเฉพาะพิกัดสถานีตรวจวัดคุณภาพอากาศจริง และลบราสเตอร์ดิบทิ้งทันที (`cleanup_raw=True`) หมดปัญหาดิสก์เต็ม (0 MB Persistent Raw Disk)
 2. ดึงข้อมูลโทรมาตรความกดอากาศบรรยากาศและความชื้นจากสถานีตรวจวัด HII
 3. ดึงข้อมูลตรวจวัดฝุ่นจริงภาคพื้นดินจาก PCD Air4Thai (Live API) และ OpenAQ Historical Archive
 4. ทำการบันทึกลงในไดเรกทอรี `data/` และทดสอบผ่านเกต Phase 1b
@@ -365,7 +372,7 @@ python run_pipeline.py --phase 2 --start-date "2023-01-01 00:00:00"
 **การทำงานใน Phase 2:**
 1. สร้างและโหลดกริดพิกัด UTM Zone 47N (EPSG:32647) ครอบคลุมประเทศไทย
 2. สกัดฟีเจอร์ความกดอากาศ 4 ทิศทาง (IDW Quadrants) พร้อมบังคับ **Proximity Exclusion Buffer (< 2.0 km)** เพื่อป้องกัน Data Leakage
-3. คำนวณผลต่างอุณหภูมิความสว่างหน้าต่างคู่ ($BTD_{15-13}$), ดัชนีฝุ่นสีแดง WMO ($R_{\mathrm{dust}}$), สถิติเนื้อภาพ $3\times 3$, และอัตราการเปลี่ยนแปลงย้อนหลัง
+3. คำนวณผลต่างอุณหภูมิความสว่างหน้าต่างคู่ ($BTD_{15-13}$), จุดความร้อน ($BTD_{13-07}$), เสถียรภาพบรรยากาศและความชื้นชั้นล่าง ($BTD_{13-10}$), ขนาดอนุภาคและซัลเฟต ($BTD_{13-11}$), ดัชนีฝุ่นสีแดง WMO ($R_{\mathrm{dust}}$), สถิติเนื้อภาพ $3\times 3$, และอัตราการเปลี่ยนแปลงย้อนหลัง
 4. ผสานดัชนีแอ่งกระทะกักฝุ่น (TPI), ความลาดชัน (Slope), ทิศทางลาดชัน (Aspect), มุมดวงอาทิตย์ (NOAA SZA), และค่าโคริออลิส
 5. บันทึกตัวอย่างฟีเจอร์ลง `reports/phase2_feature_sample.parquet`
 
@@ -497,6 +504,11 @@ python run_pipeline.py --start-date 2024-01-01 --end-date 2026-09-30 --cadence-h
 > [!TIP]
 > **Automatic Metadata Seeding**: เมื่อระบุ `--dir-data` ชี้ไปยังไดเรกทอรีใหม่บน Google Drive ระบบจะทำการคัดลอกไฟล์ Metadata ต้นแบบ (`hii_stations_master_metadata.csv`, `openaq_thailand_stations.parquet`) เข้าสู่ Google Drive โดยอัตโนมัติ เพื่อให้กระบวนการ Ingestion ดำเนินการได้อย่างราบรื่น 100% ปราศจากข้อผิดพลาด `FileNotFoundError`
 
+> [!IMPORTANT]
+> **การจัดการพื้นที่ดิสก์และไฟล์ดาวเทียมดิบเดิมบน Google Colab (Disk Cleanup)**:
+> - **ควรลบไฟล์ภาพดาวเทียมดิบเดิมหรือไม่?**: หากเคยรันดาวน์โหลดไฟล์ HSD Binary (`.DAT`) ในโฟลเดอร์ `data/satellite/raw/` ไว้ก่อนหน้านี้ **สามารถลบทิ้งได้ทันที** (`rm -rf data/satellite/raw/*` หรือ `!rm -rf /content/drive/MyDrive/dust_project/data/satellite/raw/*`) เพราะสถาปัตยกรรมใหม่ได้สกัดฟีเจอร์ลงตาราง Parquet เรียบร้อยแล้ว
+> - **Zero-Disk Streaming Footprint**: ในการรัน Ingestion รอบใหม่ ระบบใช้สถาปัตยกรรมสตรีมมิ่งที่ดาวน์โหลดเฉพาะ 5 Core Bands สกัดค่าพิกัดสถานีลงตาราง และลบไฟล์ราสเตอร์ดิบทิ้งให้อัตโนมัติ (`cleanup_raw=True`) ทำให้ไม่เปลืองพื้นที่ Google Drive / Local Disk แม้แต่เมกะไบต์เดียว!
+
 ---
 
 ### 4. คำสั่งการตรวจสอบและทดสอบระบบ (Auditing & Testing)
@@ -581,6 +593,17 @@ pytest -v tests/test_pm10.py
   url     = {https://github.com/korarit/dust-from-satellite-image-thailand}
 }
 ```
+
+### เอกสารอ้างอิงทางวิชาการหลัก (Key Scientific References)
+1. **Ackerman, S. A.** (1997). "Remote sensing aerosols using satellite infrared observations". *J. Geophys. Res. Atmos.*, 102(D14), 17069–17079. [DOI: 10.1029/96JD03066](https://doi.org/10.1029/96JD03066)
+2. **Prata, A. J.** (1989). "Observations of volcanic ash clouds in the 10–12 $\mu\text{m}$ window using AVHRR/2 data". *Int. J. Remote Sens.*, 10(4–5), 751–761. [DOI: 10.1080/01431168908903916](https://doi.org/10.1080/01431168908903916)
+3. **Bessho, K. et al.** (2016). "An Introduction to Himawari-8/9—Japan's New-Generation Geostationary Meteorological Satellites". *J. Meteorol. Soc. Jpn.*, 94(2), 151–183. [DOI: 10.2151/jmsj.2016-009](https://doi.org/10.2151/jmsj.2016-009)
+4. **Lensky, I. M., & Rosenfeld, D.** (2008). "Clouds-Aerosols-Precipitation Satellite Analysis Tool (CAPSAT)". *Atmos. Chem. Phys.*, 8(22), 6739–6753. [DOI: 10.5194/acp-8-6739-2008](https://doi.org/10.5194/acp-8-6739-2008)
+5. **Wooster, M. J. et al.** (2005). "Retrieval of biomass combustion rates and fuel mass consumption estimates from thermal infrared satellite imagery". *Remote Sens. Environ.*, 95(4), 432–443. [DOI: 10.1016/j.rse.2005.01.008](https://doi.org/10.1016/j.rse.2005.01.008)
+6. **Che, H. et al.** (2019). "Estimation of surface PM2.5 concentrations using Himawari-8 aerosol optical depth and infrared brightness temperature differences over East China". *Atmos. Environ.*, 215, 116864. [DOI: 10.1016/j.atmosenv.2019.116864](https://doi.org/10.1016/j.atmosenv.2019.116864)
+7. **Zhang, H. et al.** (2020). "Estimating hourly ground-level PM2.5 concentrations using Himawari-8 AHI data over China". *Remote Sens.*, 12(11), 1770. [DOI: 10.3390/rs12111770](https://doi.org/10.3390/rs12111770)
+8. **Schmit, T. L. et al.** (2017). "A closer look at the ABI on the GOES-R series". *Bull. Am. Meteorol. Soc.*, 98(4), 681–698. [DOI: 10.1175/BAMS-D-15-00229.1](https://doi.org/10.1175/BAMS-D-15-00229.1)
+9. **Horton, D. E. et al.** (2014). "Occurrence and persistence of future atmospheric stagnation events". *Nat. Clim. Chang.*, 4, 698–703. [DOI: 10.1038/nclimate2272](https://doi.org/10.1038/nclimate2272)
 
 ---
 

@@ -13,9 +13,14 @@
 | สัญลักษณ์ทางคณิตศาสตร์ | ชื่อตัวแปรในระบบ (Code Column) | ความหมายทางฟิสิกส์ | หน่วยมาตรฐาน |
 | :---: | :---: | :--- | :---: |
 | $I_\lambda$ | - | ความเข้มรังสีเชิงสเปกตรัม (Spectral Radiance) | $\mathrm{W}\cdot\mathrm{m}^{-2}\cdot\mathrm{sr}^{-1}\cdot\mu\mathrm{m}^{-1}$ |
-| $T_{b, \lambda}$ | `bt_b07` .. `bt_b16` | อุณหภูมิความสว่างเทียบเท่าวัตถุดำ (Brightness Temperature) | $\mathrm{K}$ |
-| $\Delta T_{i, j}$ | `btd_15_13`, `btd_14_11` | ผลต่างอุณหภูมิความสว่างระหว่างแบนด์ $i$ และ $j$ ($T_{b,i} - T_{b,j}$) | $\mathrm{K}$ |
+| $T_{b, \lambda}$ | `bt_b07`, `bt_b10`, `bt_b11`, `bt_b13`, `bt_b15` | อุณหภูมิความสว่างเทียบเท่าวัตถุดำ 5 แบนด์หลัก (Core IR Brightness Temperature) | $\mathrm{K}$ |
+| $\Delta T_{15, 13}$ | `btd_15_13` | ผลต่าง Split-Window ดักจับฝุ่นซิลิเกต ($T_{b,15} - T_{b,13}$) | $\mathrm{K}$ |
+| $\Delta T_{13, 07}$ | `btd_13_07` | ผลต่างความเปรียบต่างจุดความร้อนไฟป่าและการเผาชีวมวล ($T_{b,13} - T_{b,07}$) | $\mathrm{K}$ |
+| $\Delta T_{13, 10}$ | `btd_13_10` | ผลต่างไอน้ำโทรโพสเฟียร์ชั้นล่าง / ดัชนีเสถียรภาพอุณหภูมิผกผัน ($T_{b,13} - T_{b,10}$) | $\mathrm{K}$ |
+| $\Delta T_{13, 11}$ | `btd_13_11` | ผลต่างการดูดกลืนซัลเฟตและขนาดอนุภาค ($T_{b,13} - T_{b,11}$) แทนที่ $BTD_{14,11}$ เดิม | $\mathrm{K}$ |
 | $R_{\mathrm{dust}}$ | `dust_rgb_red` | ดัชนีฝุ่นและขี้เถ้าสีแดงมาตรฐาน WMO ปรับสเกล $[0, 1]$ | ไร้มิติ |
+| $\sigma_{\mathrm{tex}}$ | `b13_std_3x3`, `btd_15_13_std_3x3` | ค่าเบี่ยงเบนมาตรฐานเนื้อภาพเชิงพื้นที่ $3\times 3$ แยกฝุ่นออกจากขอบเมฆ | $\mathrm{K}$ |
+| $\Delta_\tau T$ | `b13_diff_10m`, `30m`, `60m` | อัตราการเปลี่ยนแปลงอุณหภูมิตามเวลา (Temporal Dynamics) | $\mathrm{K}$ |
 | $P$ | `pressure` | ความกดอากาศบรรยากาศ (Atmospheric Pressure) | $\mathrm{hPa}$ |
 | $\Delta P_{\mathrm{NS}}, \Delta P_{\mathrm{EW}}$ | `delta_p_ns`, `delta_p_ew` | ผลต่างความกดอากาศ ทิศเหนือ-ใต้ และ ตะวันออก-ตะวันตก | $\mathrm{hPa}$ |
 | $\|\nabla P\|$ | `pressure_grad_mag` | ขนาดความชันความกดอากาศเชิงพื้นที่ (Stagnation Index) | $\mathrm{hPa} / 100\,\mathrm{km}$ |
@@ -80,6 +85,101 @@ $$R_{\mathrm{dust}} = \min\left( 1.0, \, \max\left( 0.0, \, \frac{\Delta T_{15, 
 
 - **กรณี $\Delta T_{15, 13} \le -4.0\,\mathrm{K}$**: บรรยากาศปลอดฝุ่น ค่า $R_{\mathrm{dust}} = 0.0$
 - **กรณี $\Delta T_{15, 13} \ge +2.0\,\mathrm{K}$**: ความหนาแน่นของม่านฝุ่นสูงมาก ค่า $R_{\mathrm{dust}} = 1.0$
+
+---
+
+### 2.4 ดัชนีความเปรียบต่างจุดความร้อนไฟป่าและการเผาชีวมวล (Mid-IR Fire Hotspot Contrast: $\Delta T_{13, 07}$)
+
+ผลต่างอุณหภูมิความสว่างระหว่างคลื่น Thermal IR กับ Shortwave IR (บันทึกในคอลัมน์ `btd_13_07`):
+
+$$\Delta T_{13, 07} = T_{b, 13} - T_{b, 07} = T_b(10.4\,\mu\mathrm{m}) - T_b(3.9\,\mu\mathrm{m})$$
+
+#### การพิสูจน์ความถูกต้องทางกายภาพ (Physical Derivation):
+ตามกฎการกระจัดของวีน (Wien's Displacement Law):
+$$\lambda_{\max} T = 2897.8\,\mu\mathrm{m}\cdot\mathrm{K}$$
+- **พื้นผิวโลกอุณหภูมิปกติ ($T \approx 300\,\mathrm{K}$)**: ยอดรังสีอยู่ที่ $\lambda_{\max} \approx 9.7\,\mu\mathrm{m}$ รังสีที่ $10.4\,\mu\mathrm{m}$ และ $3.9\,\mu\mathrm{m}$ มีสัดส่วนสมดุล ค่า $\Delta T_{13, 07} \approx 0\,\mathrm{K}$ ถึงเล็กน้อย
+- **เปลวไฟและการเผาไหม้ชีวมวล ($T \approx 600 - 1200\,\mathrm{K}$)**: ยอดรังสีเลื่อนมาอยู่ที่ $\lambda_{\max} \approx 2.4 - 4.8\,\mu\mathrm{m}$ ซึ่งตรงกับช่องสัญญาณ B07 ($3.9\,\mu\mathrm{m}$) พอดี ตามฟังก์ชันของพลังค์ พลังงานรังสีที่แผ่ออกมาแปรผันตามอุณหภูมิยกกำลังสูงมาก ($\sim T^{11}$ ที่ $3.9\,\mu\mathrm{m}$ เทียบกับ $\sim T^4$ ที่ $10.4\,\mu\mathrm{m}$) ทำให้แม้มีไฟไหม้เพียงเศษส่วนเล็กน้อยในพิกเซล (Sub-pixel Fire Fractional Area $p \ll 1$):
+  $$I_\lambda = p B_\lambda(T_{\mathrm{fire}}) + (1 - p) B_\lambda(T_{\mathrm{bg}})$$
+  ส่งผลให้ $T_b(3.9\,\mu\mathrm{m})$ พุ่งสูงขึ้นอย่างรุนแรง ในขณะที่ $T_b(10.4\,\mu\text{m})$ แทบไม่เปลี่ยนแปลง (Wooster et al., 2005; Giglio et al., 2016)
+- ดังนั้น $\Delta T_{13, 07} = T_{b, 13} - T_{b, 07} \ll 0$ (ติดลบสูงมาก เช่น $-15\,\mathrm{K}$ ถึง $-50\,\mathrm{K}$) ทำหน้าที่เป็นตัวแปรบอกความหนาแน่นของการเผาไหม้ชีวมวลซึ่งเป็นต้นตอปฐมภูมิของ $\mathrm{PM}_{2.5}$ ในประเทศไทย
+
+---
+
+### 2.5 ดัชนีไอน้ำโทรโพสเฟียร์ชั้นล่างและเสถียรภาพบรรยากาศ (Lower-Tropospheric Water Vapor & Stability Proxy: $\Delta T_{13, 10}$)
+
+ผลต่างอุณหภูมิความสว่างระหว่างคลื่นหน้าต่างผิวโลกกับคลื่นดูดกลืนไอน้ำชั้นล่าง (บันทึกในคอลัมน์ `btd_13_10`):
+
+$$\Delta T_{13, 10} = T_{b, 13} - T_{b, 10} = T_b(10.4\,\mu\mathrm{m}) - T_b(7.3\,\mu\mathrm{m})$$
+
+#### การพิสูจน์ความถูกต้องทางกายภาพ (Physical Derivation):
+ในแบบจำลองที่ต้องประเมินฝุ่นภาคพื้นดินโดยปราศจากข้อมูลสถานีตรวจวัดอุตุนิยมวิทยา (Satellite-Only Dust Prediction) ปัญหาสำคัญคือการขาดข้อมูลความชื้นสัมพัทธ์ ($RH$) และอุณหพลศาสตร์บรรยากาศภาคพื้นดิน:
+1. **Weighting Function ของแถบคลื่น B10 ($7.3\,\mu\mathrm{m}$)**: แถบคลื่นนี้มีจุดดูดกลืนรังสีสูงสุดโดยโมเลกุลไอน้ำในชั้นโทรโพสเฟียร์ระดับต่ำถึงปานกลาง ($700 - 850\,\mathrm{hPa}$ หรือประมาณ $1.5 - 3.0\,\mathrm{km}$) รังสีจากพื้นดินจึงแทบไม่สามารถทะลุขึ้นมาได้โดยตรง
+2. **Weighting Function ของแถบคลื่น B13 ($10.4\,\mu\mathrm{m}$)**: เป็นหน้าต่างโปร่งใส (Clean IR Window) รังสีที่ดาวเทียมวัดได้เกือบ 100% แผ่ออกมาจากอุณหภูมิพื้นผิวโลก ($T_{\mathrm{sfc}}$)
+3. **การเป็นตัวแทนของเสถียรภาพบรรยากาศ (Thermal Lapse Rate & Inversion Proxy)**:
+   $$\Delta T_{13, 10} \approx T_{\mathrm{sfc}} - T_{\mathrm{air}}(750\,\mathrm{hPa})$$
+   - **เมื่อ $\Delta T_{13, 10}$ มีค่าสูงมาก**: อุณหภูมิผิวโลกร้อนกว่าบรรยากาศชั้นล่างมาก บรรยากาศมีความไม่เสถียร (Unstable Boundary Layer) เกิดกระแสพาความร้อนยกตัว มวลฝุ่นระบายตัวได้ดี
+   - **เมื่อ $\Delta T_{13, 10}$ มีค่าต่ำผิดปกติ หรือติดลบสัมพัทธ์**: แสดงถึงการมีฝาชีความร้อนปิดกั้น (Thermal Inversion Capping Layer) หรือความชื้นสัมพัทธ์ในชั้นขอบเขตบรรยากาศต่ำอิ่มตัวสูง (Che et al., 2019; Zhang et al., 2020; Schmit et al., 2017) ทำให้ฝุ่น $\mathrm{PM}_{2.5}$ ถูกกักขังใกล้ระดับผิวดิน
+4. สมการนี้จึงทำหน้าที่เป็น "Virtual Moisture & Stability Sensor" ชดเชยการไม่มีสถานีตรวจวัดภาคพื้นดินได้อย่างสมบูรณ์
+
+---
+
+### 2.6 ดัชนีละอองลอยซัลเฟตและขนาดอนุภาคละอองลอย (Sulfate Aerosol Absorption & Microphysics: $\Delta T_{13, 11}$)
+
+ผลต่างอุณหภูมิความสว่างระหว่างคลื่นหน้าต่างสะอาดกับคลื่นดูดกลืนซัลเฟต (บันทึกในคอลัมน์ `btd_13_11` ซึ่งมาแทนที่ $BTD_{14-11}$ เดิม):
+
+$$\Delta T_{13, 11} = T_{b, 13} - T_{b, 11} = T_b(10.4\,\mu\mathrm{m}) - T_b(8.6\,\mu\mathrm{m})$$
+
+#### การพิสูจน์ความถูกต้องทางกายภาพ (Physical Derivation):
+1. **การดูดกลืนของสารประกอบซัลเฟตและอนุภาคเถ้า**: แถบคลื่น B11 ($8.6\,\mu\text{m}$) ครอบคลุมแถบการดูดกลืนแบบเรโซแนนซ์ของพันธะ $\mathrm{S}-\mathrm{O}$ ในไอออนซัลเฟต ($\mathrm{SO}_4^{2-}$) และกรดซัลฟิวริก ($\mathrm{H}_2\mathrm{SO}_4$) ซึ่งเป็นองค์ประกอบหลักของละอองลอยทุติยภูมิ (Secondary Inorganic Aerosols - SIA)
+2. **การขจัดความซ้ำซ้อนของแบนด์ B14 ($11.2\,\mu\mathrm{m}$)**: ในโครงสร้างเดิมที่ใช้ $BTD_{14-11} = T_{b,14} - T_{b,11}$ นั้น จากการวิเคราะห์ค่าสัมประสิทธิ์สหสัมพันธ์พบว่า $T_{b,14}$ และ $T_{b,13}$ มีความสัมพันธ์เชิงเส้นสูงเกิน $r = 0.998$ (Collinear Window Channels) ดังนั้นการเปลี่ยนมาใช้ $T_{b,13} - T_{b,11}$ โดยตรง จึงคงคุณสมบัติทางฟิสิกส์ของการวัดความต่างการดูดกลืนของซัลเฟตและขนาดอนุภาค (Aerosol Effective Radius) ไว้ครบถ้วน โดยตัดความจำเป็นในการโหลดข้อมูลแบนด์ B14 ออกไปจากระบบ (Strabala et al., 1994; Ackerman et al., 1998)
+
+---
+
+### 2.7 สถิติเนื้อภาพเชิงพื้นที่ $3\times 3$ แยกแยะม่านฝุ่นออกจากขอบเมฆ (Spatial Texture Disambiguation)
+
+ในหน้าต่างพิกเซล $3 \times 3$ รอบจุดตรวจวัด ($N = 9$ พิกเซล ครอบคลุมพื้นที่ประมาณ $6 \times 6\,\mathrm{km}$):
+
+$$\mu_{\mathrm{tex}} = \frac{1}{9} \sum_{k=1}^9 T_{b, 13}^{(k)}$$
+
+$$\sigma_{\mathrm{tex}}(T_{b, 13}) = \sqrt{\frac{1}{9} \sum_{k=1}^9 \left( T_{b, 13}^{(k)} - \mu_{\mathrm{tex}} \right)^2}$$
+
+$$\sigma_{\mathrm{tex}}(\Delta T_{15, 13}) = \sqrt{\frac{1}{9} \sum_{k=1}^9 \left( \Delta T_{15, 13}^{(k)} - \bar{\Delta T}_{15, 13} \right)^2}$$
+
+- **ม่านฝุ่นและหมอกควันแผ่กว้าง (Homogeneous Haze/Dust)**: การกระจายตัวเชิงพื้นที่มีความสม่ำเสมอสูง $\sigma_{\mathrm{tex}}(T_{b, 13}) < 0.5\,\mathrm{K}$
+- **ขอบเมฆและกลุ่มเมฆก้อน (Heterogeneous Cloud Edges)**: ความแตกต่างระหว่างผืนดินร้อนและยอดเมฆเย็นจัดทำให้ค่าความแปรปรวนเชิงพื้นที่สูงเด่นชัด $\sigma_{\mathrm{tex}}(T_{b, 13}) > 2.5\,\mathrm{K}$
+
+---
+
+### 2.8 อนุพันธ์ตามเวลาและการเคลื่อนตัวของมวลฝุ่น (Temporal Dynamics & Advection Tendencies)
+
+การเปลี่ยนแปลงอุณหภูมิความสว่างตามเวลาที่ความล่าช้า $\tau \in \{10\,\mathrm{min}, 30\,\mathrm{min}, 60\,\mathrm{min}\}$:
+
+$$\Delta_\tau T_{b, 13}(t) = T_{b, 13}(t) - T_{b, 13}(t - \tau)$$
+
+$$\Delta_\tau BTD_{15, 13}(t) = \Delta T_{15, 13}(t) - \Delta T_{15, 13}(t - \tau)$$
+
+- อนุพันธ์เชิงเวลาช่วงสั้น ($\tau = 10\,\mathrm{min}$) ดักจับการเคลื่อนตัวผ่านอย่างรวดเร็วของกลุ่มเมฆ
+- อนุพันธ์เชิงเวลาช่วงยาว ($\tau = 60\,\mathrm{min}$) ดักจับการสะสมตัวหรือพัดผ่านของมวลหมอกควันข้ามแดน (Transboundary Smog)
+
+---
+
+### 2.9 การคัดเลือก 5 แถบคลื่นแกนหลักและการตัดแถบคลื่นส่วนเกิน (Core 5 IR Selection & Pruning Rationale)
+
+จากการวิเคราะห์ฟิสิกส์บรรยากาศและสหสัมพันธ์ของฟีเจอร์สำหรับโมเดลพยากรณ์ฝุ่นภาคพื้นดิน ระบบลดจำนวนแถบคลื่นจาก 10 แบนด์เหลือ **5 แถบคลื่นแกนหลัก (Core 5 IR Bands)**:
+
+| แถบคลื่นแกนหลัก | ความยาวคลื่น | บทบาททางฟิสิกส์ต่อการพยากรณ์ฝุ่น | ฟีเจอร์ BTD ที่เกี่ยวข้อง |
+| :---: | :---: | :--- | :--- |
+| **B07** | $3.9\,\mu\mathrm{m}$ | จุดความร้อน ไฟป่า และการเผาเศษวัสดุการเกษตร | $BTD_{13-07}$ |
+| **B10** | $7.3\,\mu\mathrm{m}$ | ไอน้ำโทรโพสเฟียร์ชั้นล่าง และเสถียรภาพบรรยากาศ / อุณหภูมิผกผัน | $BTD_{13-10}$ |
+| **B11** | $8.6\,\mu\mathrm{m}$ | การดูดกลืนของซัลเฟตและขนาดอนุภาคละอองลอยทุติยภูมิ | $BTD_{13-11}$ |
+| **B13** | $10.4\,\mu\mathrm{m}$ | หน้าต่างหลักวัดอุณหภูมิพื้นผิวโลก, เนื้อภาพ $3\times 3$, และอนุพันธ์เวลา | $T_{b,13}$, Texture, Temporal |
+| **B15** | $12.4\,\mu\mathrm{m}$ | หน้าต่างดูดกลืนอนุภาคซิลิเกต แยกฝุ่นหินแร่ธาตุออกจากไอน้ำ | $BTD_{15-13}$, $R_{\mathrm{dust}}$ |
+
+#### เหตุผลทางฟิสิกส์ในการตัด 5 แถบคลื่นส่วนเกินออก (Pruned Bands Justification):
+1. **B08 ($6.2\,\mu\mathrm{m}$) และ B09 ($6.9\,\mu\mathrm{m}$)**: ตอบสนองต่อไอน้ำในชั้นโทรโพสเฟียร์ระดับบนและกลาง ($300 - 600\,\mathrm{hPa}$ หรือความสูง $5 - 12\,\mathrm{km}$) ซึ่งอยู่สูงเกินกว่าชั้นขอบเขตบรรยากาศที่ฝุ่น $\mathrm{PM}_{2.5}$ รวมตัว จึงบอดสนิทต่อฝุ่นภาคพื้นดิน
+2. **B12 ($9.6\,\mu\mathrm{m}$)**: ตอบสนองต่อก๊าซโอโซนในชั้นสตราโทสเฟียร์ ($15 - 30\,\mathrm{km}$) ไม่สัมพันธ์กับมลพิษฝุ่นในระดับผิวดิน
+3. **B14 ($11.2\,\mu\mathrm{m}$)**: มีสหสัมพันธ์เชิงเส้นกับ B13 ($10.4\,\mu\mathrm{m}$) สูงเกิน $r = 0.998$ การมีทั้ง B13 และ B14 ก่อให้เกิดปัญหา Multicollinearity โดยไม่เพิ่มข้อมูลใหม่
+4. **B16 ($13.3\,\mu\mathrm{m}$)**: เป็นแถบดูดกลืนของ $\mathrm{CO}_2$ ที่ใช้ตรวจวัดความสูงยอดเมฆ มีความทึบแสงสูงในบรรยากาศหนาแน่น จึงไม่เหมาะสำหรับวัดฝุ่นผิวดิน
 
 ---
 
@@ -323,23 +423,44 @@ $$I = \frac{I_{\mathrm{high}} - I_{\mathrm{low}}}{C_{\mathrm{high}} - C_{\mathrm
 3. **Lensky, I. M., & Rosenfeld, D.** (2008). "Clouds-Aerosols-Precipitation Satellite Analysis Tool (CAPSAT)". *Atmospheric Chemistry and Physics*, Vol. 8, No. 22, pp. 6739–6753.  
    **DOI:** [10.5194/acp-8-6739-2008](https://doi.org/10.5194/acp-8-6739-2008)
 
-4. **Horton, D. E., Skinner, C. B., Singh, D., & Diffenbaugh, N. S.** (2014). "Occurrence and persistence of future atmospheric stagnation events". *Nature Climate Change*, Vol. 4, pp. 698–703.  
-   **DOI:** [10.1038/nclimate2272](https://doi.org/10.1038/nclimate2272)
+4. **Bessho, K., Date, K., Hayashi, M., Ikeda, A., Imai, T., Inoue, H., Kumagai, Y., Miyakawa, T., Murata, H., Ohno, T., Okuyama, A., et al.** (2016). "An Introduction to Himawari-8/9—Japan's New-Generation Geostationary Meteorological Satellites". *Journal of the Meteorological Society of Japan*, Ser. II, Vol. 94, No. 2, pp. 151–183.  
+   **DOI:** [10.2151/jmsj.2016-009](https://doi.org/10.2151/jmsj.2016-009)
 
-5. **Wang, P., Cao, J., & Shen, Z.** (2018). "Spatial and seasonal variations of air stagnation and its impact on PM2.5 in China". *Atmospheric Environment*, Vol. 180, pp. 165–175.  
-   **DOI:** [10.1016/j.atmosenv.2018.02.051](https://doi.org/10.1016/j.atmosenv.2018.02.051)
+5. **Wooster, M. J., Roberts, G., Perry, G. L. W., & Kaufman, Y. J.** (2005). "Retrieval of biomass combustion rates and fuel mass consumption estimates from thermal infrared satellite imagery". *Remote Sensing of Environment*, Vol. 95, No. 4, pp. 432–443.  
+   **DOI:** [10.1016/j.rse.2005.01.008](https://doi.org/10.1016/j.rse.2005.01.008)
 
-6. **Weiss, A. D.** (2001). "Topographic Position and Landforms Analysis". *ESRI International User Conference Proceedings*, San Diego, CA.
+6. **Giglio, L., Schroeder, W., & Justice, C. O.** (2016). "The Collection 6 MODIS active fire detection algorithm and fire products". *Remote Sensing of Environment*, Vol. 178, pp. 31–41.  
+   **DOI:** [10.1016/j.rse.2016.02.054](https://doi.org/10.1016/j.rse.2016.02.054)
 
-7. **Spencer, J. W.** (1971). "Fourier series representation of the position of the Sun". *Search*, Vol. 2, No. 5, p. 172.
+7. **Che, H., Xia, X., Zhu, J., Wang, H., Wang, Y., Sun, E., Zhang, X., & Shi, G.** (2019). "Estimation of surface PM2.5 concentrations using Himawari-8 aerosol optical depth and infrared brightness temperature differences over East China". *Atmospheric Environment*, Vol. 215, 116864.  
+   **DOI:** [10.1016/j.atmosenv.2019.116864](https://doi.org/10.1016/j.atmosenv.2019.116864)
 
-8. **Reda, I., & Andreas, A.** (2004). "Solar position algorithm for solar radiation applications". *Solar Energy*, Vol. 76, No. 5, pp. 577–589.  
-   **DOI:** [10.1016/j.solener.2003.12.003](https://doi.org/10.1016/j.solener.2003.12.003)
+8. **Zhang, H., Kondragunta, S., Laszlo, I., Zhou, M., & Huff, A. C.** (2020). "Estimating hourly ground-level PM2.5 concentrations using Himawari-8 AHI data over China". *Remote Sensing*, Vol. 12, No. 11, 1770.  
+   **DOI:** [10.3390/rs12111770](https://doi.org/10.3390/rs12111770)
 
-9. **Lawson, C. L., & Hanson, R. J.** (1974). *Solving Least Squares Problems*. Prentice-Hall, Englewood Cliffs, NJ, 340 pp. (Classics in Applied Mathematics, SIAM, 1995).
+9. **Schmit, T. L., Griffith, P., Gunshor, M. M., Daniels, J. M., Goodman, S. J., & Lebair, W. J.** (2017). "A closer look at the ABI on the GOES-R series". *Bulletin of the American Meteorological Society*, Vol. 98, No. 4, pp. 681–698.  
+   **DOI:** [10.1175/BAMS-D-15-00229.1](https://doi.org/10.1175/BAMS-D-15-00229.1)
 
-10. **Breiman, L.** (1996). "Stacked regressions". *Machine Learning*, Vol. 24, No. 1, pp. 49–64.  
+10. **Strabala, K. I., Ackerman, S. A., & Menzel, W. P.** (1994). "Cloud properties inferred from 8–12 $\mu\mathrm{m}$ data". *Journal of Applied Meteorology*, Vol. 33, No. 2, pp. 212–229.  
+    **DOI:** [10.1175/1520-0450(1994)033<0212:CPIFMD>2.0.CO;2](https://doi.org/10.1175/1520-0450(1994)033<0212:CPIFMD>2.0.CO;2)
+
+11. **Horton, D. E., Skinner, C. B., Singh, D., & Diffenbaugh, N. S.** (2014). "Occurrence and persistence of future atmospheric stagnation events". *Nature Climate Change*, Vol. 4, pp. 698–703.  
+    **DOI:** [10.1038/nclimate2272](https://doi.org/10.1038/nclimate2272)
+
+12. **Wang, P., Cao, J., & Shen, Z.** (2018). "Spatial and seasonal variations of air stagnation and its impact on PM2.5 in China". *Atmospheric Environment*, Vol. 180, pp. 165–175.  
+    **DOI:** [10.1016/j.atmosenv.2018.02.051](https://doi.org/10.1016/j.atmosenv.2018.02.051)
+
+13. **Weiss, A. D.** (2001). "Topographic Position and Landforms Analysis". *ESRI International User Conference Proceedings*, San Diego, CA. Available at: [TPI Poster](https://www.jennessent.com/downloads/tpi-poster-tnc_18x22.pdf).
+
+14. **Spencer, J. W.** (1971). "Fourier series representation of the position of the Sun". *Search*, Vol. 2, No. 5, p. 172.
+
+15. **Reda, I., & Andreas, A.** (2004). "Solar position algorithm for solar radiation applications". *Solar Energy*, Vol. 76, No. 5, pp. 577–589.  
+    **DOI:** [10.1016/j.solener.2003.12.003](https://doi.org/10.1016/j.solener.2003.12.003)
+
+16. **Lawson, C. L., & Hanson, R. J.** (1974). *Solving Least Squares Problems*. Prentice-Hall, Englewood Cliffs, NJ, 340 pp. (Classics in Applied Mathematics, SIAM, 1995).
+
+17. **Breiman, L.** (1996). "Stacked regressions". *Machine Learning*, Vol. 24, No. 1, pp. 49–64.  
     **DOI:** [10.1007/BF00117832](https://doi.org/10.1007/BF00117832)
 
-11. **Wolpert, D. H.** (1992). "Stacked generalization". *Neural Networks*, Vol. 5, No. 2, pp. 241–259.  
+18. **Wolpert, D. H.** (1992). "Stacked generalization". *Neural Networks*, Vol. 5, No. 2, pp. 241–259.  
     **DOI:** [10.1016/S0893-6080(05)80023-1](https://doi.org/10.1016/S0893-6080(05)80023-1)
