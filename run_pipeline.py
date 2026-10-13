@@ -1039,6 +1039,27 @@ def run_phase_1_full(
         if not stn_coords.empty:
             logger.info("Station-Centric Extraction: querying ground stations (Zero Disk Cache Footprint)...")
 
+            # Extract Target-Driven observation timestamps from Ground Truth (Point-in-Time Nowcast Match)
+            train_target_ts = None
+            if not train_gt.empty and "timestamp_utc" in train_gt.columns:
+                gt_ts_all = pd.to_datetime(train_gt["timestamp_utc"], utc=True).dt.floor("h").drop_duplicates().sort_values()
+                if cadence_hours > 1:
+                    train_target_ts = gt_ts_all[gt_ts_all.dt.hour % cadence_hours == 0].tolist()
+                else:
+                    train_target_ts = gt_ts_all.tolist()
+                logger.info("  • Target-Driven Timestamps (Train): %d exact ground truth hours selected (Cadence=%dh)",
+                            len(train_target_ts), cadence_hours)
+
+            test_target_ts = None
+            if not test_gt.empty and "timestamp_utc" in test_gt.columns:
+                test_ts_all = pd.to_datetime(test_gt["timestamp_utc"], utc=True).dt.floor("h").drop_duplicates().sort_values()
+                if cadence_hours > 1:
+                    test_target_ts = test_ts_all[test_ts_all.dt.hour % cadence_hours == 0].tolist()
+                else:
+                    test_target_ts = test_ts_all.tolist()
+                logger.info("  • Target-Driven Timestamps (Test) : %d exact ground truth hours selected (Cadence=%dh)",
+                            len(test_target_ts), cadence_hours)
+
             # 3a. Training Period Ingestion (Segment 4 only)
             if start_dt < split_dt:
                 train_range_end = min(end_dt, split_dt - pd.Timedelta(seconds=1))
@@ -1049,6 +1070,7 @@ def run_phase_1_full(
                     end_date=train_range_end,
                     stations_df=stn_coords,
                     cadence_hours=cadence_hours,
+                    target_timestamps=train_target_ts,
                     bands=bands,
                     segments=train_segs,
                     lat_col="latitude",
@@ -1068,6 +1090,7 @@ def run_phase_1_full(
                     end_date=end_dt,
                     stations_df=stn_coords,
                     cadence_hours=cadence_hours,
+                    target_timestamps=test_target_ts,
                     bands=bands,
                     segments=test_segs,
                     lat_col="latitude",
@@ -1146,8 +1169,54 @@ def run_phase_4_full(pollutant: str = "pm25", split_date: str = "2026-01-01") ->
     if matrix_path.exists():
         unified_df = pd.read_parquet(matrix_path)
     else:
-        sample_dt = pd.Timestamp("2026-10-12 14:00:00", tz="UTC")
-        return run_phase_4_smoke_test(sample_dt, pollutant=pol)
+        # Check if station satellite observations exist from Phase 1 full ingestion
+        candidate_sat_files = [
+            FEATURES_DIR / f"satellite_stations_{pol}_2024_2026.parquet",
+            FEATURES_DIR / f"satellite_stations_{pol}.parquet",
+        ] + list(FEATURES_DIR.glob(f"satellite_stations_{pol}_*.parquet"))
+
+        found_sat_p = next((p for p in candidate_sat_files if p.exists() and p.stat().st_size > 0), None)
+        if found_sat_p and not train_gt.empty:
+            logger.info("Assembling Multi-Year Feature Matrix from authentic satellite observations: %s", found_sat_p.name)
+            sat_df = pd.read_parquet(found_sat_p)
+            sat_df["timestamp_utc"] = pd.to_datetime(sat_df["timestamp"], utc=True).dt.floor("h")
+            all_gt = pd.concat([train_gt, test_gt], ignore_index=True) if not test_gt.empty else train_gt
+            all_gt["timestamp_utc"] = pd.to_datetime(all_gt["timestamp_utc"], utc=True).dt.floor("h")
+
+            # Exact point-in-time merge on location_id and timestamp_utc (Nowcast standard)
+            merged_df = sat_df.merge(
+                all_gt[["location_id", "timestamp_utc", tgt_col]].drop_duplicates(),
+                on=["location_id", "timestamp_utc"],
+                how="inner"
+            )
+            if not merged_df.empty:
+                zenith, azimuth = compute_solar_angles_vectorized(
+                    merged_df["latitude"].values, merged_df["longitude"].values, merged_df["timestamp_utc"]
+                )
+                merged_df["solar_zenith_deg"] = zenith
+                merged_df["solar_azimuth_deg"] = azimuth
+                merged_df["is_night"] = (zenith > 85.0).astype(np.float32)
+                merged_df["imputed_flag"] = 0.0
+                merged_df["cloud_occluded_flag"] = 0.0
+
+                time_feats = compute_cyclical_time_features(merged_df["timestamp_utc"])
+                for col in ["hour_sin", "hour_cos", "day_of_year_sin", "day_of_year_cos", "month_sin", "month_cos"]:
+                    if col in time_feats:
+                        merged_df[col] = time_feats[col].values
+
+                merged_df["timestamp"] = merged_df["timestamp_utc"]
+                merged_df["grid_id"] = merged_df["location_id"].astype(str)
+                unified_df = merged_df
+                builder = FeatureMatrixBuilder()
+                builder.save_matrix(unified_df, matrix_path)
+                logger.info("Successfully assembled & saved authentic multi-year unified matrix -> %s (%d records)",
+                            matrix_path.name, len(unified_df))
+            else:
+                sample_dt = pd.Timestamp("2026-10-12 14:00:00", tz="UTC")
+                return run_phase_4_smoke_test(sample_dt, pollutant=pol)
+        else:
+            sample_dt = pd.Timestamp("2026-10-12 14:00:00", tz="UTC")
+            return run_phase_4_smoke_test(sample_dt, pollutant=pol)
 
     # Attach ground truth if missing or all NaN
     if tgt_col not in unified_df.columns or unified_df[tgt_col].isna().all():

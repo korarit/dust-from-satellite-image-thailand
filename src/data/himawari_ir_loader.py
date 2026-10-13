@@ -559,10 +559,11 @@ class HimawariIRLoader:
 
     def fetch_range_station_snapshots(
         self,
-        start_date: pd.Timestamp,
-        end_date: pd.Timestamp,
-        stations_df: pd.DataFrame,
+        start_date: Optional[pd.Timestamp] = None,
+        end_date: Optional[pd.Timestamp] = None,
+        stations_df: pd.DataFrame = None,
         cadence_hours: int = 3,
+        target_timestamps: Optional[List[pd.Timestamp]] = None,
         bands: Optional[List[str]] = None,
         segments: Optional[List[int]] = None,
         lat_col: str = "latitude",
@@ -575,20 +576,29 @@ class HimawariIRLoader:
         Extracts satellite features across a multi-year date range specifically
         at ground station locations (Station-Centric Extraction).
         Supports:
+        - Target-Driven Timestamps: if target_timestamps is provided, extracts exactly those observation hours.
         - Pruning to Segment 4 for ultra-fast training vs All Segments [3, 4, 5] for testing.
         - Incremental Auto-Resume: detects existing Parquet checkpoint and resumes missing timestamps.
         - Crash-safe periodic checkpoint saves every `checkpoint_interval` snapshots.
         - Deletes raw .DAT rasters after each step (Zero Disk Footprint).
         """
-        start_dt = pd.to_datetime(start_date)
-        end_dt = pd.to_datetime(end_date)
-        if start_dt.tzinfo is None:
-            start_dt = start_dt.tz_localize("UTC")
-        if end_dt.tzinfo is None:
-            end_dt = end_dt.tz_localize("UTC")
-
         use_segments = segments if segments is not None else self.segments
-        all_timestamps = pd.date_range(start_dt, end_dt, freq=f"{cadence_hours}h")
+
+        if target_timestamps is not None and len(target_timestamps) > 0:
+            parsed_ts = [
+                pd.to_datetime(t, utc=True) if pd.to_datetime(t).tzinfo is None
+                else pd.to_datetime(t).tz_convert("UTC")
+                for t in target_timestamps
+            ]
+            all_timestamps = pd.DatetimeIndex(sorted(set(parsed_ts)))
+        else:
+            start_dt = pd.to_datetime(start_date)
+            end_dt = pd.to_datetime(end_date)
+            if start_dt.tzinfo is None:
+                start_dt = start_dt.tz_localize("UTC")
+            if end_dt.tzinfo is None:
+                end_dt = end_dt.tz_localize("UTC")
+            all_timestamps = pd.date_range(start_dt, end_dt, freq=f"{cadence_hours}h")
 
         save_p = Path(save_parquet_path) if save_parquet_path else None
         existing_df = pd.DataFrame()
