@@ -55,6 +55,7 @@ from src.config.paths import (
     configure_paths,
     DATA_DIR,
     HIMAWARI_CACHE_DIR,
+    OPENAQ_CACHE_DIR,
     HII_DIR,
     TARGET_DIR,
     REPORTS_DIR,
@@ -73,10 +74,11 @@ from src.config.paths import (
 
 def update_pipeline_runtime_paths() -> None:
     """Synchronizes module-level paths with src.config.paths."""
-    global DATA_DIR, HIMAWARI_CACHE_DIR, HII_DIR, TARGET_DIR, REPORTS_DIR, GEO_DIR, FEATURES_DIR, MODELS_DIR, MAPS_DIR, EVALUATION_DIR
+    global DATA_DIR, HIMAWARI_CACHE_DIR, OPENAQ_CACHE_DIR, HII_DIR, TARGET_DIR, REPORTS_DIR, GEO_DIR, FEATURES_DIR, MODELS_DIR, MAPS_DIR, EVALUATION_DIR
     import src.config.paths as _paths
     DATA_DIR = _paths.DATA_DIR
     HIMAWARI_CACHE_DIR = _paths.HIMAWARI_CACHE_DIR
+    OPENAQ_CACHE_DIR = _paths.OPENAQ_CACHE_DIR
     HII_DIR = _paths.HII_DIR
     TARGET_DIR = _paths.TARGET_DIR
     REPORTS_DIR = _paths.REPORTS_DIR

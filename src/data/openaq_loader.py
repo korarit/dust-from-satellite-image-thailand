@@ -16,7 +16,10 @@ import io
 import gzip
 import logging
 import urllib.request
+import urllib.error
 import json
+import time
+import random
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -27,7 +30,7 @@ from botocore.config import Config
 import numpy as np
 import pandas as pd
 
-from src.config.paths import TARGET_DIR, DATA_CONFIG_PATH, METADATA_DIR, load_yaml_config
+from src.config.paths import TARGET_DIR, DATA_CONFIG_PATH, METADATA_DIR, OPENAQ_CACHE_DIR, load_yaml_config
 
 logger = logging.getLogger(__name__)
 
@@ -77,12 +80,15 @@ class OpenAQLoader:
         self,
         target_dir: Path = TARGET_DIR,
         metadata_dir: Path = METADATA_DIR,
+        cache_dir: Optional[Path] = None,
         api_key: Optional[str] = None
     ):
-        self.target_dir = target_dir
-        self.metadata_dir = metadata_dir
+        self.target_dir = Path(target_dir)
+        self.metadata_dir = Path(metadata_dir)
+        self.cache_dir = Path(cache_dir or OPENAQ_CACHE_DIR)
         self.target_dir.mkdir(parents=True, exist_ok=True)
         self.metadata_dir.mkdir(parents=True, exist_ok=True)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
 
         cfg_key = None
         if DATA_CONFIG_PATH.exists():
@@ -176,6 +182,122 @@ class OpenAQLoader:
 
         return df[mask].reset_index(drop=True)
 
+    def _http_request_with_retry(
+        self,
+        url: str,
+        headers: Dict[str, str],
+        timeout: int = 20,
+        max_retries: int = 5,
+        base_delay: float = 6.0,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Executes an HTTP GET request with exponential backoff and retry.
+        Specifically catches HTTP 429 (Too Many Requests), pauses (5 - 10+ seconds),
+        and retries 3 - 5 times to respect rate limits.
+        """
+        for attempt in range(1, max_retries + 1):
+            try:
+                req = urllib.request.Request(url, headers=headers)
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    return json.loads(resp.read().decode("utf-8"))
+            except urllib.error.HTTPError as e:
+                if e.code == 429:
+                    if attempt <= max_retries:
+                        sleep_time = min(60.0, base_delay * (1.5 ** (attempt - 1)) + random.uniform(1.0, 3.0))
+                        logger.warning(
+                            "OpenAQ API HTTP 429 (Too Many Requests) [attempt %d/%d]. "
+                            "Pausing for %.1f seconds before retrying URL: %s",
+                            attempt, max_retries, sleep_time, url
+                        )
+                        time.sleep(sleep_time)
+                        continue
+                    else:
+                        logger.error("OpenAQ HTTP 429 rate limit exceeded max retries (%d) for %s", max_retries, url)
+                        return None
+                elif e.code in (500, 502, 503, 504):
+                    if attempt <= max_retries:
+                        sleep_time = base_delay + attempt * 2.0
+                        logger.warning(
+                            "OpenAQ API server error HTTP %d [attempt %d/%d]. Sleeping %.1fs before retry...",
+                            e.code, attempt, max_retries, sleep_time
+                        )
+                        time.sleep(sleep_time)
+                        continue
+                    return None
+                else:
+                    logger.warning("OpenAQ API HTTP Error %d for %s: %s", e.code, url, e)
+                    return None
+            except urllib.error.URLError as e:
+                if attempt <= max_retries:
+                    sleep_time = base_delay + 2.0
+                    logger.warning(
+                        "OpenAQ network connection glitch [attempt %d/%d]: %s. Retrying in %.1fs...",
+                        attempt, max_retries, e, sleep_time
+                    )
+                    time.sleep(sleep_time)
+                    continue
+                logger.warning("OpenAQ network connection failed after %d attempts: %s", max_retries, e)
+                return None
+            except Exception as e:
+                logger.warning("Unexpected error during OpenAQ request to %s: %s", url, e)
+                return None
+        return None
+
+    def get_station_cache_path(self, location_id: int, pollutant: str = "pm25") -> Path:
+        """Returns the local Parquet cache path for an individual OpenAQ station."""
+        p_param = "pm10" if "pm10" in pollutant.lower() else "pm25"
+        return self.cache_dir / f"station_{location_id}_{p_param}.parquet"
+
+    def load_cached_station(
+        self,
+        location_id: int,
+        start_date: pd.Timestamp,
+        end_date: pd.Timestamp,
+        pollutant: str = "pm25",
+    ) -> Optional[pd.DataFrame]:
+        """
+        Loads cached observations for a station from disk if available,
+        filtering to the requested date range. Returns None if not cached.
+        """
+        cache_path = self.get_station_cache_path(location_id, pollutant)
+        if not cache_path.exists():
+            return None
+
+        try:
+            df = pd.read_parquet(cache_path)
+            if df.empty:
+                return df
+
+            p_param = "pm10" if "pm10" in pollutant.lower() else "pm25"
+            target_col = f"observed_{p_param}"
+            if "timestamp_utc" in df.columns and target_col in df.columns:
+                s_ts = pd.to_datetime(start_date, utc=True).tz_localize(None)
+                e_ts = pd.to_datetime(end_date, utc=True).tz_localize(None)
+                mask = (df["timestamp_utc"] >= s_ts) & (df["timestamp_utc"] <= e_ts)
+                return df[mask].copy() if not mask.all() else df.copy()
+            return df
+        except Exception as e:
+            logger.warning("Failed reading cached station %s: %s. Will re-fetch.", cache_path, e)
+            return None
+
+    def save_cached_station(
+        self,
+        location_id: int,
+        df: pd.DataFrame,
+        pollutant: str = "pm25",
+    ) -> Path:
+        """
+        Atomically saves station observations to local disk cache for crash recovery & resuming.
+        """
+        cache_path = self.get_station_cache_path(location_id, pollutant)
+        try:
+            tmp_path = cache_path.with_suffix(".parquet.tmp")
+            df.to_parquet(tmp_path, index=False, engine="pyarrow")
+            tmp_path.replace(cache_path)
+        except Exception as e:
+            logger.warning("Could not persist station cache to %s: %s", cache_path, e)
+        return cache_path
+
     def fetch_sensor_measurements_api(
         self,
         sensor_id: int,
@@ -187,7 +309,7 @@ class OpenAQLoader:
     ) -> pd.DataFrame:
         """
         Fetches hourly particulate matter measurements directly from OpenAQ v3 API
-        with multi-page pagination for full multi-year series.
+        with multi-page pagination, rate-limit backoff, and 429 retry handling.
         Endpoint: /v3/sensors/{sensor_id}/hours
         """
         start_ts = pd.to_datetime(start_date, utc=True)
@@ -210,13 +332,16 @@ class OpenAQLoader:
                 f"{OPENAQ_API_BASE}/sensors/{sensor_id}/hours?"
                 f"datetime_from={start_iso}&datetime_to={end_iso}&limit={page_limit}&page={page}"
             )
-            try:
-                req = urllib.request.Request(url, headers=headers)
-                with urllib.request.urlopen(req, timeout=timeout) as resp:
-                    data = json.loads(resp.read().decode("utf-8"))
-            except Exception as e:
+            data = self._http_request_with_retry(
+                url,
+                headers=headers,
+                timeout=timeout,
+                max_retries=5,
+                base_delay=6.0
+            )
+            if not data:
                 if page == 1:
-                    logger.warning("OpenAQ API request failed for sensor %s: %s", sensor_id, e)
+                    logger.warning("OpenAQ API request failed for sensor %s after retries", sensor_id)
                 break
 
             results = data.get("results", [])
@@ -245,6 +370,9 @@ class OpenAQLoader:
             page += 1
             if page > 50:  # safety ceiling (up to 50,000 records per sensor)
                 break
+
+            # Polite pause between pages to mitigate burst rate limiting
+            time.sleep(0.2)
 
         if not rows:
             return pd.DataFrame()
@@ -286,9 +414,14 @@ class OpenAQLoader:
                 if self.api_key:
                     headers["X-API-Key"] = self.api_key
                 url = f"{OPENAQ_API_BASE}/locations/{location_id}"
-                req = urllib.request.Request(url, headers=headers)
-                with urllib.request.urlopen(req, timeout=15) as resp:
-                    loc_data = json.loads(resp.read().decode("utf-8"))
+                loc_data = self._http_request_with_retry(
+                    url,
+                    headers=headers,
+                    timeout=15,
+                    max_retries=5,
+                    base_delay=6.0
+                )
+                if loc_data:
                     results = loc_data.get("results", [])
                     if results:
                         loc_obj = results[0]
@@ -397,40 +530,63 @@ class OpenAQLoader:
         max_workers: int = 4,
         prefer_api: bool = True,
         pollutant: str = "pm25",
+        use_cache: bool = True,
     ) -> pd.DataFrame:
         """
         Fetches historical records for a location ID over a given date range.
+        Checks local station cache first to allow resuming interrupted downloads.
         If prefer_api is True, attempts OpenAQ v3 API first, falling back to S3 archive.
         """
+        # 1. Check local station disk cache for resuming
+        if use_cache:
+            cached_df = self.load_cached_station(location_id, start_date, end_date, pollutant=pollutant)
+            if cached_df is not None:
+                if not cached_df.empty:
+                    logger.info("  Location %d: Restored %d clean records from disk cache (%s)",
+                                location_id, len(cached_df), self.get_station_cache_path(location_id, pollutant).name)
+                return cached_df
+
+        df_clean = pd.DataFrame()
+        fetched = False
+
         if prefer_api and self.api_key:
             try:
                 df_api = self.fetch_station_api(location_id, start_date, end_date, pollutant=pollutant)
                 if not df_api.empty:
-                    return self.clean_and_qa_dataset(df_api, pollutant=pollutant)
+                    df_clean = self.clean_and_qa_dataset(df_api, pollutant=pollutant)
+                    fetched = True
             except Exception as e:
                 logger.warning("API fetch failed for loc %d, falling back to S3: %s", location_id, e)
 
-        days = pd.date_range(start_date, end_date, freq="D")
-        dfs: List[pd.DataFrame] = []
+        if not fetched:
+            days = pd.date_range(start_date, end_date, freq="D")
+            dfs: List[pd.DataFrame] = []
 
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            fut_to_day = {
-                executor.submit(self.fetch_station_day, location_id, day, pollutant): day
-                for day in days
-            }
-            for fut in as_completed(fut_to_day):
-                try:
-                    df_day = fut.result()
-                    if not df_day.empty:
-                        dfs.append(df_day)
-                except Exception as e:
-                    logger.warning("Error fetching day %s for loc %d: %s", fut_to_day[fut], location_id, e)
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                fut_to_day = {
+                    executor.submit(self.fetch_station_day, location_id, day, pollutant): day
+                    for day in days
+                }
+                for fut in as_completed(fut_to_day):
+                    try:
+                        df_day = fut.result()
+                        if not df_day.empty:
+                            dfs.append(df_day)
+                    except Exception as e:
+                        logger.warning("Error fetching day %s for loc %d: %s", fut_to_day[fut], location_id, e)
 
-        if not dfs:
-            return pd.DataFrame()
+            if dfs:
+                combined = pd.concat(dfs, ignore_index=True)
+                df_clean = self.clean_and_qa_dataset(combined, pollutant=pollutant)
+                fetched = True
 
-        combined = pd.concat(dfs, ignore_index=True)
-        return self.clean_and_qa_dataset(combined, pollutant=pollutant)
+        # Save to local station cache to support resume
+        if use_cache and (fetched or not df_clean.empty):
+            self.save_cached_station(location_id, df_clean, pollutant=pollutant)
+            if not df_clean.empty:
+                logger.info("  Location %d: Saved %d clean records to disk cache", location_id, len(df_clean))
+
+        return df_clean
 
     def fetch_benchmark_stations(
         self,
@@ -438,13 +594,14 @@ class OpenAQLoader:
         end_date: pd.Timestamp,
         location_ids: Optional[List[int]] = None,
         region: Optional[str] = None,
-        max_workers: int = 6,
+        max_workers: int = 3,
         prefer_api: bool = True,
         pollutant: str = "pm25",
+        use_cache: bool = True,
     ) -> pd.DataFrame:
         """
         Fetches historical PM2.5 or PM10 records across stations for the given date range.
-        Supports filtering by specific location_ids or geographical region ('north', 'central', etc.).
+        Includes periodic checkpointing and automatic resumption from local cache files.
         """
         if location_ids is not None:
             locs = location_ids
@@ -454,10 +611,14 @@ class OpenAQLoader:
         else:
             locs = list(DEFAULT_THAILAND_OPENAQ_LOCATIONS.keys())
 
-        logger.info("Fetching OpenAQ historical data (%s) for %d stations from %s to %s",
-                    pollutant.upper(), len(locs), start_date, end_date)
+        p_clean = "pm10" if "pm10" in pollutant.lower() else "pm25"
+        logger.info("Fetching OpenAQ historical data (%s) for %d stations from %s to %s (Cache dir: %s)",
+                    p_clean.upper(), len(locs), start_date, end_date, self.cache_dir)
 
         dfs: List[pd.DataFrame] = []
+        checkpoint_file = self.target_dir / f"openaq_{p_clean}_checkpoint.parquet"
+        processed_count = 0
+
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             fut_to_loc = {
                 executor.submit(
@@ -466,25 +627,54 @@ class OpenAQLoader:
                     start_date,
                     end_date,
                     prefer_api=prefer_api,
-                    pollutant=pollutant
+                    pollutant=pollutant,
+                    use_cache=use_cache,
                 ): loc
                 for loc in locs
             }
             for fut in as_completed(fut_to_loc):
                 loc = fut_to_loc[fut]
+                processed_count += 1
                 try:
                     df_loc = fut.result()
                     if not df_loc.empty:
                         dfs.append(df_loc)
-                        logger.info("  Location %d: Retrieved %d clean records", loc, len(df_loc))
+                        logger.info("  [%d/%d] Location %d: Retrieved %d clean records",
+                                    processed_count, len(locs), loc, len(df_loc))
+                    else:
+                        logger.info("  [%d/%d] Location %d: 0 clean records found",
+                                    processed_count, len(locs), loc)
                 except Exception as e:
                     logger.warning("Error fetching location %d: %s", loc, e)
+
+                # Periodic checkpoint every 10 stations to guarantee file exists on disk during long runs
+                if processed_count % 10 == 0 and dfs:
+                    try:
+                        cur_cp = pd.concat(dfs, ignore_index=True)
+                        tmp_cp = checkpoint_file.with_suffix(".parquet.tmp")
+                        cur_cp.to_parquet(tmp_cp, index=False, engine="pyarrow")
+                        tmp_cp.replace(checkpoint_file)
+                        logger.info("  💾 [Checkpoint] Progress saved to %s (%d records from %d stations)",
+                                    checkpoint_file, len(cur_cp), cur_cp["station_code"].nunique())
+                    except Exception as cp_err:
+                        logger.debug("Failed updating periodic checkpoint: %s", cp_err)
 
         if not dfs:
             return pd.DataFrame()
 
         combined = pd.concat(dfs, ignore_index=True)
-        return self.clean_and_qa_dataset(combined, pollutant=pollutant)
+        final_df = self.clean_and_qa_dataset(combined, pollutant=pollutant)
+
+        # Save final consolidated checkpoint
+        try:
+            tmp_cp = checkpoint_file.with_suffix(".parquet.tmp")
+            final_df.to_parquet(tmp_cp, index=False, engine="pyarrow")
+            tmp_cp.replace(checkpoint_file)
+            logger.info("  💾 [Checkpoint] Final consolidated data saved to %s", checkpoint_file)
+        except Exception as cp_err:
+            logger.debug("Failed saving final checkpoint: %s", cp_err)
+
+        return final_df
 
     def clean_and_qa_dataset(self, df: pd.DataFrame, pollutant: str = "pm25") -> pd.DataFrame:
         """

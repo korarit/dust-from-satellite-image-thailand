@@ -47,10 +47,15 @@ class GroundTruthLoader:
     Manages loading, cleaning, and validating real physical PM2.5 and PM10 ground truth observations.
     """
 
-    def __init__(self, target_dir: Path = TARGET_DIR, openaq_api_key: Optional[str] = None):
-        self.target_dir = target_dir
+    def __init__(
+        self,
+        target_dir: Path = TARGET_DIR,
+        cache_dir: Optional[Path] = None,
+        openaq_api_key: Optional[str] = None
+    ):
+        self.target_dir = Path(target_dir)
         self.target_dir.mkdir(parents=True, exist_ok=True)
-        self.openaq_loader = OpenAQLoader(target_dir=self.target_dir, api_key=openaq_api_key)
+        self.openaq_loader = OpenAQLoader(target_dir=self.target_dir, cache_dir=cache_dir, api_key=openaq_api_key)
 
     def fetch_openaq_historical(
         self,
@@ -63,10 +68,10 @@ class GroundTruthLoader:
     ) -> pd.DataFrame:
         """
         Fetches historical PM2.5 or PM10 observations from OpenAQ (mirroring PCD Air4Thai stations)
-        via OpenAQ v3 API or AWS S3 archive.
+        via OpenAQ v3 API or AWS S3 archive with resume & caching.
         Supports regional filtering: 'north', 'northeast', 'central', 'east', 'south', 'all'.
         """
-        return self.openaq_loader.fetch_benchmark_stations(
+        df = self.openaq_loader.fetch_benchmark_stations(
             start_date=start_date,
             end_date=end_date,
             location_ids=location_ids,
@@ -74,6 +79,14 @@ class GroundTruthLoader:
             prefer_api=prefer_api,
             pollutant=pollutant,
         )
+        if not df.empty:
+            pol_clean = "pm10" if "pm10" in pollutant.lower() else "pm25"
+            try:
+                raw_filename = f"openaq_{pol_clean}_historical.parquet"
+                self.openaq_loader.save_to_parquet(df, filename=raw_filename)
+            except Exception as e:
+                logger.warning("Could not save %s raw archive: %s", raw_filename, e)
+        return df
 
     def _get_ssl_context(self) -> ssl.SSLContext:
         """Creates an SSL context that handles self-signed or internal government certs."""

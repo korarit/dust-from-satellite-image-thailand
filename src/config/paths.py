@@ -20,6 +20,7 @@ OUTPUTS_DIR = Path(os.getenv("DUST_OUTPUTS_DIR", PROJECT_ROOT / "outputs"))
 # Data Subdirectories
 CACHE_DIR = DATA_DIR / "cache"
 HIMAWARI_CACHE_DIR = CACHE_DIR / "himawari_s3"
+OPENAQ_CACHE_DIR = CACHE_DIR / "openaq"
 HIMAWARI_DIR = DATA_DIR / "himawari9"
 HII_DIR = DATA_DIR / "hii"
 TARGET_DIR = DATA_DIR / "target"
@@ -84,7 +85,7 @@ def configure_paths(
     Designed for Google Colab and cloud instances with custom storage volumes.
     """
     global DATA_DIR, OUTPUTS_DIR
-    global CACHE_DIR, HIMAWARI_CACHE_DIR, HIMAWARI_DIR, HII_DIR, TARGET_DIR, GEO_DIR, METADATA_DIR, FEATURES_DIR
+    global CACHE_DIR, HIMAWARI_CACHE_DIR, OPENAQ_CACHE_DIR, HIMAWARI_DIR, HII_DIR, TARGET_DIR, GEO_DIR, METADATA_DIR, FEATURES_DIR
     global OUTPUTS_PM25_DIR, OUTPUTS_PM10_DIR, REPORTS_DIR, MODELS_DIR, MAPS_DIR, EVALUATION_DIR
 
     if data_dir is not None:
@@ -92,6 +93,7 @@ def configure_paths(
         os.environ["DUST_DATA_DIR"] = str(DATA_DIR)
         CACHE_DIR = DATA_DIR / "cache"
         HIMAWARI_CACHE_DIR = CACHE_DIR / "himawari_s3"
+        OPENAQ_CACHE_DIR = CACHE_DIR / "openaq"
         HIMAWARI_DIR = DATA_DIR / "himawari9"
         HII_DIR = DATA_DIR / "hii"
         TARGET_DIR = DATA_DIR / "target"
@@ -142,6 +144,7 @@ def ensure_directories() -> None:
         DATA_DIR,
         CACHE_DIR,
         HIMAWARI_CACHE_DIR,
+        OPENAQ_CACHE_DIR,
         HIMAWARI_DIR,
         HII_DIR,
         TARGET_DIR,
