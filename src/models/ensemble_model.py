@@ -65,6 +65,7 @@ class DustStackingEnsemble(BaseDustModel):
             ),
             "catboost": CatBoostDustModel(
                 model_params=models_cfg.get("catboost", {}),
+                monotonic_constraints=self.mono_constraints,
             ),
             "xgboost": XGBoostDustModel(
                 model_params=models_cfg.get("xgboost", {}),
@@ -150,9 +151,11 @@ class DustStackingEnsemble(BaseDustModel):
 
         def objective(w: np.ndarray) -> float:
             pred = oof_matrix @ w
+            diff = pred - y_arr
             if loss_metric == "mae":
-                return float(np.mean(np.abs(pred - y_arr)))
-            return float(np.mean((pred - y_arr) ** 2))
+                # Smooth Charbonnier / Pseudo-Huber loss approximating L1
+                return float(np.mean(np.sqrt(diff ** 2 + 1e-6)))
+            return float(np.mean(diff ** 2))
 
         init_w = np.ones(len(MODEL_KEYS), dtype=np.float64) / len(MODEL_KEYS)
         bounds = [(0.0, 1.0) for _ in range(len(MODEL_KEYS))]
@@ -163,7 +166,7 @@ class DustStackingEnsemble(BaseDustModel):
             normalized_weights = np.clip(opt_res.x, 0.0, 1.0)
             normalized_weights = normalized_weights / np.sum(normalized_weights)
         else:
-            # Fallback to NNLS if SLSQP fails
+            # Fallback to Simplex-projected NNLS if SLSQP fails
             raw_weights, _ = nnls(oof_matrix, y_arr)
             sum_w = np.sum(raw_weights)
             if sum_w > 1e-7:
@@ -380,6 +383,7 @@ class DustStackingEnsemble(BaseDustModel):
         elif model_key == "catboost":
             return CatBoostDustModel(
                 model_params=models_cfg.get("catboost", {}),
+                monotonic_constraints=self.mono_constraints,
             )
         elif model_key == "xgboost":
             return XGBoostDustModel(

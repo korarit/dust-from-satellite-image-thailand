@@ -68,12 +68,15 @@ class LGBMDustModel(BaseDustModel):
 
         fit_params = dict(self.params)
 
-        # Build monotone constraints sequence if specified and supported by objective
-        # Note: LightGBM does not support monotone_constraints with regression_l1
+        # Build monotone constraints sequence if specified
+        # LightGBM requires smooth objective (such as huber) for monotone_constraints
         obj = fit_params.get("objective", "regression_l1")
-        if self.monotonic_constraints and len(self.feature_names_) > 0 and obj not in ("regression_l1", "mae", "l1"):
+        if self.monotonic_constraints and len(self.feature_names_) > 0:
             m_list = [self.monotonic_constraints.get(fn, 0) for fn in self.feature_names_]
             if any(m != 0 for m in m_list):
+                if obj in ("regression_l1", "mae", "l1"):
+                    logger.info("LightGBM requires smooth loss for monotone_constraints: adapting objective from '%s' to 'huber'.", obj)
+                    fit_params["objective"] = "huber"
                 fit_params["monotone_constraints"] = m_list
 
 

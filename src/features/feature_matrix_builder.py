@@ -315,7 +315,24 @@ class PhysicsFallbackImputer:
     """
 
     def __init__(self):
-        pass
+        self.fitted_stats_: Dict[str, float] = {}
+
+    def fit(self, df: pd.DataFrame) -> "PhysicsFallbackImputer":
+        """
+        Learns deterministic median statistics from a training DataFrame
+        to prevent train/test distribution leakage during evaluation.
+        """
+        self.fitted_stats_ = {}
+        for col in df.columns:
+            if pd.api.types.is_numeric_dtype(df[col]):
+                valid_vals = df[col].dropna()
+                if len(valid_vals) > 0:
+                    self.fitted_stats_[col] = float(valid_vals.median())
+        return self
+
+    def transform(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Applies imputation using fitted training statistics."""
+        return self.impute_features(df)
 
     def impute_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -341,11 +358,15 @@ class PhysicsFallbackImputer:
                 nans = out_df[col].isna()
                 if nans.any():
                     imputed_mask |= nans
-                    valid_vals = out_df[col].dropna()
-                    median_val = float(valid_vals.median()) if len(valid_vals) > 0 else CLIMATOLOGY_SURFACE_BT_K
+                    if col in self.fitted_stats_:
+                        median_val = self.fitted_stats_[col]
+                    else:
+                        valid_vals = out_df[col].dropna()
+                        median_val = float(valid_vals.median()) if len(valid_vals) > 0 else CLIMATOLOGY_SURFACE_BT_K
                     out_df[col] = out_df[col].fillna(median_val).astype(np.float32)
             else:
-                out_df[col] = np.float32(CLIMATOLOGY_SURFACE_BT_K)
+                default_bt = self.fitted_stats_.get(col, CLIMATOLOGY_SURFACE_BT_K)
+                out_df[col] = np.float32(default_bt)
                 imputed_mask[:] = True
 
         # 3. Impute / Recalculate BTD Columns
@@ -410,20 +431,32 @@ class PhysicsFallbackImputer:
             else:
                 out_df[col] = np.float32(0.0)
 
-        # 6. Impute Weather Pressure Columns
+        # 6. Impute Weather Pressure Columns with Barometric Elevation Scaling
         p_mean = (
-            float(out_df["pressure_mean_surround"].dropna().median())
-            if "pressure_mean_surround" in out_df.columns and not out_df["pressure_mean_surround"].dropna().empty
-            else CLIMATOLOGY_PRESSURE_HPA
+            self.fitted_stats_.get("pressure_mean_surround")
+            if "pressure_mean_surround" in self.fitted_stats_
+            else (
+                float(out_df["pressure_mean_surround"].dropna().median())
+                if "pressure_mean_surround" in out_df.columns and not out_df["pressure_mean_surround"].dropna().empty
+                else CLIMATOLOGY_PRESSURE_HPA
+            )
         )
+        # Barometric elevation scale factor: P(z) = P0 * (1 - L*z/T0)^5.25588
+        if "elevation_m" in out_df.columns:
+            z_arr = np.maximum(out_df["elevation_m"].fillna(0.0).to_numpy(dtype=float), 0.0)
+            f_baro = (1.0 - (0.0065 * z_arr) / 288.15) ** 5.25588
+            p_elevation_adjusted = (p_mean * f_baro).astype(np.float32)
+        else:
+            p_elevation_adjusted = np.float32(p_mean)
+
         for p_dir in ["p_north", "p_south", "p_east", "p_west", "pressure_mean_surround"]:
             if p_dir in out_df.columns:
                 nans = out_df[p_dir].isna()
                 if nans.any():
                     imputed_mask |= nans
-                    out_df[p_dir] = out_df[p_dir].fillna(p_mean).astype(np.float32)
+                    out_df[p_dir] = out_df[p_dir].fillna(p_elevation_adjusted).astype(np.float32)
             else:
-                out_df[p_dir] = np.float32(p_mean)
+                out_df[p_dir] = p_elevation_adjusted
 
         for p_grad in ["delta_p_ns", "delta_p_ew"]:
             if p_grad in out_df.columns:
@@ -519,7 +552,8 @@ class TargetMatcher:
         and optional timestamp window filtering to eliminate multi-day temporal aggregation (Issue #2).
         """
         out_df = grid_df.copy()
-        out_df[target_val_col] = np.nan
+        if target_val_col not in out_df.columns:
+            out_df[target_val_col] = np.nan
 
         if ground_truth_df.empty:
             return out_df

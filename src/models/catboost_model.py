@@ -30,8 +30,10 @@ class CatBoostDustModel(BaseDustModel):
         self,
         model_params: Optional[Dict[str, Any]] = None,
         name: str = "CatBoost",
+        monotonic_constraints: Optional[Dict[str, int]] = None,
     ) -> None:
         super().__init__(model_params=model_params, name=name)
+        self.monotonic_constraints: Dict[str, int] = monotonic_constraints or {}
 
         # Default high-performance parameters
         self.params: Dict[str, Any] = {
@@ -60,7 +62,13 @@ class CatBoostDustModel(BaseDustModel):
         y_arr = self._prepare_target(y)
         self.feature_names_ = f_names
 
-        self.estimator = CatBoostRegressor(**self.params)
+        fit_params = dict(self.params)
+        if self.monotonic_constraints and len(self.feature_names_) > 0:
+            m_list = [self.monotonic_constraints.get(fn, 0) for fn in self.feature_names_]
+            if any(m != 0 for m in m_list):
+                fit_params["monotone_constraints"] = m_list
+
+        self.estimator = CatBoostRegressor(**fit_params)
 
         train_pool = Pool(data=X_arr, label=y_arr, feature_names=self.feature_names_)
 
@@ -112,6 +120,7 @@ class CatBoostDustModel(BaseDustModel):
         checkpoint = {
             "name": self.name,
             "params": self.params,
+            "monotonic_constraints": self.monotonic_constraints,
             "feature_names_": self.feature_names_,
             "is_fitted_": self.is_fitted_,
             "estimator": self.estimator,
@@ -125,6 +134,7 @@ class CatBoostDustModel(BaseDustModel):
         model = cls(
             model_params=checkpoint["params"],
             name=checkpoint["name"],
+            monotonic_constraints=checkpoint.get("monotonic_constraints", {}),
         )
         model.estimator = checkpoint["estimator"]
         model.feature_names_ = checkpoint["feature_names_"]

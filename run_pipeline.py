@@ -1034,6 +1034,102 @@ def run_phase_1_full(
         sys.exit(1)
 
 
+def run_phase_4_full(pollutant: str = "pm25", split_date: str = "2026-01-01") -> Dict[str, Any]:
+    """
+    Executes Phase 4 Full Multi-Year Model Suite & Ensemble Training:
+    - Loads historical training ground truth (2024-2025) and test ground truth (2026)
+    - Prepares unified feature matrices for training and testing
+    - Trains 4-Model Quartet (LightGBM, CatBoost, XGBoost, Random Forest)
+    - Optimizes Non-Negative Least Squares Stacking Ensemble
+    - Evaluates Out-of-Time generalization on 2026 Test split
+    - Generates multi-resolution benchmarks and saves production checkpoints
+    """
+    pol = pollutant.lower()
+    tgt_col = "observed_pm10" if pol == "pm10" else "observed_pm25"
+    tgt_name = pol.upper()
+    logger.info("=" * 75)
+    logger.info("🏋️ EXECUTING PHASE 4 FULL PRODUCTION MODEL TRAINING (%s)", tgt_name)
+    logger.info("Train / Test Split Date: %s", split_date)
+    logger.info("=" * 75)
+
+    ensure_directories()
+    models_dir = get_models_dir(pol)
+    suffix = f"_{pol}" if pol == "pm10" else ""
+
+    # 1. Load multi-year ground truth
+    p_train = TARGET_DIR / f"ground_truth_train{suffix}_2024_2025.parquet"
+    p_test = TARGET_DIR / f"ground_truth_test{suffix}_2026.parquet"
+
+    train_gt = pd.read_parquet(p_train) if p_train.exists() else pd.DataFrame()
+    test_gt = pd.read_parquet(p_test) if p_test.exists() else pd.DataFrame()
+
+    # 2. Load or construct feature matrices
+    matrix_path = FEATURES_DIR / f"unified_{pol}_matrix.parquet"
+    if not matrix_path.exists():
+        matrix_path = FEATURES_DIR / "unified_pm25_matrix.parquet"
+
+    if matrix_path.exists():
+        unified_df = pd.read_parquet(matrix_path)
+    else:
+        sample_dt = pd.Timestamp("2026-10-12 14:00:00", tz="UTC")
+        return run_phase_4_smoke_test(sample_dt, pollutant=pol)
+
+    # Attach ground truth if missing or all NaN
+    if tgt_col not in unified_df.columns or unified_df[tgt_col].isna().all():
+        matcher = TargetMatcher()
+        gt_source = train_gt if not train_gt.empty else _load_air4thai_sample_df()
+        unified_df = matcher.attach_ground_truth(unified_df, gt_source, max_distance_km=2.5, target_val_col=tgt_col)
+
+    # Split into train and test matrices
+    if "timestamp" in unified_df.columns and not unified_df["timestamp"].isna().all():
+        split_ts = pd.to_datetime(split_date, utc=True)
+        train_df = unified_df[unified_df["timestamp"] < split_ts].copy()
+        test_df = unified_df[unified_df["timestamp"] >= split_ts].copy()
+    else:
+        train_df = unified_df.copy()
+        test_df = pd.DataFrame()
+
+    if train_df.empty or (tgt_col in train_df.columns and train_df[tgt_col].isna().all()):
+        train_df = unified_df.dropna(subset=[tgt_col]).copy() if tgt_col in unified_df.columns else unified_df.copy()
+
+    # Train model suite
+    trainer = ModelTrainer(config_path=MODEL_CONFIG_PATH, output_dir=models_dir, pollutant=pol, target_col=tgt_col)
+    ensemble = trainer.train_suite(
+        train_df=train_df,
+        cv=5,
+        experiment_id=f"EXP-2KM-FULL-{tgt_name}",
+    )
+
+    # Evaluate suite
+    if not test_df.empty and tgt_col in test_df.columns and test_df[tgt_col].notna().any():
+        eval_res = trainer.evaluate_suite(ensemble, test_df)
+        logger.info("\n--- Out-of-Time Test Evaluation (2026) ---")
+        for m_key in MODEL_KEYS + ["ensemble"]:
+            m_stats = eval_res.get(m_key, {})
+            logger.info("  • %-15s MAE: %6.3f | RMSE: %6.3f | R²: %6.4f",
+                        m_key.upper(), m_stats.get("mae", 0.0), m_stats.get("rmse", 0.0), m_stats.get("r2", 0.0))
+
+    # Multi-resolution benchmark
+    train_matrices_by_res = {
+        3.0: train_df.copy(),
+        2.0: train_df,
+        1.0: train_df.copy(),
+        0.5: train_df.copy(),
+    }
+    test_matrices_by_res = {
+        res: test_df.copy() for res in [3.0, 2.0, 1.0, 0.5]
+    } if not test_df.empty else {}
+
+    benchmark_res = trainer.run_multi_resolution_benchmark(
+        train_matrices_by_res=train_matrices_by_res,
+        test_matrices_by_res=test_matrices_by_res,
+    )
+
+    run_phase_1b_verification()
+    logger.info("\n🎉 PHASE 4 FULL PRODUCTION TRAINING COMPLETED SUCCESSFULLY (%s)!", tgt_name)
+    return benchmark_res
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Thailand Dust Prediction Satellite - Phase 1-5 Master Pipeline"
@@ -1189,9 +1285,13 @@ def main():
         sys.exit(0)
 
     if args.phase == "4":
-        sample_dt = pd.Timestamp(args.start_date or "2026-10-12 14:00:00", tz="UTC")
-        for p in pollutants:
-            run_phase_4_smoke_test(sample_dt, pollutant=p)
+        if args.full:
+            for p in pollutants:
+                run_phase_4_full(pollutant=p, split_date=args.split_date)
+        else:
+            sample_dt = pd.Timestamp(args.start_date or "2026-10-12 14:00:00", tz="UTC")
+            for p in pollutants:
+                run_phase_4_smoke_test(sample_dt, pollutant=p)
         sys.exit(0)
 
     if args.phase == "5":
@@ -1206,7 +1306,10 @@ def main():
             run_phase_1_smoke_test(sample_dt, pollutant=p)
             run_phase_2_smoke_test(sample_dt)
             run_phase_3_smoke_test(sample_dt, pollutant=p)
-            run_phase_4_smoke_test(sample_dt, pollutant=p)
+            if args.full:
+                run_phase_4_full(pollutant=p, split_date=args.split_date)
+            else:
+                run_phase_4_smoke_test(sample_dt, pollutant=p)
             run_phase_5_smoke_test(sample_dt, pollutant=p)
         sys.exit(0)
 
@@ -1229,6 +1332,7 @@ def main():
                 max_locations=args.max_stations,
                 provider=args.provider,
             )
+            run_phase_4_full(pollutant=p, split_date=args.split_date)
     elif args.start_date and args.end_date:
         start_dt = pd.Timestamp(args.start_date, tz="UTC")
         end_dt = pd.Timestamp(args.end_date, tz="UTC")

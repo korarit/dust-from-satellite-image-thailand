@@ -169,7 +169,7 @@ def compute_solar_zenith_angle(
 
     # Equation of time in minutes
     eqtime = 229.18 * (
-        0.000075 + 0.01868 * math.cos(gamma) - 0.032077 * math.sin(gamma)
+        0.000075 + 0.001868 * math.cos(gamma) - 0.032077 * math.sin(gamma)
         - 0.014615 * math.cos(2.0 * gamma) - 0.040849 * math.sin(2.0 * gamma)
     )
 
