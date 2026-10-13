@@ -43,6 +43,13 @@ BUCKET_H9 = "noaa-himawari9"
 # Satellite Operational Cutover timestamp (Dec 13, 2022 ~05:00 UTC)
 HIMAWARI_CUTOVER_UTC = pd.Timestamp("2022-12-13 05:00:00", tz="UTC")
 
+# 2025 Himawari-9 Anomaly & Backup Period:
+# On 2025-10-11 ~15:30 UTC, Himawari-9 encountered an imager anomaly.
+# JMA temporarily switched primary operations to backup satellite Himawari-8 (H08)
+# from 2025-10-11 23:20 UTC until operations were restored to Himawari-9 on 2025-11-26 04:50 UTC.
+H8_ANOMALY_BACKUP_START = pd.Timestamp("2025-10-11 15:30:00", tz="UTC")
+H8_ANOMALY_BACKUP_END = pd.Timestamp("2025-11-26 04:50:00", tz="UTC")
+
 # 5 Core Physical IR Bands (Satellite-Only Dust, Fire, Moisture & Inversion)
 CORE_5_IR_BANDS = ["B07", "B10", "B11", "B13", "B15"]
 # Default bands to load (reduced from 10 to 5 to eliminate redundancy and save 50% bandwidth)
@@ -69,6 +76,8 @@ def get_himawari_bucket_and_sat(target_dt: pd.Timestamp) -> Tuple[str, str]:
         ts = ts.tz_convert("UTC")
 
     if ts < HIMAWARI_CUTOVER_UTC:
+        return BUCKET_H8, "H08"
+    if H8_ANOMALY_BACKUP_START <= ts < H8_ANOMALY_BACKUP_END:
         return BUCKET_H8, "H08"
     return BUCKET_H9, "H09"
 
@@ -296,7 +305,52 @@ class HimawariIRLoader:
                     except Exception as e:
                         logger.warning("Error downloading segment %s: %s", k, e)
 
-        # 3. Assemble results per band
+        # 3. Satellite Fallback check: If all segments for any band failed, attempt alternate satellite
+        primary_bucket, _ = get_himawari_bucket_and_sat(dt)
+        missing_bands = [
+            b for b in bands
+            if not any(is_cached or (k in downloaded_results) for k, _, is_cached in band_segments_map[b])
+        ]
+        if missing_bands:
+            alt_bucket = BUCKET_H8 if primary_bucket == BUCKET_H9 else BUCKET_H9
+            alt_sat_old = "H09" if primary_bucket == BUCKET_H9 else "H08"
+            alt_sat_new = "H08" if primary_bucket == BUCKET_H9 else "H09"
+            alt_needed_downloads: List[Tuple[str, str, Path]] = []
+
+            for b in missing_bands:
+                alt_seg_info = []
+                for orig_k, _, _ in band_segments_map[b]:
+                    alt_k = orig_k.replace(f"HS_{alt_sat_old}_", f"HS_{alt_sat_new}_")
+                    fname = Path(alt_k).name
+                    dat_fname = fname[:-4] if fname.endswith(".bz2") else fname
+                    dat_path = self.cache_dir / dat_fname
+                    is_cached = dat_path.exists() and dat_path.stat().st_size > 0
+                    alt_seg_info.append((alt_k, dat_path, is_cached))
+                    if not is_cached:
+                        alt_needed_downloads.append((alt_bucket, alt_k, dat_path))
+                band_segments_map[b] = alt_seg_info
+
+            if alt_needed_downloads:
+                logger.info(
+                    "Attempting alternate satellite fallback (%s -> %s) for %s missing bands at %s",
+                    alt_sat_old, alt_sat_new, len(missing_bands), dt
+                )
+                alt_workers = min(len(alt_needed_downloads), self.max_workers)
+                with ThreadPoolExecutor(max_workers=alt_workers) as executor:
+                    alt_futs = {
+                        executor.submit(_download_and_extract_single_key, b, k, self.cache_dir, self.s3_client): k
+                        for b, k, _ in alt_needed_downloads
+                    }
+                    for fut in as_completed(alt_futs):
+                        k = alt_futs[fut]
+                        try:
+                            res = fut.result()
+                            if res is not None:
+                                downloaded_results[k] = res
+                        except Exception as e:
+                            logger.debug("Alternate satellite fallback failed for %s: %s", k, e)
+
+        # 4. Assemble results per band
         for band, seg_info in band_segments_map.items():
             dat_files = []
             for k, dat_path, is_cached in seg_info:
@@ -665,6 +719,12 @@ class HimawariIRLoader:
             if save_p and new_batch_dfs and ((i + 1) % checkpoint_interval == 0 or (i + 1) == len(pending_timestamps)):
                 try:
                     chk_df = pd.concat(accumulated_dfs, ignore_index=True)
+                    if "timestamp" in chk_df.columns:
+                        dedup_cols = ["timestamp", "location_id"] if "location_id" in chk_df.columns else ["timestamp", lat_col, lon_col]
+                        valid_cols = [c for c in dedup_cols if c in chk_df.columns]
+                        if valid_cols:
+                            chk_df = chk_df.drop_duplicates(subset=valid_cols)
+                        chk_df = chk_df.sort_values("timestamp").reset_index(drop=True)
                     save_p.parent.mkdir(parents=True, exist_ok=True)
                     chk_df.to_parquet(save_p, compression="snappy", index=False)
                     logger.debug("  [Checkpoint Saved] -> %s (%d rows, %d timestamps)",
@@ -674,6 +734,12 @@ class HimawariIRLoader:
 
         if accumulated_dfs:
             final_df = pd.concat(accumulated_dfs, ignore_index=True)
+            if "timestamp" in final_df.columns:
+                dedup_cols = ["timestamp", "location_id"] if "location_id" in final_df.columns else ["timestamp", lat_col, lon_col]
+                valid_cols = [c for c in dedup_cols if c in final_df.columns]
+                if valid_cols:
+                    final_df = final_df.drop_duplicates(subset=valid_cols)
+                final_df = final_df.sort_values("timestamp").reset_index(drop=True)
             if save_p:
                 save_p.parent.mkdir(parents=True, exist_ok=True)
                 final_df.to_parquet(save_p, compression="snappy", index=False)

@@ -1,5 +1,5 @@
 {
-  "audit_timestamp_utc": "2026-10-13T16:54:43.016596+00:00",
+  "audit_timestamp_utc": "2026-10-13T21:03:55.209159+00:00",
   "overall_decision": "CERTIFIED_REAL_OBSERVATIONS_PASS",
   "is_synthetic": false,
   "gate_version": "1.0-strict-zero-mock",
@@ -11,9 +11,15 @@
     },
     "himawari_satellite": {
       "status": "PASS",
-      "files_count": 94,
+      "files_count": 95,
       "verified": true,
       "sample_files": [
+        {
+          "filename": "HS_H08_20251012_0000_B13_FLDK_R20_S0410.DAT",
+          "size_bytes": 6053689,
+          "sha256_prefix": "cc996a9034091adc",
+          "valid_hsd_naming": true
+        },
         {
           "filename": "HS_H09_20230101_0000_B13_FLDK_R20_S0410.DAT",
           "size_bytes": 6051533,
@@ -36,12 +42,6 @@
           "filename": "HS_H09_20251230_0000_B07_FLDK_R20_S0410.DAT",
           "size_bytes": 6051533,
           "sha256_prefix": "8156990420690d54",
-          "valid_hsd_naming": true
-        },
-        {
-          "filename": "HS_H09_20251230_0000_B07_FLDK_R20_S0510.DAT",
-          "size_bytes": 6051523,
-          "sha256_prefix": "e8a7fabe35a370cc",
           "valid_hsd_naming": true
         }
       ]

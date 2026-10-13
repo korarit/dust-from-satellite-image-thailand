@@ -82,6 +82,14 @@ def test_himawari_timestamp_and_keys():
     assert "HS_H09_20230101_0010_B13_FLDK_R20_S0310.DAT.bz2" in keys[0]
     assert "HS_H09_20230101_0010_B13_FLDK_R20_S0410.DAT.bz2" in keys[1]
 
+    # Verify 2025 Himawari-9 anomaly backup switch to Himawari-8
+    dt_anomaly = pd.Timestamp("2025-10-20 12:00:00", tz="UTC")
+    bucket_anomaly, sat_anomaly = get_himawari_bucket_and_sat(dt_anomaly)
+    assert bucket_anomaly == "noaa-himawari8"
+    assert sat_anomaly == "H08"
+    _, keys_anomaly = build_s3_prefix_and_keys(dt_anomaly, "B13", segments=[4])
+    assert "HS_H08_20251020_1200_B13_FLDK_R20_S0410.DAT.bz2" in keys_anomaly[0]
+
 
 def test_himawari_physical_bounds_sanitization():
     """Verifies Brightness Temperature physical bounds sanitization."""
