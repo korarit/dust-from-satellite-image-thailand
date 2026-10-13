@@ -21,7 +21,7 @@ import json
 import time
 import random
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple, Any
+from typing import List, Dict, Optional, Tuple, Any, Set
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import boto3
@@ -380,21 +380,18 @@ class OpenAQLoader:
         df = pd.DataFrame(rows)
         return df.drop_duplicates(subset=["timestamp_utc"]).sort_values("timestamp_utc")
 
-    def fetch_station_api(
+    def _resolve_station_sensor(
         self,
         location_id: int,
-        start_date: pd.Timestamp,
-        end_date: pd.Timestamp,
         pollutant: str = "pm25",
-    ) -> pd.DataFrame:
+    ) -> Tuple[Optional[int], str, float, float]:
         """
-        Fetches observations for a station location via OpenAQ v3 API.
-        Resolves the sensor_id and station coordinates from the station catalog.
+        Resolves sensor_id, station_name, lat, lon for an OpenAQ location ID.
+        Checks local station catalog first, falling back to OpenAQ API /v3/locations/{id}.
         """
         stations = self.get_thailand_stations()
         match = stations[stations["location_id"] == location_id]
         p_param = "pm10" if "pm10" in pollutant.lower() else "pm25"
-        target_col = f"observed_{p_param}"
 
         if not match.empty:
             row = match.iloc[0]
@@ -402,6 +399,8 @@ class OpenAQLoader:
             station_name = row.get("station_name", f"OpenAQ_{location_id}")
             lat = float(row.get("latitude", 13.75))
             lon = float(row.get("longitude", 100.5))
+            if pd.notna(sensor_id) and sensor_id:
+                return int(sensor_id), station_name, lat, lon
         else:
             sensor_id = None
             station_name = DEFAULT_THAILAND_OPENAQ_LOCATIONS.get(location_id, f"OpenAQ_{location_id}")
@@ -436,8 +435,24 @@ class OpenAQLoader:
                                 break
             except Exception as e:
                 logger.warning("Could not resolve sensor for location %d: %s", location_id, e)
-                return pd.DataFrame()
 
+        return (int(sensor_id) if sensor_id else None), station_name, lat, lon
+
+    def fetch_station_api(
+        self,
+        location_id: int,
+        start_date: pd.Timestamp,
+        end_date: pd.Timestamp,
+        pollutant: str = "pm25",
+    ) -> pd.DataFrame:
+        """
+        Fetches observations for a station location via OpenAQ v3 API.
+        Resolves the sensor_id and station coordinates from the station catalog.
+        """
+        p_param = "pm10" if "pm10" in pollutant.lower() else "pm25"
+        target_col = f"observed_{p_param}"
+
+        sensor_id, station_name, lat, lon = self._resolve_station_sensor(location_id, pollutant=pollutant)
         if not sensor_id:
             logger.warning("No %s sensor found for location %d", p_param.upper(), location_id)
             return pd.DataFrame()
@@ -457,6 +472,227 @@ class OpenAQLoader:
             target_col, "latitude", "longitude", "source"
         ]
         return df_meas[cols]
+
+    def discover_s3_station_keys(
+        self,
+        location_id: int,
+        start_date: pd.Timestamp,
+        end_date: pd.Timestamp,
+    ) -> List[Tuple[str, Any]]:
+        """
+        Discovers all available daily CSV.GZ archive keys on AWS S3 for a location ID
+        within the requested year and date range.
+        S3 Key pattern: records/csv.gz/locationid={id}/year={year}/month={month}/location-{id}-{yyyymmdd}.csv.gz
+        """
+        start_d = pd.to_datetime(start_date).date()
+        end_d = pd.to_datetime(end_date).date()
+        years = range(start_d.year, end_d.year + 1)
+        valid_keys: List[Tuple[str, Any]] = []
+
+        for y in years:
+            prefix = f"records/csv.gz/locationid={location_id}/year={y}/"
+            try:
+                paginator = self._s3_client.get_paginator("list_objects_v2")
+                for page in paginator.paginate(Bucket=OPENAQ_S3_BUCKET, Prefix=prefix):
+                    for obj in page.get("Contents", []):
+                        k = obj.get("Key", "")
+                        fn = k.split("/")[-1]
+                        parts = fn.replace(".csv.gz", "").split("-")
+                        if len(parts) >= 3 and parts[-1].isdigit() and len(parts[-1]) == 8:
+                            try:
+                                dt = pd.to_datetime(parts[-1], format="%Y%m%d").date()
+                                if start_d <= dt <= end_d:
+                                    valid_keys.append((k, dt))
+                            except Exception:
+                                continue
+            except Exception as e:
+                logger.debug("S3 listing failed for loc %d year %d: %s", location_id, y, e)
+                continue
+
+        return valid_keys
+
+    def fetch_station_s3_bulk(
+        self,
+        location_id: int,
+        s3_key_entries: List[Tuple[str, Any]],
+        pollutant: str = "pm25",
+        max_workers: int = 8,
+    ) -> Tuple[pd.DataFrame, Set[Any]]:
+        """
+        Downloads and parses multiple daily files from AWS S3 in parallel.
+        Returns a combined DataFrame and the set of covered dates.
+        """
+        if not s3_key_entries:
+            return pd.DataFrame(), set()
+
+        p_param = "pm10" if "pm10" in pollutant.lower() else "pm25"
+        target_col = f"observed_{p_param}"
+        station_name = DEFAULT_THAILAND_OPENAQ_LOCATIONS.get(location_id, f"OpenAQ_{location_id}")
+
+        def _fetch_one_key(entry: Tuple[str, Any]) -> Optional[pd.DataFrame]:
+            k, d_val = entry
+            try:
+                obj = self._s3_client.get_object(Bucket=OPENAQ_S3_BUCKET, Key=k)
+                compressed = obj["Body"].read()
+                with gzip.GzipFile(fileobj=io.BytesIO(compressed)) as gz:
+                    df = pd.read_csv(gz)
+                if df.empty or "parameter" not in df.columns:
+                    return None
+                p_df = df[df["parameter"].str.lower() == p_param].copy()
+                if p_df.empty:
+                    return None
+                p_df["timestamp_utc"] = pd.to_datetime(p_df["datetime"], errors="coerce", utc=True).dt.tz_localize(None)
+                p_df[target_col] = pd.to_numeric(p_df["value"], errors="coerce")
+                p_df["latitude"] = pd.to_numeric(p_df["lat"], errors="coerce")
+                p_df["longitude"] = pd.to_numeric(p_df["lon"], errors="coerce")
+                s_name = p_df["location"].iloc[0] if "location" in p_df.columns and pd.notna(p_df["location"].iloc[0]) else station_name
+                out_df = pd.DataFrame({
+                    "station_code": f"OPENAQ_{location_id}",
+                    "station_name": s_name,
+                    "timestamp_utc": p_df["timestamp_utc"],
+                    target_col: p_df[target_col],
+                    "latitude": p_df["latitude"],
+                    "longitude": p_df["longitude"],
+                    "source": "OpenAQ_AWS_S3"
+                }).dropna(subset=["timestamp_utc", target_col, "latitude", "longitude"])
+                return out_df
+            except Exception as e:
+                logger.debug("Failed fetching S3 key %s: %s", k, e)
+                return None
+
+        dfs: List[pd.DataFrame] = []
+        covered_dates: Set[Any] = set()
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            results = list(executor.map(_fetch_one_key, s3_key_entries))
+            for res, (k, dt_val) in zip(results, s3_key_entries):
+                if res is not None and not res.empty:
+                    dfs.append(res)
+                    covered_dates.add(dt_val)
+
+        if not dfs:
+            return pd.DataFrame(), set()
+
+        combined = pd.concat(dfs, ignore_index=True)
+        return combined, covered_dates
+
+    @staticmethod
+    def find_missing_date_chunks(
+        all_dates: List[Any],
+        covered_dates: Set[Any],
+    ) -> List[Tuple[pd.Timestamp, pd.Timestamp]]:
+        """
+        Identifies contiguous date intervals that were missing from AWS S3
+        so they can be selectively backfilled via OpenAQ API v3.
+        """
+        missing = sorted(list(set(all_dates) - set(covered_dates)))
+        if not missing:
+            return []
+
+        chunks = []
+        cur_start = missing[0]
+        cur_end = missing[0]
+
+        for d in missing[1:]:
+            if (d - cur_end).days == 1:
+                cur_end = d
+            else:
+                chunks.append((cur_start, cur_end))
+                cur_start = d
+                cur_end = d
+        chunks.append((cur_start, cur_end))
+
+        ts_chunks = []
+        for s_d, e_d in chunks:
+            s_ts = pd.Timestamp(s_d).tz_localize("UTC")
+            e_ts = pd.Timestamp(e_d).tz_localize("UTC") + pd.Timedelta(hours=23, minutes=59, seconds=59)
+            ts_chunks.append((s_ts, e_ts))
+
+        return ts_chunks
+
+    def fetch_station_hybrid(
+        self,
+        location_id: int,
+        start_date: pd.Timestamp,
+        end_date: pd.Timestamp,
+        pollutant: str = "pm25",
+        s3_workers: int = 8,
+    ) -> pd.DataFrame:
+        """
+        Intelligent Hybrid Data Ingestion Engine:
+        1. Queries AWS Open Data S3 direct archive (zero rate limit, highly parallel).
+        2. Detects any missing months/days across the requested time range.
+        3. Selectively backfills ONLY the missing date gaps via OpenAQ v3 API with retry.
+        4. Merges, harmonizes, and deduplicates the combined dataset.
+        """
+        start_d = pd.to_datetime(start_date).date()
+        end_d = pd.to_datetime(end_date).date()
+        all_target_dates = pd.date_range(start_d, end_d, freq="D").date.tolist()
+
+        # Phase 1: Discover & Ingest from AWS S3 Open Data archive
+        s3_keys = self.discover_s3_station_keys(location_id, start_date, end_date)
+        df_s3 = pd.DataFrame()
+        covered_dates: Set[Any] = set()
+
+        if s3_keys:
+            df_s3, covered_dates = self.fetch_station_s3_bulk(
+                location_id, s3_keys, pollutant=pollutant, max_workers=s3_workers
+            )
+            logger.info("  Location %d: Ingested %d records across %d days from AWS S3 Open Data archive",
+                        location_id, len(df_s3), len(covered_dates))
+        else:
+            logger.info("  Location %d: No AWS S3 records found. Will attempt OpenAQ API v3 for full range", location_id)
+
+        # Phase 2: Detect Missing Gaps
+        missing_chunks = self.find_missing_date_chunks(all_target_dates, covered_dates)
+        dfs_api: List[pd.DataFrame] = []
+
+        if missing_chunks and self.api_key:
+            total_missing_days = sum((e.date() - s.date()).days + 1 for s, e in missing_chunks)
+            logger.info("  Location %d: AWS S3 missing %d days across %d chunk(s). Backfilling from OpenAQ API v3...",
+                        location_id, total_missing_days, len(missing_chunks))
+
+            sensor_id, station_name, lat, lon = self._resolve_station_sensor(location_id, pollutant=pollutant)
+
+            if sensor_id:
+                p_param = "pm10" if "pm10" in pollutant.lower() else "pm25"
+                target_col = f"observed_{p_param}"
+
+                for idx, (chunk_start, chunk_end) in enumerate(missing_chunks, 1):
+                    logger.debug("  Location %d: Backfilling gap %d/%d (%s to %s) via API...",
+                                 location_id, idx, len(missing_chunks), chunk_start.date(), chunk_end.date())
+                    df_chunk = self.fetch_sensor_measurements_api(
+                        int(sensor_id), chunk_start, chunk_end, pollutant=pollutant
+                    )
+                    if not df_chunk.empty:
+                        df_chunk["station_code"] = f"OPENAQ_{location_id}"
+                        df_chunk["station_name"] = station_name
+                        df_chunk["latitude"] = lat
+                        df_chunk["longitude"] = lon
+                        df_chunk["source"] = "OpenAQ_API_v3"
+                        cols = ["station_code", "station_name", "timestamp_utc", target_col, "latitude", "longitude", "source"]
+                        dfs_api.append(df_chunk[cols])
+            else:
+                logger.warning("  Location %d: Could not resolve %s sensor for API gap fill", location_id, pollutant.upper())
+
+        # Phase 3: Combine S3 records + API Gap records
+        all_dfs = []
+        if not df_s3.empty:
+            all_dfs.append(df_s3)
+        if dfs_api:
+            all_dfs.extend(dfs_api)
+
+        if not all_dfs:
+            return pd.DataFrame()
+
+        combined = pd.concat(all_dfs, ignore_index=True)
+        combined = combined.drop_duplicates(subset=["timestamp_utc"]).sort_values("timestamp_utc")
+
+        if not combined.empty:
+            if "station_name" not in combined.columns or combined["station_name"].iloc[0] == f"OpenAQ_{location_id}":
+                stn_name = DEFAULT_THAILAND_OPENAQ_LOCATIONS.get(location_id, f"OpenAQ_{location_id}")
+                combined["station_name"] = stn_name
+
+        return self.clean_and_qa_dataset(combined, pollutant=pollutant)
 
     def fetch_station_day(
         self,
@@ -494,12 +730,10 @@ class OpenAQLoader:
         p_param = "pm10" if "pm10" in pollutant.lower() else "pm25"
         target_col = f"observed_{p_param}"
 
-        # Filter particulate measurements
         p_df = df[df["parameter"].str.lower() == p_param].copy()
         if p_df.empty:
             return pd.DataFrame()
 
-        # Standardize columns: datetime, lat, lon, value
         p_df["timestamp_utc"] = pd.to_datetime(p_df["datetime"], errors="coerce", utc=True).dt.tz_localize(None)
         p_df[target_col] = pd.to_numeric(p_df["value"], errors="coerce")
         p_df["latitude"] = pd.to_numeric(p_df["lat"], errors="coerce")
@@ -528,14 +762,18 @@ class OpenAQLoader:
         start_date: pd.Timestamp,
         end_date: pd.Timestamp,
         max_workers: int = 4,
-        prefer_api: bool = True,
+        prefer_api: bool = False,
         pollutant: str = "pm25",
         use_cache: bool = True,
+        strategy: str = "hybrid",
     ) -> pd.DataFrame:
         """
         Fetches historical records for a location ID over a given date range.
         Checks local station cache first to allow resuming interrupted downloads.
-        If prefer_api is True, attempts OpenAQ v3 API first, falling back to S3 archive.
+        By default, uses the intelligent 'hybrid' strategy:
+          1. Ingests available days/months directly from AWS S3 Open Data archive (no rate limits).
+          2. Detects any missing gap periods across the date range.
+          3. Queries OpenAQ v3 API only for the missing gap intervals.
         """
         # 1. Check local station disk cache for resuming
         if use_cache:
@@ -549,36 +787,24 @@ class OpenAQLoader:
         df_clean = pd.DataFrame()
         fetched = False
 
-        if prefer_api and self.api_key:
+        if strategy == "hybrid":
+            try:
+                df_clean = self.fetch_station_hybrid(
+                    location_id, start_date, end_date, pollutant=pollutant
+                )
+                if not df_clean.empty:
+                    fetched = True
+            except Exception as e:
+                logger.warning("Hybrid fetch failed for loc %d: %s. Falling back to direct API...", location_id, e)
+
+        if not fetched and self.api_key:
             try:
                 df_api = self.fetch_station_api(location_id, start_date, end_date, pollutant=pollutant)
                 if not df_api.empty:
                     df_clean = self.clean_and_qa_dataset(df_api, pollutant=pollutant)
                     fetched = True
             except Exception as e:
-                logger.warning("API fetch failed for loc %d, falling back to S3: %s", location_id, e)
-
-        if not fetched:
-            days = pd.date_range(start_date, end_date, freq="D")
-            dfs: List[pd.DataFrame] = []
-
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                fut_to_day = {
-                    executor.submit(self.fetch_station_day, location_id, day, pollutant): day
-                    for day in days
-                }
-                for fut in as_completed(fut_to_day):
-                    try:
-                        df_day = fut.result()
-                        if not df_day.empty:
-                            dfs.append(df_day)
-                    except Exception as e:
-                        logger.warning("Error fetching day %s for loc %d: %s", fut_to_day[fut], location_id, e)
-
-            if dfs:
-                combined = pd.concat(dfs, ignore_index=True)
-                df_clean = self.clean_and_qa_dataset(combined, pollutant=pollutant)
-                fetched = True
+                logger.warning("API fetch failed for loc %d: %s", location_id, e)
 
         # Save to local station cache to support resume
         if use_cache and (fetched or not df_clean.empty):
