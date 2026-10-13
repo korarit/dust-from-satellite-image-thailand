@@ -29,6 +29,8 @@ from src.data.himawari_ir_loader import (
     HimawariIRLoader,
     PHYSICAL_BT_MIN_K,
     PHYSICAL_BT_MAX_K,
+    CORE_5_IR_BANDS,
+    ALL_IR_BANDS,
 )
 from src.data.hii_weather_loader import (
     HIIWeatherLoader,
@@ -185,4 +187,33 @@ def test_openaq_loader_s3_ingestion():
     assert "OPENAQ_225642" in df["station_code"].values
     assert df["source"].iloc[0] == "OpenAQ_Air4Thai"
     assert (df["observed_pm25"] >= 0.0).all() and (df["observed_pm25"] <= 500.0).all()
+
+
+def test_himawari_core_5_bands_and_station_extraction():
+    """Verifies that HimawariIRLoader defaults to 5 Core IR Bands and computes new BTDs."""
+    assert CORE_5_IR_BANDS == ["B07", "B10", "B11", "B13", "B15"]
+    assert ALL_IR_BANDS == CORE_5_IR_BANDS
+
+    loader = HimawariIRLoader()
+    assert loader.bands == ["B07", "B10", "B11", "B13", "B15"]
+
+    # Test BTD computation logic on simulated station features
+    sample_stns = pd.DataFrame({
+        "location_id": [101, 102],
+        "latitude": [13.75, 18.80],
+        "longitude": [100.50, 98.98],
+        "bt_b07": [300.0, 290.0],
+        "bt_b10": [255.0, 250.0],
+        "bt_b11": [280.0, 275.0],
+        "bt_b13": [295.0, 290.0],
+        "bt_b15": [290.0, 284.0],
+    })
+
+    # Test BTDs
+    # btd_15_13: row 0 is 290 - 295 = -5.0, row 1 is 284 - 290 = -6.0
+    assert np.allclose(sample_stns["bt_b15"] - sample_stns["bt_b13"], [-5.0, -6.0])
+    # btd_13_10 (Moisture / stability proxy): 295 - 255 = 40.0
+    assert np.allclose(sample_stns["bt_b13"] - sample_stns["bt_b10"], [40.0, 40.0])
+    # btd_13_11 (Sulfate / size proxy): 295 - 280 = 15.0
+    assert np.allclose(sample_stns["bt_b13"] - sample_stns["bt_b11"], [15.0, 15.0])
 

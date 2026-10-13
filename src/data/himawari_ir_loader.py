@@ -43,8 +43,11 @@ BUCKET_H9 = "noaa-himawari9"
 # Satellite Operational Cutover timestamp (Dec 13, 2022 ~05:00 UTC)
 HIMAWARI_CUTOVER_UTC = pd.Timestamp("2022-12-13 05:00:00", tz="UTC")
 
-# 10 IR Bands defined in Master Plan
-ALL_IR_BANDS = ["B07", "B08", "B09", "B10", "B11", "B12", "B13", "B14", "B15", "B16"]
+# 5 Core Physical IR Bands (Satellite-Only Dust, Fire, Moisture & Inversion)
+CORE_5_IR_BANDS = ["B07", "B10", "B11", "B13", "B15"]
+# Default bands to load (reduced from 10 to 5 to eliminate redundancy and save 50% bandwidth)
+ALL_IR_BANDS = CORE_5_IR_BANDS
+FULL_10_IR_BANDS = ["B07", "B08", "B09", "B10", "B11", "B12", "B13", "B14", "B15", "B16"]
 
 # Segments covering Thailand (Lat 5.5 - 21.0 N)
 DEFAULT_SEGS = [3, 4, 5]
@@ -442,4 +445,142 @@ class HimawariIRLoader:
                 t_batch_start = time.perf_counter()
 
         return all_snapshots
+
+    def fetch_and_extract_station_points(
+        self,
+        target_dt: pd.Timestamp,
+        stations_df: pd.DataFrame,
+        bands: Optional[List[str]] = None,
+        lat_col: str = "latitude",
+        lon_col: str = "longitude",
+        cleanup_raw: bool = True,
+    ) -> pd.DataFrame:
+        """
+        Downloads the required bands for target_dt, loads the scene,
+        extracts Brightness Temperature & physics BTDs at station coordinates,
+        and immediately deletes raw .DAT segment files to maintain zero disk footprint.
+        """
+        bands = bands or self.bands
+        dt = round_to_himawari_10m(target_dt)
+        files_by_band = self.fetch_snapshot_files(dt, bands=bands)
+        if not files_by_band:
+            logger.warning("No satellite files available for %s", dt)
+            return pd.DataFrame()
+
+        try:
+            scene = self.load_scene(files_by_band, bands_to_load=bands)
+            station_features = self.sample_at_coordinates(
+                scene,
+                stations_df,
+                bands=bands,
+                lat_col=lat_col,
+                lon_col=lon_col
+            )
+
+            # Compute core physics-informed BTDs
+            if "bt_b15" in station_features.columns and "bt_b13" in station_features.columns:
+                station_features["btd_15_13"] = (
+                    station_features["bt_b15"] - station_features["bt_b13"]
+                ).astype(np.float32)
+                station_features["dust_rgb_red"] = np.clip(
+                    (station_features["btd_15_13"] - (-4.0)) / (2.0 - (-4.0)), 0.0, 1.0
+                ).astype(np.float32)
+
+            if "bt_b13" in station_features.columns and "bt_b07" in station_features.columns:
+                station_features["btd_13_07"] = (
+                    station_features["bt_b13"] - station_features["bt_b07"]
+                ).astype(np.float32)
+
+            if "bt_b13" in station_features.columns and "bt_b10" in station_features.columns:
+                station_features["btd_13_10"] = (
+                    station_features["bt_b13"] - station_features["bt_b10"]
+                ).astype(np.float32)
+                # Backward-compatibility alias for lower moisture / lapse rate
+                station_features["btd_10_08"] = station_features["btd_13_10"]
+
+            if "bt_b13" in station_features.columns and "bt_b11" in station_features.columns:
+                station_features["btd_13_11"] = (
+                    station_features["bt_b13"] - station_features["bt_b11"]
+                ).astype(np.float32)
+                # Backward-compatibility alias for particle size
+                station_features["btd_14_11"] = station_features["btd_13_11"]
+
+            station_features["timestamp"] = pd.to_datetime(dt, utc=True)
+            return station_features
+        finally:
+            if cleanup_raw:
+                for file_list in files_by_band.values():
+                    for p in file_list:
+                        try:
+                            p.unlink(missing_ok=True)
+                        except OSError:
+                            pass
+
+    def fetch_range_station_snapshots(
+        self,
+        start_date: pd.Timestamp,
+        end_date: pd.Timestamp,
+        stations_df: pd.DataFrame,
+        cadence_hours: int = 3,
+        bands: Optional[List[str]] = None,
+        lat_col: str = "latitude",
+        lon_col: str = "longitude",
+        cleanup_raw: bool = True,
+        save_parquet_path: Optional[Path] = None,
+    ) -> pd.DataFrame:
+        """
+        Extracts satellite features across a multi-year date range specifically
+        at ground station locations (Station-Centric Extraction).
+        Deletes raw .DAT rasters after each step (Zero Disk Footprint),
+        producing a lean Parquet dataset ready for Model Training.
+        """
+        start_dt = pd.to_datetime(start_date)
+        end_dt = pd.to_datetime(end_date)
+        if start_dt.tzinfo is None:
+            start_dt = start_dt.tz_localize("UTC")
+        if end_dt.tzinfo is None:
+            end_dt = end_dt.tz_localize("UTC")
+
+        timestamps = pd.date_range(start_dt, end_dt, freq=f"{cadence_hours}h")
+        logger.info(
+            "Station-Centric Ingestion: Extracting %d timestamps (cadence=%dh) for %d stations (cleanup_raw=%s)",
+            len(timestamps), cadence_hours, len(stations_df), cleanup_raw
+        )
+
+        accumulated_dfs: List[pd.DataFrame] = []
+        t_batch_start = time.perf_counter()
+        for i, dt in enumerate(timestamps):
+            try:
+                stn_df = self.fetch_and_extract_station_points(
+                    target_dt=dt,
+                    stations_df=stations_df,
+                    bands=bands,
+                    lat_col=lat_col,
+                    lon_col=lon_col,
+                    cleanup_raw=cleanup_raw,
+                )
+                if not stn_df.empty:
+                    accumulated_dfs.append(stn_df)
+            except Exception as e:
+                logger.warning("Error extracting satellite features at %s: %s", dt, e)
+
+            if (i + 1) % 10 == 0 or (i + 1) == len(timestamps):
+                elapsed = max(0.001, time.perf_counter() - t_batch_start)
+                rate = 10.0 / elapsed if (i + 1) % 10 == 0 else ((i % 10 + 1) / elapsed)
+                logger.info(
+                    "  [Station Extraction] Progress: %d/%d timestamps processed (%.1fs/batch, %.2f snapshots/sec, total rows: %d)",
+                    i + 1, len(timestamps), elapsed, rate, sum(len(d) for d in accumulated_dfs)
+                )
+                t_batch_start = time.perf_counter()
+
+        if accumulated_dfs:
+            final_df = pd.concat(accumulated_dfs, ignore_index=True)
+            if save_parquet_path:
+                save_p = Path(save_parquet_path)
+                save_p.parent.mkdir(parents=True, exist_ok=True)
+                final_df.to_parquet(save_p, compression="snappy", index=False)
+                logger.info("Saved station satellite features -> %s (Rows: %d, Size: %.2f MB)",
+                            save_p, len(final_df), save_p.stat().st_size / (1024 * 1024))
+            return final_df
+        return pd.DataFrame()
 

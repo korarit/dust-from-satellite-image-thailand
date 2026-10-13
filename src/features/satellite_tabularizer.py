@@ -26,7 +26,9 @@ from scipy.spatial import cKDTree
 
 logger = logging.getLogger(__name__)
 
-ALL_IR_BANDS = ["B07", "B08", "B09", "B10", "B11", "B12", "B13", "B14", "B15", "B16"]
+CORE_5_IR_BANDS = ["B07", "B10", "B11", "B13", "B15"]
+ALL_IR_BANDS = CORE_5_IR_BANDS
+FULL_10_IR_BANDS = ["B07", "B08", "B09", "B10", "B11", "B12", "B13", "B14", "B15", "B16"]
 BAND_COLS = [f"bt_{b.lower()}" for b in ALL_IR_BANDS]
 
 PHYSICAL_BT_MIN_K = 150.0
@@ -55,15 +57,17 @@ class SatelliteTabularizer:
     def compute_btds(df: pd.DataFrame) -> pd.DataFrame:
         """
         Computes Group 2 physics-based BTD features from available BT columns:
-        - btd_15_13 = bt_b15 - bt_b13
-        - btd_14_11 = bt_b14 - bt_b11
-        - btd_13_07 = bt_b13 - bt_b07
-        - btd_10_08 = bt_b10 - bt_b08
+        - btd_15_13 = bt_b15 - bt_b13 (Silicate / coarse-fine dust index)
+        - btd_13_07 = bt_b13 - bt_b07 (Hotspot / biomass smoke contrast)
+        - btd_13_10 = bt_b13 - bt_b10 (Lower troposphere moisture / stability proxy)
+        - btd_13_11 = bt_b13 - bt_b11 (Sulfate & aerosol particle size proxy)
+        - btd_14_11 = bt_b14 - bt_b11 (or aliased to btd_13_11)
+        - btd_10_08 = bt_b10 - bt_b08 (or aliased to btd_13_10)
         - dust_rgb_red = clip((btd_15_13 - (-4.0)) / (2.0 - (-4.0)), 0.0, 1.0)
         """
         out_df = df.copy()
 
-        # btd_15_13
+        # btd_15_13 (Split-window silicate/dust index: BT15 - BT13)
         if "bt_b15" in out_df.columns and "bt_b13" in out_df.columns:
             out_df["btd_15_13"] = (out_df["bt_b15"] - out_df["bt_b13"]).astype(np.float32)
             # Dust RGB Red channel: -4K to +2K normalized to [0, 1]
@@ -71,17 +75,29 @@ class SatelliteTabularizer:
                 (out_df["btd_15_13"] - (-4.0)) / (2.0 - (-4.0)), 0.0, 1.0
             ).astype(np.float32)
 
-        # btd_14_11
-        if "bt_b14" in out_df.columns and "bt_b11" in out_df.columns:
-            out_df["btd_14_11"] = (out_df["bt_b14"] - out_df["bt_b11"]).astype(np.float32)
-
-        # btd_13_07
+        # btd_13_07 (Hotspots, fire & agricultural smoke contrast: BT13 - BT07)
         if "bt_b13" in out_df.columns and "bt_b07" in out_df.columns:
             out_df["btd_13_07"] = (out_df["bt_b13"] - out_df["bt_b07"]).astype(np.float32)
 
-        # btd_10_08
+        # btd_13_10 (Clean Window minus Lower Water Vapor = Lower Troposphere Moisture & Stability Proxy)
+        if "bt_b13" in out_df.columns and "bt_b10" in out_df.columns:
+            out_df["btd_13_10"] = (out_df["bt_b13"] - out_df["bt_b10"]).astype(np.float32)
+
+        # btd_13_11 (Clean Window minus Cloud/Sulfate Phase = Sulfate/Particle Size Proxy)
+        if "bt_b13" in out_df.columns and "bt_b11" in out_df.columns:
+            out_df["btd_13_11"] = (out_df["bt_b13"] - out_df["bt_b11"]).astype(np.float32)
+
+        # btd_14_11 (Particle size: BT14 - BT11 or fallback alias to btd_13_11)
+        if "bt_b14" in out_df.columns and "bt_b11" in out_df.columns:
+            out_df["btd_14_11"] = (out_df["bt_b14"] - out_df["bt_b11"]).astype(np.float32)
+        elif "btd_13_11" in out_df.columns and "btd_14_11" not in out_df.columns:
+            out_df["btd_14_11"] = out_df["btd_13_11"]
+
+        # btd_10_08 (Lapse rate / Inversion: BT10 - BT08 or fallback alias to btd_13_10)
         if "bt_b10" in out_df.columns and "bt_b08" in out_df.columns:
             out_df["btd_10_08"] = (out_df["bt_b10"] - out_df["bt_b08"]).astype(np.float32)
+        elif "btd_13_10" in out_df.columns and "btd_10_08" not in out_df.columns:
+            out_df["btd_10_08"] = out_df["btd_13_10"]
 
         return out_df
 

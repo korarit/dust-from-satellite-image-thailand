@@ -82,6 +82,8 @@ SAT_BTD_COLUMNS = [
     "btd_13_07",
     "btd_10_08",
     "dust_rgb_red",
+    "btd_13_10",
+    "btd_13_11",
 ]
 
 SAT_TEXTURE_COLUMNS = [
@@ -376,14 +378,24 @@ class PhysicsFallbackImputer:
                 (out_df["btd_15_13"] - (-4.0)) / (2.0 - (-4.0)), 0.0, 1.0
             ).astype(np.float32)
 
-        if "bt_b14" in out_df.columns and "bt_b11" in out_df.columns:
-            out_df["btd_14_11"] = (out_df["bt_b14"] - out_df["bt_b11"]).astype(np.float32)
-
         if "bt_b13" in out_df.columns and "bt_b07" in out_df.columns:
             out_df["btd_13_07"] = (out_df["bt_b13"] - out_df["bt_b07"]).astype(np.float32)
 
+        if "bt_b13" in out_df.columns and "bt_b10" in out_df.columns:
+            out_df["btd_13_10"] = (out_df["bt_b13"] - out_df["bt_b10"]).astype(np.float32)
+
+        if "bt_b13" in out_df.columns and "bt_b11" in out_df.columns:
+            out_df["btd_13_11"] = (out_df["bt_b13"] - out_df["bt_b11"]).astype(np.float32)
+
+        if "bt_b14" in out_df.columns and "bt_b11" in out_df.columns:
+            out_df["btd_14_11"] = (out_df["bt_b14"] - out_df["bt_b11"]).astype(np.float32)
+        elif "btd_13_11" in out_df.columns and "btd_14_11" not in out_df.columns:
+            out_df["btd_14_11"] = out_df["btd_13_11"]
+
         if "bt_b10" in out_df.columns and "bt_b08" in out_df.columns:
             out_df["btd_10_08"] = (out_df["bt_b10"] - out_df["bt_b08"]).astype(np.float32)
+        elif "btd_13_10" in out_df.columns and "btd_10_08" not in out_df.columns:
+            out_df["btd_10_08"] = out_df["btd_13_10"]
 
         for col in SAT_BTD_COLUMNS:
             if col in out_df.columns:

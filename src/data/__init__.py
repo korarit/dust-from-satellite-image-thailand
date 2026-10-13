@@ -7,6 +7,8 @@ from src.data.himawari_ir_loader import (
     build_s3_prefix_and_keys,
     round_to_himawari_10m,
     ALL_IR_BANDS,
+    CORE_5_IR_BANDS,
+    FULL_10_IR_BANDS,
 )
 from src.data.hii_weather_loader import (
     HIIWeatherLoader,
@@ -30,6 +32,8 @@ __all__ = [
     "build_s3_prefix_and_keys",
     "round_to_himawari_10m",
     "ALL_IR_BANDS",
+    "CORE_5_IR_BANDS",
+    "FULL_10_IR_BANDS",
     "HIIWeatherLoader",
     "GroundTruthLoader",
     "OpenAQLoader",

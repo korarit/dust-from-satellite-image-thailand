@@ -1004,19 +1004,44 @@ def run_phase_1_full(
         logger.error("Error during Step 2 HII telemetry ingestion: %s", e, exc_info=True)
 
     # ---------------------------------------------------------
-    # 3. Himawari-9 Satellite IR Bands Ingestion
+    # 3. Himawari Satellite IR Bands Ingestion (5 Core Bands, Station-Centric)
     # ---------------------------------------------------------
-    logger.info("--- Step 3: Fetching Himawari-9 IR Bands at Cadence=%dh ---", cadence_hours)
+    logger.info("--- Step 3: Fetching Himawari IR Bands (5 Bands, Station-Centric, Zero-Disk) at Cadence=%dh ---", cadence_hours)
     try:
         sat_loader = HimawariIRLoader(cache_dir=HIMAWARI_CACHE_DIR, bands=bands, segments=[3, 4, 5])
-        # Fetch snapshots across the range
-        snapshots = sat_loader.fetch_range_snapshots(
-            start_date=start_date,
-            end_date=end_date,
-            cadence_hours=cadence_hours,
-            bands=bands
+        all_stns = target_loader.openaq_loader.get_thailand_stations()
+        stn_coords = (
+            all_stns[all_stns["location_id"].isin(query_locs)].copy()
+            if not all_stns.empty and "location_id" in all_stns.columns
+            else pd.DataFrame()
         )
-        logger.info("Downloaded satellite snapshots: %d observation cycles", len(snapshots))
+        if stn_coords.empty and not all_stns.empty:
+            stn_coords = all_stns.copy()
+
+        sat_parquet_out = FEATURES_DIR / f"satellite_stations_{pol}_{start_date.year}_{end_date.year}.parquet"
+
+        if not stn_coords.empty:
+            logger.info("Station-Centric Extraction: querying %d ground stations (Zero Disk Cache Footprint)...", len(stn_coords))
+            station_sat_df = sat_loader.fetch_range_station_snapshots(
+                start_date=start_date,
+                end_date=end_date,
+                stations_df=stn_coords,
+                cadence_hours=cadence_hours,
+                bands=bands,
+                lat_col="latitude",
+                lon_col="longitude",
+                cleanup_raw=True,
+                save_parquet_path=sat_parquet_out,
+            )
+            logger.info("Extracted authentic satellite observations for %d records -> %s", len(station_sat_df), sat_parquet_out)
+        else:
+            snapshots = sat_loader.fetch_range_snapshots(
+                start_date=start_date,
+                end_date=end_date,
+                cadence_hours=cadence_hours,
+                bands=bands
+            )
+            logger.info("Downloaded satellite snapshots: %d observation cycles", len(snapshots))
     except Exception as e:
         logger.error("Error during Step 3 Himawari satellite ingestion: %s", e, exc_info=True)
 
