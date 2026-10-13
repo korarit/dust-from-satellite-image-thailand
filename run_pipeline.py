@@ -1083,8 +1083,9 @@ def run_phase_4_full(pollutant: str = "pm25", split_date: str = "2026-01-01") ->
     # Split into train and test matrices
     if "timestamp" in unified_df.columns and not unified_df["timestamp"].isna().all():
         split_ts = pd.to_datetime(split_date, utc=True)
-        train_df = unified_df[unified_df["timestamp"] < split_ts].copy()
-        test_df = unified_df[unified_df["timestamp"] >= split_ts].copy()
+        ts_series = pd.to_datetime(unified_df["timestamp"], utc=True)
+        train_df = unified_df[ts_series < split_ts].copy()
+        test_df = unified_df[ts_series >= split_ts].copy()
     else:
         train_df = unified_df.copy()
         test_df = pd.DataFrame()

@@ -270,9 +270,10 @@ class OpenAQLoader:
             p_param = "pm10" if "pm10" in pollutant.lower() else "pm25"
             target_col = f"observed_{p_param}"
             if "timestamp_utc" in df.columns and target_col in df.columns:
-                s_ts = pd.to_datetime(start_date, utc=True).tz_localize(None)
-                e_ts = pd.to_datetime(end_date, utc=True).tz_localize(None)
-                mask = (df["timestamp_utc"] >= s_ts) & (df["timestamp_utc"] <= e_ts)
+                cached_ts = pd.to_datetime(df["timestamp_utc"], utc=True)
+                s_ts = pd.to_datetime(start_date, utc=True)
+                e_ts = pd.to_datetime(end_date, utc=True)
+                mask = (cached_ts >= s_ts) & (cached_ts <= e_ts)
                 return df[mask].copy() if not mask.all() else df.copy()
             return df
         except Exception as e:
