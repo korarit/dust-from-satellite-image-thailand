@@ -14,9 +14,10 @@ Features:
 import os
 import sys
 import bz2
+import time
 import logging
 from pathlib import Path
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict, Tuple, Optional, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import warnings
 
@@ -115,25 +116,41 @@ def build_s3_prefix_and_keys(
     return bucket, keys
 
 
-def _download_and_extract_single_key(bucket: str, k: str, cache_dir: Path) -> Optional[Path]:
+_SHARED_S3_CLIENT: Optional[Any] = None
+
+
+def get_shared_s3_client(max_pool_connections: int = 10) -> Any:
+    """Returns a shared S3 client with persistent HTTPS connection pooling."""
+    global _SHARED_S3_CLIENT
+    if _SHARED_S3_CLIENT is None:
+        _SHARED_S3_CLIENT = boto3.client(
+            "s3",
+            region_name="us-east-1",
+            config=Config(signature_version=UNSIGNED, max_pool_connections=max_pool_connections)
+        )
+    return _SHARED_S3_CLIENT
+
+
+def _download_and_extract_single_key(
+    bucket: str,
+    k: str,
+    cache_dir: Path,
+    s3_client: Optional[Any] = None
+) -> Optional[Path]:
     """Downloads a single .DAT.bz2 segment and decompresses it to cache_dir."""
     fname = Path(k).name
     dat_fname = fname[:-4] if fname.endswith(".bz2") else fname
     dat_path = cache_dir / dat_fname
     bz2_path = cache_dir / fname
 
-    # If uncompressed file exists and has content, reuse it
+    # If uncompressed file exists and has content, reuse it immediately (Fast Cache Hit)
     if dat_path.exists() and dat_path.stat().st_size > 0:
         return dat_path
 
-    s3_client = boto3.client(
-        "s3",
-        region_name="us-east-1",
-        config=Config(signature_version=UNSIGNED)
-    )
+    client = s3_client or get_shared_s3_client()
     try:
         logger.debug("Downloading s3://%s/%s -> %s", bucket, k, bz2_path.name)
-        s3_client.download_file(bucket, k, str(bz2_path))
+        client.download_file(bucket, k, str(bz2_path))
     except Exception as e:
         logger.warning("Could not download s3://%s/%s: %s", bucket, k, e)
         if bz2_path.exists():
@@ -170,17 +187,19 @@ def download_and_extract_hsd_segments(
     bucket: str,
     keys: List[str],
     cache_dir: Path = HIMAWARI_CACHE_DIR,
-    max_workers: int = 4
+    max_workers: int = 10,
+    s3_client: Optional[Any] = None,
 ) -> List[Path]:
-    """Downloads and extracts HSD segments concurrently."""
+    """Downloads and extracts HSD segments concurrently using shared S3 connection pool."""
     cache_dir.mkdir(parents=True, exist_ok=True)
     if not keys:
         return []
 
+    client = s3_client or get_shared_s3_client(max_pool_connections=max(10, max_workers))
     workers = min(len(keys), max_workers)
     results_map: Dict[str, Path] = {}
     with ThreadPoolExecutor(max_workers=workers) as executor:
-        futs = {executor.submit(_download_and_extract_single_key, bucket, k, cache_dir): k for k in keys}
+        futs = {executor.submit(_download_and_extract_single_key, bucket, k, cache_dir, client): k for k in keys}
         for fut in as_completed(futs):
             key = futs[fut]
             try:
@@ -203,12 +222,16 @@ class HimawariIRLoader:
         self,
         cache_dir: Path = HIMAWARI_CACHE_DIR,
         bands: Optional[List[str]] = None,
-        segments: Optional[List[int]] = None
+        segments: Optional[List[int]] = None,
+        max_workers: int = 10,
     ):
-        self.cache_dir = cache_dir
+        self.cache_dir = Path(cache_dir)
         self.bands = bands or ALL_IR_BANDS
         self.segments = segments or DEFAULT_SEGS
+        self.max_workers = max_workers
         self.cache_dir.mkdir(parents=True, exist_ok=True)
+        # Shared S3 client with connection pool matching max_workers (default 10)
+        self.s3_client = get_shared_s3_client(max_pool_connections=max(10, self.max_workers))
 
     def fetch_snapshot_files(
         self,
@@ -216,16 +239,57 @@ class HimawariIRLoader:
         bands: Optional[List[str]] = None
     ) -> Dict[str, List[Path]]:
         """
-        Downloads all segment files for the specified bands for target_dt.
+        Downloads all segment files for the specified bands for target_dt concurrently across all bands.
         Returns mapping from band name to list of extracted DAT paths.
         """
         bands = bands or self.bands
         dt = round_to_himawari_10m(target_dt)
         files_by_band: Dict[str, List[Path]] = {}
 
+        # 1. Quick local cache check across all bands and segments (zero network overhead for hits)
+        needed_downloads: List[Tuple[str, str, Path]] = []
+        band_segments_map: Dict[str, List[Tuple[str, Path, bool]]] = {}
+
         for band in bands:
             bucket, keys = build_s3_prefix_and_keys(dt, band=band, segments=self.segments)
-            dat_files = download_and_extract_hsd_segments(bucket, keys, self.cache_dir)
+            seg_info = []
+            for k in keys:
+                fname = Path(k).name
+                dat_fname = fname[:-4] if fname.endswith(".bz2") else fname
+                dat_path = self.cache_dir / dat_fname
+                is_cached = dat_path.exists() and dat_path.stat().st_size > 0
+                seg_info.append((k, dat_path, is_cached))
+                if not is_cached:
+                    needed_downloads.append((bucket, k, dat_path))
+            band_segments_map[band] = seg_info
+
+        # 2. Concurrently download any missing segments across all bands simultaneously (up to max_workers connections)
+        downloaded_results: Dict[str, Path] = {}
+        if needed_downloads:
+            workers = min(len(needed_downloads), self.max_workers)
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                futs = {
+                    executor.submit(_download_and_extract_single_key, b, k, self.cache_dir, self.s3_client): k
+                    for b, k, _ in needed_downloads
+                }
+                for fut in as_completed(futs):
+                    k = futs[fut]
+                    try:
+                        res = fut.result()
+                        if res is not None:
+                            downloaded_results[k] = res
+                    except Exception as e:
+                        logger.warning("Error downloading segment %s: %s", k, e)
+
+        # 3. Assemble results per band
+        for band, seg_info in band_segments_map.items():
+            dat_files = []
+            for k, dat_path, is_cached in seg_info:
+                if is_cached:
+                    dat_files.append(dat_path)
+                elif k in downloaded_results:
+                    dat_files.append(downloaded_results[k])
+
             if dat_files:
                 files_by_band[band] = dat_files
             else:
@@ -363,12 +427,19 @@ class HimawariIRLoader:
                     len(timestamps), start_dt, end_dt)
 
         all_snapshots: Dict[pd.Timestamp, Dict[str, List[Path]]] = {}
+        t_batch_start = time.perf_counter()
         for i, dt in enumerate(timestamps):
             files = self.fetch_snapshot_files(dt, bands=bands)
             if files:
                 all_snapshots[dt] = files
             if (i + 1) % 10 == 0 or (i + 1) == len(timestamps):
-                logger.info("  Progress: %d/%d timestamps processed", i + 1, len(timestamps))
+                elapsed = max(0.001, time.perf_counter() - t_batch_start)
+                rate = 10.0 / elapsed if (i + 1) % 10 == 0 else ((i % 10 + 1) / elapsed)
+                logger.info(
+                    "  Progress: %d/%d timestamps processed (%.1fs/batch, %.2f snapshots/sec)",
+                    i + 1, len(timestamps), elapsed, rate
+                )
+                t_batch_start = time.perf_counter()
 
         return all_snapshots
 
