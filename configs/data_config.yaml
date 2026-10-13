@@ -9,6 +9,8 @@ himawari:
     - "B13"
     - "B15"
   segments: [3, 4, 5]
+  train_segments: [4]
+  test_segments: [3, 4, 5]
   physical_bounds:
     kelvin_min: 150.0
     kelvin_max: 350.0

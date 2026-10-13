@@ -51,6 +51,10 @@ FULL_10_IR_BANDS = ["B07", "B08", "B09", "B10", "B11", "B12", "B13", "B14", "B15
 
 # Segments covering Thailand (Lat 5.5 - 21.0 N)
 DEFAULT_SEGS = [3, 4, 5]
+# Training Segment: Segment 4 covers scan lines 1651–2200 (~10.5°N - 21.6°N, 574 stations / 92.9% of Thailand)
+DEFAULT_TRAIN_SEGS = [4]
+# Testing Segments: Full coverage of all 618+ stations including Southern Thailand (~5.5°N - 21.0°N)
+DEFAULT_TEST_SEGS = [3, 4, 5]
 
 PHYSICAL_BT_MIN_K = 150.0
 PHYSICAL_BT_MAX_K = 350.0
@@ -226,26 +230,34 @@ class HimawariIRLoader:
         cache_dir: Path = HIMAWARI_CACHE_DIR,
         bands: Optional[List[str]] = None,
         segments: Optional[List[int]] = None,
+        train_segments: Optional[List[int]] = None,
+        test_segments: Optional[List[int]] = None,
         max_workers: int = 10,
     ):
         self.cache_dir = Path(cache_dir)
         self.bands = bands or ALL_IR_BANDS
         self.segments = segments or DEFAULT_SEGS
+        self.train_segments = train_segments or DEFAULT_TRAIN_SEGS
+        self.test_segments = test_segments or DEFAULT_TEST_SEGS
         self.max_workers = max_workers
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         # Shared S3 client with connection pool matching max_workers (default 10)
         self.s3_client = get_shared_s3_client(max_pool_connections=max(10, self.max_workers))
+        # Spatial Index Cache to eliminate redundant area.get_lonlats() and cKDTree recomputations
+        self._cached_spatial_index: Dict[Tuple, Any] = {}
 
     def fetch_snapshot_files(
         self,
         target_dt: pd.Timestamp,
-        bands: Optional[List[str]] = None
+        bands: Optional[List[str]] = None,
+        segments: Optional[List[int]] = None,
     ) -> Dict[str, List[Path]]:
         """
         Downloads all segment files for the specified bands for target_dt concurrently across all bands.
         Returns mapping from band name to list of extracted DAT paths.
         """
         bands = bands or self.bands
+        use_segments = segments if segments is not None else self.segments
         dt = round_to_himawari_10m(target_dt)
         files_by_band: Dict[str, List[Path]] = {}
 
@@ -254,7 +266,7 @@ class HimawariIRLoader:
         band_segments_map: Dict[str, List[Tuple[str, Path, bool]]] = {}
 
         for band in bands:
-            bucket, keys = build_s3_prefix_and_keys(dt, band=band, segments=self.segments)
+            bucket, keys = build_s3_prefix_and_keys(dt, band=band, segments=use_segments)
             seg_info = []
             for k in keys:
                 fname = Path(k).name
@@ -358,50 +370,67 @@ class HimawariIRLoader:
         coords_df: pd.DataFrame,
         bands: Optional[List[str]] = None,
         lat_col: str = "centroid_lat",
-        lon_col: str = "centroid_lon"
+        lon_col: str = "centroid_lon",
+        segments: Optional[List[int]] = None,
+        max_dist_deg: float = 0.05,
     ) -> pd.DataFrame:
         """
         Extracts centroid Brightness Temperature for given lat/lon coordinates
         (e.g., from the Master Grid or Ground Stations).
+        Uses spatial index caching across timestamps and masks out-of-bounds
+        coordinates (e.g. Southern stations when Segment 4 only is loaded) with NaN.
         """
         bands = bands or self.bands
+        use_segments = segments if segments is not None else self.segments
         result_df = coords_df.copy()
-
-        # Extract area coordinate arrays from the first available band
-        sample_band = bands[0]
-        ds_sample = scene[sample_band]
-        area = ds_sample.attrs["area"]
-        lons_sat, lats_sat = area.get_lonlats()
 
         query_lats = coords_df[lat_col].to_numpy()
         query_lons = coords_df[lon_col].to_numpy()
 
-        # For spatial sampling, construct a nearest-pixel KDTree or grid lookup
-        # Since AHI geostationary grid is regular in scan angle, we can use nearest lookup
-        from scipy.spatial import cKDTree
-        # Subsample sat coordinates within bounding box to keep KDTree lean
-        margin = 0.2
-        bbox_mask = (
-            (lats_sat >= query_lats.min() - margin) &
-            (lats_sat <= query_lats.max() + margin) &
-            (lons_sat >= query_lons.min() - margin) &
-            (lons_sat <= query_lons.max() + margin)
+        cache_key = (
+            tuple(sorted(use_segments)),
+            len(coords_df),
+            round(float(query_lats[0]), 4) if len(query_lats) > 0 else 0.0,
+            round(float(query_lons[0]), 4) if len(query_lons) > 0 else 0.0,
+            round(float(query_lats[-1]), 4) if len(query_lats) > 0 else 0.0,
+            round(float(query_lons[-1]), 4) if len(query_lons) > 0 else 0.0,
         )
-        sub_lats = lats_sat[bbox_mask]
-        sub_lons = lons_sat[bbox_mask]
 
-        if len(sub_lats) == 0:
-            raise ValueError("No satellite pixels intersect the query bounding box")
+        if cache_key in self._cached_spatial_index:
+            bbox_mask, idxs, valid_dist_mask = self._cached_spatial_index[cache_key]
+        else:
+            sample_band = bands[0]
+            ds_sample = scene[sample_band]
+            area = ds_sample.attrs["area"]
+            lons_sat, lats_sat = area.get_lonlats()
 
-        tree = cKDTree(np.column_stack([sub_lats, sub_lons]))
-        _, idxs = tree.query(np.column_stack([query_lats, query_lons]), k=1)
+            from scipy.spatial import cKDTree
+            margin = 0.2
+            bbox_mask = (
+                (lats_sat >= query_lats.min() - margin) &
+                (lats_sat <= query_lats.max() + margin) &
+                (lons_sat >= query_lons.min() - margin) &
+                (lons_sat <= query_lons.max() + margin)
+            )
+            sub_lats = lats_sat[bbox_mask]
+            sub_lons = lons_sat[bbox_mask]
+
+            if len(sub_lats) == 0:
+                raise ValueError("No satellite pixels intersect the query bounding box")
+
+            tree = cKDTree(np.column_stack([sub_lats, sub_lons]))
+            dists, idxs = tree.query(np.column_stack([query_lats, query_lons]), k=1)
+            valid_dist_mask = (dists <= max_dist_deg)
+            self._cached_spatial_index[cache_key] = (bbox_mask, idxs, valid_dist_mask)
 
         # For each band, extract the pixel values at idxs
         for b in bands:
             col_name = f"bt_{b.lower()}"
             ds = scene[b]
             raw_vals = ds.values[bbox_mask]
-            sampled_vals = raw_vals[idxs]
+            sampled_vals = raw_vals[idxs].astype(np.float64, copy=True)
+            # Coordinates exceeding max distance from any valid pixel become NaN
+            sampled_vals[~valid_dist_mask] = np.nan
             cleaned_vals, _ = self.validate_physical_bounds(sampled_vals, b)
             result_df[col_name] = cleaned_vals
 
@@ -451,9 +480,11 @@ class HimawariIRLoader:
         target_dt: pd.Timestamp,
         stations_df: pd.DataFrame,
         bands: Optional[List[str]] = None,
+        segments: Optional[List[int]] = None,
         lat_col: str = "latitude",
         lon_col: str = "longitude",
         cleanup_raw: bool = True,
+        max_dist_deg: float = 0.05,
     ) -> pd.DataFrame:
         """
         Downloads the required bands for target_dt, loads the scene,
@@ -461,8 +492,9 @@ class HimawariIRLoader:
         and immediately deletes raw .DAT segment files to maintain zero disk footprint.
         """
         bands = bands or self.bands
+        use_segments = segments if segments is not None else self.segments
         dt = round_to_himawari_10m(target_dt)
-        files_by_band = self.fetch_snapshot_files(dt, bands=bands)
+        files_by_band = self.fetch_snapshot_files(dt, bands=bands, segments=use_segments)
         if not files_by_band:
             logger.warning("No satellite files available for %s", dt)
             return pd.DataFrame()
@@ -474,8 +506,17 @@ class HimawariIRLoader:
                 stations_df,
                 bands=bands,
                 lat_col=lat_col,
-                lon_col=lon_col
+                lon_col=lon_col,
+                segments=use_segments,
+                max_dist_deg=max_dist_deg,
             )
+
+            # Drop stations that fall outside the loaded segments extent (where bt_b13 is NaN)
+            if "bt_b13" in station_features.columns:
+                station_features = station_features.dropna(subset=["bt_b13"]).reset_index(drop=True)
+
+            if station_features.empty:
+                return pd.DataFrame()
 
             # Compute core physics-informed BTDs
             if "bt_b15" in station_features.columns and "bt_b13" in station_features.columns:
@@ -523,16 +564,21 @@ class HimawariIRLoader:
         stations_df: pd.DataFrame,
         cadence_hours: int = 3,
         bands: Optional[List[str]] = None,
+        segments: Optional[List[int]] = None,
         lat_col: str = "latitude",
         lon_col: str = "longitude",
         cleanup_raw: bool = True,
         save_parquet_path: Optional[Path] = None,
+        checkpoint_interval: int = 20,
     ) -> pd.DataFrame:
         """
         Extracts satellite features across a multi-year date range specifically
         at ground station locations (Station-Centric Extraction).
-        Deletes raw .DAT rasters after each step (Zero Disk Footprint),
-        producing a lean Parquet dataset ready for Model Training.
+        Supports:
+        - Pruning to Segment 4 for ultra-fast training vs All Segments [3, 4, 5] for testing.
+        - Incremental Auto-Resume: detects existing Parquet checkpoint and resumes missing timestamps.
+        - Crash-safe periodic checkpoint saves every `checkpoint_interval` snapshots.
+        - Deletes raw .DAT rasters after each step (Zero Disk Footprint).
         """
         start_dt = pd.to_datetime(start_date)
         end_dt = pd.to_datetime(end_date)
@@ -541,46 +587,88 @@ class HimawariIRLoader:
         if end_dt.tzinfo is None:
             end_dt = end_dt.tz_localize("UTC")
 
-        timestamps = pd.date_range(start_dt, end_dt, freq=f"{cadence_hours}h")
+        use_segments = segments if segments is not None else self.segments
+        all_timestamps = pd.date_range(start_dt, end_dt, freq=f"{cadence_hours}h")
+
+        save_p = Path(save_parquet_path) if save_parquet_path else None
+        existing_df = pd.DataFrame()
+        done_timestamps = set()
+
+        # Check existing parquet checkpoint for Auto-Resume
+        if save_p and save_p.exists():
+            try:
+                existing_df = pd.read_parquet(save_p)
+                if not existing_df.empty and "timestamp" in existing_df.columns:
+                    done_timestamps = set(pd.to_datetime(existing_df["timestamp"], utc=True))
+                    logger.info(
+                        "Found existing checkpoint at %s: %d rows, %d/%d timestamps already completed.",
+                        save_p.name, len(existing_df), len(done_timestamps), len(all_timestamps)
+                    )
+            except Exception as e:
+                logger.warning("Could not read existing parquet checkpoint at %s: %s", save_p, e)
+
+        pending_timestamps = [dt for dt in all_timestamps if dt not in done_timestamps]
+        if not pending_timestamps and not existing_df.empty:
+            logger.info("All %d timestamps already completed in %s. Returning cached dataset.",
+                        len(all_timestamps), save_p)
+            return existing_df
+
         logger.info(
-            "Station-Centric Ingestion: Extracting %d timestamps (cadence=%dh) for %d stations (cleanup_raw=%s)",
-            len(timestamps), cadence_hours, len(stations_df), cleanup_raw
+            "Station-Centric Ingestion: Extracting %d remaining timestamps (of %d total, cadence=%dh) "
+            "for %d stations using Segments %s (cleanup_raw=%s)",
+            len(pending_timestamps), len(all_timestamps), cadence_hours, len(stations_df), use_segments, cleanup_raw
         )
 
-        accumulated_dfs: List[pd.DataFrame] = []
+        accumulated_dfs: List[pd.DataFrame] = [existing_df] if not existing_df.empty else []
+        new_batch_dfs: List[pd.DataFrame] = []
         t_batch_start = time.perf_counter()
-        for i, dt in enumerate(timestamps):
+
+        for i, dt in enumerate(pending_timestamps):
             try:
                 stn_df = self.fetch_and_extract_station_points(
                     target_dt=dt,
                     stations_df=stations_df,
                     bands=bands,
+                    segments=use_segments,
                     lat_col=lat_col,
                     lon_col=lon_col,
                     cleanup_raw=cleanup_raw,
                 )
                 if not stn_df.empty:
+                    new_batch_dfs.append(stn_df)
                     accumulated_dfs.append(stn_df)
             except Exception as e:
                 logger.warning("Error extracting satellite features at %s: %s", dt, e)
 
-            if (i + 1) % 10 == 0 or (i + 1) == len(timestamps):
+            # Progress log & periodic checkpoint save
+            if (i + 1) % 10 == 0 or (i + 1) == len(pending_timestamps):
                 elapsed = max(0.001, time.perf_counter() - t_batch_start)
                 rate = 10.0 / elapsed if (i + 1) % 10 == 0 else ((i % 10 + 1) / elapsed)
+                total_rows = sum(len(d) for d in accumulated_dfs)
                 logger.info(
-                    "  [Station Extraction] Progress: %d/%d timestamps processed (%.1fs/batch, %.2f snapshots/sec, total rows: %d)",
-                    i + 1, len(timestamps), elapsed, rate, sum(len(d) for d in accumulated_dfs)
+                    "  [Station Extraction] Progress: %d/%d remaining timestamps (%.1fs/batch, %.2f snapshots/sec, total rows: %d)",
+                    i + 1, len(pending_timestamps), elapsed, rate, total_rows
                 )
                 t_batch_start = time.perf_counter()
 
+            # Crash-Safe Checkpoint every checkpoint_interval snapshots
+            if save_p and new_batch_dfs and ((i + 1) % checkpoint_interval == 0 or (i + 1) == len(pending_timestamps)):
+                try:
+                    chk_df = pd.concat(accumulated_dfs, ignore_index=True)
+                    save_p.parent.mkdir(parents=True, exist_ok=True)
+                    chk_df.to_parquet(save_p, compression="snappy", index=False)
+                    logger.debug("  [Checkpoint Saved] -> %s (%d rows, %d timestamps)",
+                                 save_p.name, len(chk_df), chk_df["timestamp"].nunique())
+                except Exception as e:
+                    logger.warning("Failed saving periodic checkpoint to %s: %s", save_p, e)
+
         if accumulated_dfs:
             final_df = pd.concat(accumulated_dfs, ignore_index=True)
-            if save_parquet_path:
-                save_p = Path(save_parquet_path)
+            if save_p:
                 save_p.parent.mkdir(parents=True, exist_ok=True)
                 final_df.to_parquet(save_p, compression="snappy", index=False)
-                logger.info("Saved station satellite features -> %s (Rows: %d, Size: %.2f MB)",
-                            save_p, len(final_df), save_p.stat().st_size / (1024 * 1024))
+                logger.info("Saved station satellite features -> %s (Rows: %d, Unique Timestamps: %d, Size: %.2f MB)",
+                            save_p, len(final_df), final_df["timestamp"].nunique(), save_p.stat().st_size / (1024 * 1024))
             return final_df
         return pd.DataFrame()
 

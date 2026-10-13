@@ -31,6 +31,8 @@ from src.data.himawari_ir_loader import (
     PHYSICAL_BT_MAX_K,
     CORE_5_IR_BANDS,
     ALL_IR_BANDS,
+    DEFAULT_TRAIN_SEGS,
+    DEFAULT_TEST_SEGS,
 )
 from src.data.hii_weather_loader import (
     HIIWeatherLoader,
@@ -216,4 +218,129 @@ def test_himawari_core_5_bands_and_station_extraction():
     assert np.allclose(sample_stns["bt_b13"] - sample_stns["bt_b10"], [40.0, 40.0])
     # btd_13_11 (Sulfate / size proxy): 295 - 280 = 15.0
     assert np.allclose(sample_stns["bt_b13"] - sample_stns["bt_b11"], [15.0, 15.0])
+
+
+def test_himawari_segment_partition_train_vs_test():
+    """Verifies Segment 4 for Training vs All Segments [3, 4, 5] for Testing."""
+    assert DEFAULT_TRAIN_SEGS == [4]
+    assert DEFAULT_TEST_SEGS == [3, 4, 5]
+
+    loader = HimawariIRLoader()
+    assert loader.train_segments == [4]
+    assert loader.test_segments == [3, 4, 5]
+
+    dt = pd.Timestamp("2024-03-01 06:00:00", tz="UTC")
+    # Training: only S04
+    bucket_train, train_keys = build_s3_prefix_and_keys(dt, "B13", segments=loader.train_segments)
+    assert len(train_keys) == 1
+    assert "S0410.DAT.bz2" in train_keys[0]
+
+    # Testing: S03, S04, S05
+    bucket_test, test_keys = build_s3_prefix_and_keys(dt, "B13", segments=loader.test_segments)
+    assert len(test_keys) == 3
+    assert any("S0310.DAT.bz2" in k for k in test_keys)
+    assert any("S0410.DAT.bz2" in k for k in test_keys)
+    assert any("S0510.DAT.bz2" in k for k in test_keys)
+
+
+def test_himawari_kdtree_spatial_caching_and_distance_threshold():
+    """Verifies KDTree spatial index caching and out-of-bounds station masking (max_dist_deg)."""
+    class DummyArea:
+        def get_lonlats(self):
+            lats = np.linspace(13.0, 14.0, 51)
+            lons = np.linspace(100.0, 101.0, 51)
+            grid_lons, grid_lats = np.meshgrid(lons, lats)
+            return grid_lons, grid_lats
+
+    class DummyDataArray:
+        def __init__(self, values, area):
+            self.values = values
+            self.attrs = {"area": area}
+
+    class DummyScene:
+        def __init__(self, bands_dict, area):
+            self._data = {b: DummyDataArray(vals, area) for b, vals in bands_dict.items()}
+        def __getitem__(self, item):
+            return self._data[item]
+
+    area = DummyArea()
+    scene = DummyScene({
+        "B13": np.full((51, 51), 295.0, dtype=np.float32),
+        "B15": np.full((51, 51), 290.0, dtype=np.float32),
+    }, area)
+
+    coords_df = pd.DataFrame({
+        "location_id": [1, 2],
+        "centroid_lat": [13.5, 6.5],     # Lat 13.5 is in grid; Lat 6.5 is > 6.5 degrees away
+        "centroid_lon": [100.5, 100.5],
+    })
+
+    loader = HimawariIRLoader()
+    assert len(loader._cached_spatial_index) == 0
+
+    # First call: computes and caches KDTree
+    res1 = loader.sample_at_coordinates(
+        scene=scene,
+        coords_df=coords_df,
+        bands=["B13", "B15"],
+        segments=[4],
+        max_dist_deg=0.05,
+    )
+    assert len(loader._cached_spatial_index) == 1
+    # Bangkok station (inside grid) gets 295.0 K
+    assert res1.loc[res1["location_id"] == 1, "bt_b13"].iloc[0] == 295.0
+    # Southern station (outside Segment 4) gets NaN
+    assert np.isnan(res1.loc[res1["location_id"] == 2, "bt_b13"].iloc[0])
+
+    # Second call: uses cache
+    res2 = loader.sample_at_coordinates(
+        scene=scene,
+        coords_df=coords_df,
+        bands=["B13", "B15"],
+        segments=[4],
+        max_dist_deg=0.05,
+    )
+    assert len(loader._cached_spatial_index) == 1
+    assert res2.loc[res2["location_id"] == 1, "bt_b13"].iloc[0] == 295.0
+    assert np.isnan(res2.loc[res2["location_id"] == 2, "bt_b13"].iloc[0])
+
+
+def test_himawari_station_snapshots_auto_resume(tmp_path):
+    """Verifies that fetch_range_station_snapshots auto-resumes from existing Parquet checkpoints."""
+    checkpoint_file = tmp_path / "satellite_checkpoint.parquet"
+
+    # Pre-create a checkpoint with 1 completed timestamp
+    ts_done = pd.Timestamp("2024-01-01 00:00:00", tz="UTC")
+    existing_df = pd.DataFrame({
+        "location_id": [101],
+        "latitude": [13.75],
+        "longitude": [100.50],
+        "bt_b13": [295.0],
+        "timestamp": [ts_done],
+    })
+    existing_df.to_parquet(checkpoint_file, index=False)
+
+    loader = HimawariIRLoader()
+    # Query exact same range that includes the completed timestamp
+    start_dt = pd.Timestamp("2024-01-01 00:00:00", tz="UTC")
+    end_dt = pd.Timestamp("2024-01-01 00:00:00", tz="UTC")
+
+    stn_df = pd.DataFrame({
+        "location_id": [101],
+        "latitude": [13.75],
+        "longitude": [100.50],
+    })
+
+    # Should detect that all timestamps are already completed and return existing_df without any download
+    res_df = loader.fetch_range_station_snapshots(
+        start_date=start_dt,
+        end_date=end_dt,
+        stations_df=stn_df,
+        cadence_hours=3,
+        save_parquet_path=checkpoint_file,
+    )
+    assert not res_df.empty
+    assert len(res_df) == 1
+    assert res_df["bt_b13"].iloc[0] == 295.0
+
 

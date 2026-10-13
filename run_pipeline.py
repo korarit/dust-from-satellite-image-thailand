@@ -895,6 +895,8 @@ def run_phase_1_full(
     region: Optional[str] = None,
     max_locations: Optional[int] = None,
     provider: str = "all",
+    train_segments: Optional[List[int]] = None,
+    test_segments: Optional[List[int]] = None,
 ) -> None:
     """
     Executes Phase 1 Full Multi-Year Data Ingestion & Audit (2024 - 2026):
@@ -1006,9 +1008,18 @@ def run_phase_1_full(
     # ---------------------------------------------------------
     # 3. Himawari Satellite IR Bands Ingestion (5 Core Bands, Station-Centric)
     # ---------------------------------------------------------
+    train_segs = train_segments or [4]
+    test_segs = test_segments or [3, 4, 5]
+    split_dt = pd.to_datetime(split_date, utc=True)
+    start_dt = start_date if start_date.tzinfo is not None else start_date.tz_localize("UTC")
+    end_dt = end_date if end_date.tzinfo is not None else end_date.tz_localize("UTC")
+
     logger.info("--- Step 3: Fetching Himawari IR Bands (5 Bands, Station-Centric, Zero-Disk) at Cadence=%dh ---", cadence_hours)
+    logger.info("  • Training Segment Partition : %s (Segment 4 covers 574 stations / 92.9%% of Thailand)", train_segs)
+    logger.info("  • Testing Segment Partition  : %s (Covers all 618+ stations countrywide)", test_segs)
+
     try:
-        sat_loader = HimawariIRLoader(cache_dir=HIMAWARI_CACHE_DIR, bands=bands, segments=[3, 4, 5])
+        sat_loader = HimawariIRLoader(cache_dir=HIMAWARI_CACHE_DIR, bands=bands)
         all_stns = target_loader.openaq_loader.get_thailand_stations()
         stn_coords = (
             all_stns[all_stns["location_id"].isin(query_locs)].copy()
@@ -1018,22 +1029,61 @@ def run_phase_1_full(
         if stn_coords.empty and not all_stns.empty:
             stn_coords = all_stns.copy()
 
-        sat_parquet_out = FEATURES_DIR / f"satellite_stations_{pol}_{start_date.year}_{end_date.year}.parquet"
+        sat_train_out = FEATURES_DIR / f"satellite_stations_train_{pol}_{start_dt.year}_{(split_dt - pd.Timedelta(days=1)).year}.parquet"
+        sat_test_out = FEATURES_DIR / f"satellite_stations_test_{pol}_{split_dt.year}_{end_dt.year}.parquet"
+        sat_parquet_out = FEATURES_DIR / f"satellite_stations_{pol}_{start_dt.year}_{end_dt.year}.parquet"
+
+        accumulated_train_df = pd.DataFrame()
+        accumulated_test_df = pd.DataFrame()
 
         if not stn_coords.empty:
-            logger.info("Station-Centric Extraction: querying %d ground stations (Zero Disk Cache Footprint)...", len(stn_coords))
-            station_sat_df = sat_loader.fetch_range_station_snapshots(
-                start_date=start_date,
-                end_date=end_date,
-                stations_df=stn_coords,
-                cadence_hours=cadence_hours,
-                bands=bands,
-                lat_col="latitude",
-                lon_col="longitude",
-                cleanup_raw=True,
-                save_parquet_path=sat_parquet_out,
-            )
-            logger.info("Extracted authentic satellite observations for %d records -> %s", len(station_sat_df), sat_parquet_out)
+            logger.info("Station-Centric Extraction: querying ground stations (Zero Disk Cache Footprint)...")
+
+            # 3a. Training Period Ingestion (Segment 4 only)
+            if start_dt < split_dt:
+                train_range_end = min(end_dt, split_dt - pd.Timedelta(seconds=1))
+                logger.info(">>> [TRAIN SPLIT] Ingesting Satellite Data (%s to %s) using Segment %s...",
+                            start_dt.date(), train_range_end.date(), train_segs)
+                accumulated_train_df = sat_loader.fetch_range_station_snapshots(
+                    start_date=start_dt,
+                    end_date=train_range_end,
+                    stations_df=stn_coords,
+                    cadence_hours=cadence_hours,
+                    bands=bands,
+                    segments=train_segs,
+                    lat_col="latitude",
+                    lon_col="longitude",
+                    cleanup_raw=True,
+                    save_parquet_path=sat_train_out,
+                )
+                logger.info("  Training satellite observations: %d records -> %s", len(accumulated_train_df), sat_train_out)
+
+            # 3b. Testing Period Ingestion (All Segments [3, 4, 5])
+            if end_dt >= split_dt:
+                test_range_start = max(start_dt, split_dt)
+                logger.info(">>> [TEST SPLIT] Ingesting Satellite Data (%s to %s) using ALL Segments %s...",
+                            test_range_start.date(), end_dt.date(), test_segs)
+                accumulated_test_df = sat_loader.fetch_range_station_snapshots(
+                    start_date=test_range_start,
+                    end_date=end_dt,
+                    stations_df=stn_coords,
+                    cadence_hours=cadence_hours,
+                    bands=bands,
+                    segments=test_segs,
+                    lat_col="latitude",
+                    lon_col="longitude",
+                    cleanup_raw=True,
+                    save_parquet_path=sat_test_out,
+                )
+                logger.info("  Testing satellite observations: %d records -> %s", len(accumulated_test_df), sat_test_out)
+
+            # 3c. Combine Train + Test sets into full multi-year dataset
+            parts = [df for df in [accumulated_train_df, accumulated_test_df] if not df.empty]
+            if parts:
+                combined_sat_df = pd.concat(parts, ignore_index=True)
+                combined_sat_df.to_parquet(sat_parquet_out, compression="snappy", index=False)
+                logger.info("  Combined Multi-Year Satellite dataset saved -> %s (%d records, %.2f MB)",
+                            sat_parquet_out, len(combined_sat_df), sat_parquet_out.stat().st_size / (1024 * 1024))
         else:
             snapshots = sat_loader.fetch_range_snapshots(
                 start_date=start_date,
@@ -1275,8 +1325,35 @@ def main():
         choices=["all", "air4thai"],
         help="Provider filter for ground stations: 'all' (all 618+ stations nationwide) or 'air4thai' (262 official PCD benchmark stations, default: all)"
     )
+    parser.add_argument(
+        "--train-segments",
+        type=str,
+        default="4",
+        help="Satellite segments for training data ingestion (default: '4' for Northern/Central/Isan Thailand)"
+    )
+    parser.add_argument(
+        "--test-segments",
+        type=str,
+        default="3,4,5",
+        help="Satellite segments for testing / evaluation / nowcast data ingestion (default: '3,4,5' for full countrywide coverage)"
+    )
+    parser.add_argument(
+        "--satellite-segments", "--segments",
+        type=str,
+        default=None,
+        dest="satellite_segments",
+        help="Override both train and test satellite segments globally (e.g. '4' or '3,4,5')"
+    )
 
     args = parser.parse_args()
+
+    def parse_segs(s: Optional[str], default_val: List[int]) -> List[int]:
+        if not s:
+            return default_val
+        return [int(x.strip()) for x in s.split(",") if x.strip()]
+
+    train_segs = parse_segs(args.satellite_segments or args.train_segments, [4])
+    test_segs = parse_segs(args.satellite_segments or args.test_segments, [3, 4, 5])
 
     if args.dir_data or args.dir_output:
         configure_paths(data_dir=args.dir_data, outputs_dir=args.dir_output)
@@ -1357,6 +1434,8 @@ def main():
                 region=args.region,
                 max_locations=args.max_stations,
                 provider=args.provider,
+                train_segments=train_segs,
+                test_segments=test_segs,
             )
             run_phase_4_full(pollutant=p, split_date=args.split_date)
     elif args.start_date and args.end_date:
@@ -1373,6 +1452,8 @@ def main():
                 region=args.region,
                 max_locations=args.max_stations,
                 provider=args.provider,
+                train_segments=train_segs,
+                test_segments=test_segs,
             )
     else:
         # Default or smoke-test
