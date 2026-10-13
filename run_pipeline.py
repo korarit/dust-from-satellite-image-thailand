@@ -799,11 +799,16 @@ def run_phase_5_smoke_test(target_dt: pd.Timestamp, pollutant: str = "pm25") -> 
     # 7. Comprehensive Performance Metrics (Continuous + PCD AQI)
     logger.info("\n--- Step 6: Computing Continuous & PCD AQI Classification Metrics ---")
     y_true = unified_matrix[tgt_col].values
-    comp_preds = ensemble.predict_components(unified_matrix[feature_cols])
-    y_pred = comp_preds["pred_ensemble"].values
+    if ensemble.oof_predictions_ is not None and "oof_ensemble" in ensemble.oof_predictions_.columns:
+        y_pred = ensemble.oof_predictions_["oof_ensemble"].values
+        eval_label = f"Stacking Ensemble ({tgt_name} 2km - Out-Of-Fold CV)"
+    else:
+        comp_preds = ensemble.predict_components(unified_matrix[feature_cols])
+        y_pred = comp_preds["pred_ensemble"].values
+        eval_label = f"Stacking Ensemble ({tgt_name} 2km)"
 
     comp_metrics = compute_comprehensive_metrics(y_true, y_pred, pollutant=pol)
-    logger.info("\n%s\n", format_evaluation_summary_table(comp_metrics, model_name=f"Stacking Ensemble ({tgt_name} 2km)"))
+    logger.info("\n%s\n", format_evaluation_summary_table(comp_metrics, model_name=eval_label))
 
     # 8. Multi-Resolution Benchmark Suite (3km, 2km, 1km, 500m)
     logger.info("\n--- Step 7: Executing Multi-Resolution Benchmark (3km, 2km, 1km, 500m - %s) ---", tgt_name)

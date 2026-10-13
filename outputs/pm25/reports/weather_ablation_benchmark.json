@@ -4,11 +4,11 @@
   "no_weather_features_count": 4,
   "eval_full": {
     "ensemble": {
-      "mae": 1.291,
-      "rmse": 1.805,
-      "mape": 3.18,
-      "r2": 0.9419,
-      "pearson_r": 0.9737,
+      "mae": 1.129,
+      "rmse": 1.57,
+      "mape": 2.81,
+      "r2": 0.956,
+      "pearson_r": 0.9797,
       "aqi_acc": 97.5,
       "count": 40
     },
@@ -40,28 +40,28 @@
       "count": 40
     },
     "random_forest": {
-      "mae": 1.291,
-      "rmse": 1.805,
-      "mape": 3.18,
-      "r2": 0.9419,
-      "pearson_r": 0.9737,
+      "mae": 1.131,
+      "rmse": 1.555,
+      "mape": 2.81,
+      "r2": 0.9569,
+      "pearson_r": 0.9794,
       "aqi_acc": 97.5,
       "count": 40
     },
     "weights": {
-      "lightgbm": 0.0,
-      "catboost": 0.0,
-      "xgboost": 0.0,
-      "random_forest": 1.0
+      "lightgbm": 4.4630658543876034e-17,
+      "catboost": 0.029839251154198346,
+      "xgboost": 0.005551300599056672,
+      "random_forest": 0.964609448246745
     }
   },
   "eval_no_weather": {
     "ensemble": {
-      "mae": 1.002,
-      "rmse": 1.25,
-      "mape": 2.5,
-      "r2": 0.9721,
-      "pearson_r": 0.987,
+      "mae": 1.065,
+      "rmse": 1.28,
+      "mape": 2.66,
+      "r2": 0.9708,
+      "pearson_r": 0.9863,
       "aqi_acc": 92.5,
       "count": 40
     },
@@ -93,33 +93,33 @@
       "count": 40
     },
     "random_forest": {
-      "mae": 1.002,
-      "rmse": 1.25,
-      "mape": 2.5,
-      "r2": 0.9721,
-      "pearson_r": 0.987,
+      "mae": 1.065,
+      "rmse": 1.28,
+      "mape": 2.66,
+      "r2": 0.9708,
+      "pearson_r": 0.9863,
       "aqi_acc": 92.5,
       "count": 40
     },
     "weights": {
-      "lightgbm": 0.0,
-      "catboost": 0.0,
-      "xgboost": 0.0,
-      "random_forest": 1.0
+      "lightgbm": 5.551115123125783e-17,
+      "catboost": 2.220446049250313e-16,
+      "xgboost": 2.220446049250313e-16,
+      "random_forest": 0.9999999999999996
     }
   },
   "comparison_table": [
     {
       "model": "ENSEMBLE",
-      "mae_full": 1.291,
-      "mae_no_weather": 1.002,
-      "delta_mae": -0.289,
-      "pct_mae_diff": -22.39,
-      "rmse_full": 1.805,
-      "rmse_no_weather": 1.25,
-      "delta_rmse": -0.555,
-      "r2_full": 0.9419,
-      "r2_no_weather": 0.9721,
+      "mae_full": 1.129,
+      "mae_no_weather": 1.065,
+      "delta_mae": -0.064,
+      "pct_mae_diff": -5.67,
+      "rmse_full": 1.57,
+      "rmse_no_weather": 1.28,
+      "delta_rmse": -0.29,
+      "r2_full": 0.956,
+      "r2_no_weather": 0.9708,
       "aqi_acc_full": 97.5,
       "aqi_acc_no_weather": 92.5
     },
@@ -167,29 +167,29 @@
     },
     {
       "model": "RANDOM_FOREST",
-      "mae_full": 1.291,
-      "mae_no_weather": 1.002,
-      "delta_mae": -0.289,
-      "pct_mae_diff": -22.39,
-      "rmse_full": 1.805,
-      "rmse_no_weather": 1.25,
-      "delta_rmse": -0.555,
-      "r2_full": 0.9419,
-      "r2_no_weather": 0.9721,
+      "mae_full": 1.131,
+      "mae_no_weather": 1.065,
+      "delta_mae": -0.066,
+      "pct_mae_diff": -5.84,
+      "rmse_full": 1.555,
+      "rmse_no_weather": 1.28,
+      "delta_rmse": -0.275,
+      "r2_full": 0.9569,
+      "r2_no_weather": 0.9708,
       "aqi_acc_full": 97.5,
       "aqi_acc_no_weather": 92.5
     }
   ],
   "ensemble_weights_full": {
-    "lightgbm": 0.0,
-    "catboost": 0.0,
-    "xgboost": 0.0,
-    "random_forest": 1.0
+    "lightgbm": 4.4630658543876034e-17,
+    "catboost": 0.029839251154198346,
+    "xgboost": 0.005551300599056672,
+    "random_forest": 0.964609448246745
   },
   "ensemble_weights_no_weather": {
-    "lightgbm": 0.0,
-    "catboost": 0.0,
-    "xgboost": 0.0,
-    "random_forest": 1.0
+    "lightgbm": 5.551115123125783e-17,
+    "catboost": 2.220446049250313e-16,
+    "xgboost": 2.220446049250313e-16,
+    "random_forest": 0.9999999999999996
   }
 }

@@ -19,7 +19,6 @@ import urllib.request
 import urllib.error
 import json
 import time
-import random
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Any, Set
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -203,7 +202,7 @@ class OpenAQLoader:
             except urllib.error.HTTPError as e:
                 if e.code == 429:
                     if attempt <= max_retries:
-                        sleep_time = min(60.0, base_delay * (1.5 ** (attempt - 1)) + random.uniform(1.0, 3.0))
+                        sleep_time = min(60.0, base_delay * (1.5 ** (attempt - 1)) + ((attempt % 3) * 0.75 + 1.0))
                         logger.warning(
                             "OpenAQ API HTTP 429 (Too Many Requests) [attempt %d/%d]. "
                             "Pausing for %.1f seconds before retrying URL: %s",

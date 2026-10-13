@@ -326,7 +326,7 @@ class DirectionalWeatherEngine:
                 "p_west": np.nan,
                 "delta_p_ns": 0.0,
                 "delta_p_ew": 0.0,
-                "pressure_grad_mag": 0.0,
+                "pressure_grad_mag": np.nan,
                 "pressure_mean_surround": np.nan,
             }
         elif variable == "humidity":

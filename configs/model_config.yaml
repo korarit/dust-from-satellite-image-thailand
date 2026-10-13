@@ -17,7 +17,7 @@ features:
   # +1 : Feature increase -> Predicted PM2.5 increase
   monotonic_constraints:
     pressure_grad_mag: -1   # Calm atmospheric conditions (lower ||∇P||) -> higher dust accumulation
-    btd_15_13: -1           # Stronger negative split-window (dust absorption signature) -> higher PM2.5
+    btd_15_13: 1            # Higher split-window BTD (BT15 - BT13 increases as B13 is absorbed by silicate/dust) -> higher PM2.5
 
 models:
   lightgbm:
@@ -61,7 +61,7 @@ models:
   random_forest:
     n_estimators: 300
     max_depth: 16
-    max_features: "sqrt"
+    max_features: 1.0
     min_samples_split: 5
     min_samples_leaf: 2
     random_state: 42

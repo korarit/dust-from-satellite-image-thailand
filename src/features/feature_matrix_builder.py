@@ -706,6 +706,8 @@ class FeatureMatrixBuilder:
             if "grid_id" in weather_df.columns and "grid_id" in matrix.columns:
                 matrix = matrix.merge(weather_df[["grid_id"] + weather_cols], on="grid_id", how="left")
             else:
+                if len(weather_df) != len(matrix):
+                    raise ValueError(f"Weather DataFrame row count ({len(weather_df)}) does not match grid ({len(matrix)})")
                 for c in weather_cols:
                     matrix[c] = weather_df[c].values
 
@@ -718,6 +720,8 @@ class FeatureMatrixBuilder:
             if "grid_id" in satellite_df.columns and "grid_id" in matrix.columns:
                 matrix = matrix.merge(satellite_df[["grid_id"] + sat_cols], on="grid_id", how="left")
             else:
+                if len(satellite_df) != len(matrix):
+                    raise ValueError(f"Satellite DataFrame row count ({len(satellite_df)}) does not match grid ({len(matrix)})")
                 for c in sat_cols:
                     matrix[c] = satellite_df[c].values
 

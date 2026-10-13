@@ -146,9 +146,12 @@ class DustStackingEnsemble(BaseDustModel):
         # ----------------------------------------------------------------------
         # Step 2: Meta-Learner Optimization (Constrained Convex Optimization)
         # ----------------------------------------------------------------------
-        # Solves: min || oof_matrix @ w - y ||^2  s.t.  w_i >= 0, sum(w) = 1.0 directly
+        loss_metric = self.config.get("general", {}).get("eval_metric", "mae").lower()
+
         def objective(w: np.ndarray) -> float:
             pred = oof_matrix @ w
+            if loss_metric == "mae":
+                return float(np.mean(np.abs(pred - y_arr)))
             return float(np.mean((pred - y_arr) ** 2))
 
         init_w = np.ones(len(MODEL_KEYS), dtype=np.float64) / len(MODEL_KEYS)
@@ -235,9 +238,10 @@ class DustStackingEnsemble(BaseDustModel):
     def get_feature_importance(self, importance_type: str = "gain") -> pd.DataFrame:
         """Returns ensemble-weighted feature importance table."""
         attrib_df = self.get_cross_model_feature_attribution()
-        return attrib_df[["feature", "ensemble_importance", "ensemble_importance"]].rename(
-            columns={"ensemble_importance": "importance", "ensemble_importance.1": "normalized_importance"}
-        )
+        res = attrib_df[["feature", "ensemble_importance"]].copy()
+        res.columns = ["feature", "importance"]
+        res["normalized_importance"] = res["importance"]
+        return res
 
     def get_cross_model_feature_attribution(self) -> pd.DataFrame:
         """
@@ -352,6 +356,8 @@ class DustStackingEnsemble(BaseDustModel):
                 ensemble.base_models[m_key] = cls_type.load(m_path_pol)
             elif m_path_std.exists():
                 ensemble.base_models[m_key] = cls_type.load(m_path_std)
+            else:
+                logger.warning("Base model checkpoint for %s not found in %s", m_key, load_dir)
 
         # Load OOF predictions if present
         oof_path_pol = load_dir / f"oof_predictions_{pol}.parquet"
