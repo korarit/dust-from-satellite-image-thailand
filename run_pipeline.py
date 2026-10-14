@@ -1463,14 +1463,14 @@ def run_phase_4_full(pollutant: str = "pm25", split_date: str = "2026-01-01") ->
     logger.info("  • Resolutions: 3.0 km (EXP-3KM), 2.0 km (EXP-2KM), 1.0 km (EXP-1KM), 0.5 km (EXP-500M)")
     logger.info("=" * 75)
 
+    res_engine = MultiResolutionGridEngine()
     train_matrices_by_res = {
-        3.0: train_df.copy(),
-        2.0: train_df,
-        1.0: train_df.copy(),
-        0.5: train_df.copy(),
+        res: res_engine.adapt_feature_matrix_for_resolution(train_df, res)
+        for res in [3.0, 2.0, 1.0, 0.5]
     }
     test_matrices_by_res = {
-        res: test_df.copy() for res in [3.0, 2.0, 1.0, 0.5]
+        res: res_engine.adapt_feature_matrix_for_resolution(test_df, res)
+        for res in [3.0, 2.0, 1.0, 0.5]
     } if not test_df.empty else {}
 
     benchmark_res = trainer.run_multi_resolution_benchmark(

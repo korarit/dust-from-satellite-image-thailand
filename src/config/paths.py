@@ -136,6 +136,41 @@ def seed_metadata_if_needed() -> None:
                 except Exception:
                     pass
 
+def seed_geo_if_needed() -> None:
+    """
+    If GEO_DIR points to custom external storage (e.g. Google Drive),
+    automatically seed essential master grid and DEM files from the repository.
+    """
+    import shutil
+    candidate_sources = [
+        PROJECT_ROOT / "data" / "geo",
+        Path(__file__).resolve().parent.parent.parent / "data" / "geo",
+        Path.cwd() / "data" / "geo",
+    ]
+    source_dir = next((p for p in candidate_sources if p.exists() and p.is_dir()), None)
+    if source_dir and source_dir.resolve() != GEO_DIR.resolve():
+        GEO_DIR.mkdir(parents=True, exist_ok=True)
+        # 1. Master Grid
+        src_grid = source_dir / "thailand_2km_master_grid.parquet"
+        dst_grid = GEO_DIR / "thailand_2km_master_grid.parquet"
+        if src_grid.exists() and not dst_grid.exists():
+            try:
+                shutil.copy2(src_grid, dst_grid)
+            except Exception:
+                pass
+        # 2. DEM folder and tiles
+        src_dem = source_dir / "dem"
+        dst_dem = GEO_DIR / "dem"
+        if src_dem.exists() and src_dem.is_dir():
+            dst_dem.mkdir(parents=True, exist_ok=True)
+            for f in src_dem.glob("*"):
+                dst_f = dst_dem / f.name
+                if not dst_f.exists() and f.is_file():
+                    try:
+                        shutil.copy2(f, dst_f)
+                    except Exception:
+                        pass
+
 
 def ensure_directories() -> None:
     """Ensures all required project directories exist."""
@@ -173,6 +208,7 @@ def ensure_directories() -> None:
         d.mkdir(parents=True, exist_ok=True)
 
     seed_metadata_if_needed()
+    seed_geo_if_needed()
 
 
 # Initialize directories on import

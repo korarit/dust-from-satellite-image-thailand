@@ -607,3 +607,118 @@ class MultiResolutionGridEngine:
                 logger.warning("Error processing DEM tile %s: %s", t_path, e)
 
         return out_df
+
+    @staticmethod
+    def download_copernicus_dem_tile(
+        lat: int,
+        lon: int,
+        target_dir: Optional[Path] = None,
+        timeout_seconds: int = 60,
+    ) -> Optional[Path]:
+        """
+        Downloads authentic 30m Copernicus GLO-30 DSM GeoTIFF from AWS Open Data:
+        Bucket: s3://copernicus-dem-30m/ (Public HTTPS, zero credential required)
+        URL format: https://copernicus-dem-30m.s3.amazonaws.com/Copernicus_DSM_COG_10_N{lat:02d}_00_E{lon:03d}_00_DEM/Copernicus_DSM_COG_10_N{lat:02d}_00_E{lon:03d}_00_DEM.tif
+        """
+        import urllib.request
+        import shutil
+        out_dir = target_dir or (GEO_DIR / "dem")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        tile_name = f"Copernicus_DSM_COG_10_N{lat:02d}_00_E{lon:03d}_00_DEM"
+        dest_file = out_dir / f"{tile_name}.tif"
+        if dest_file.exists() and dest_file.stat().st_size > 1000000:
+            return dest_file
+
+        url = f"https://copernicus-dem-30m.s3.amazonaws.com/{tile_name}/{tile_name}.tif"
+        try:
+            logger.info("Downloading authentic 30m Copernicus DEM tile: %s -> %s", url, dest_file.name)
+            req = urllib.request.Request(url, headers={"User-Agent": "ThailandDustPrediction/1.0"})
+            with urllib.request.urlopen(req, timeout=timeout_seconds) as resp, open(dest_file, "wb") as f_out:
+                shutil.copyfileobj(resp, f_out)
+            logger.info("  ✓ Successfully downloaded Copernicus DEM tile: %s (%.1f MB)", dest_file.name, dest_file.stat().st_size / 1e6)
+            return dest_file
+        except Exception as ex:
+            logger.warning("Could not download Copernicus DEM tile for N%02d E%03d: %s", lat, lon, ex)
+            if dest_file.exists():
+                try:
+                    dest_file.unlink()
+                except Exception:
+                    pass
+            return None
+
+    def adapt_feature_matrix_for_resolution(
+        self,
+        df: pd.DataFrame,
+        target_resolution_km: float,
+        base_resolution_km: float = 2.0,
+    ) -> pd.DataFrame:
+        """
+        Adapts a feature matrix specifically for target physical grid resolution (3.0, 2.0, 1.0, 0.5 km):
+        1. Sets resolution_km = target_resolution_km and exclusion_radius_km = EXCLUSION_BUFFER_MAP[target_resolution_km].
+        2. Recalculates scale-dependent Topographic Position Index (TPI) with search radius R = 3.0 * target_resolution_km
+           (e.g. 1.5 km for 500m micro-hollows, 3.0 km for 1km valley-mountain sweet spot, 6.0 km for 2km, 9.0 km for 3km).
+        3. Recalculates local relief within R = target_resolution_km cell radius using KDTree over Master Grid elevation.
+        4. Scales terrain roughness (elevation_std) and spatial texture variance according to Point Spread Function (PSF)
+           and grid aggregation laws (e.g. 500m retains sharper textures; 3.0 km has spatial smoothing).
+        """
+        if df.empty:
+            return df.copy()
+
+        out_df = df.copy()
+        target_res = float(target_resolution_km)
+        out_df["resolution_km"] = np.float32(target_res)
+        out_df["exclusion_radius_km"] = np.float32(EXCLUSION_BUFFER_MAP.get(target_res, target_res))
+
+        lat_col = "lat" if "lat" in out_df.columns else ("centroid_lat" if "centroid_lat" in out_df.columns else None)
+        lon_col = "lon" if "lon" in out_df.columns else ("centroid_lon" if "centroid_lon" in out_df.columns else None)
+
+        if lat_col and lon_col:
+            master_df = self.load_master_grid_2km()
+            if self._kdtree_2km is not None and "elevation_m" in master_df.columns:
+                unique_coords = out_df[[lat_col, lon_col]].drop_duplicates().to_numpy(dtype=float)
+                # TPI radius in degrees approx (1 deg ~ 111 km)
+                r_tpi_deg = max((target_res * 3.0) / 111.0, 0.015)
+                r_relief_deg = max(target_res / 111.0, 0.018)
+                elevs_master = master_df["elevation_m"].to_numpy(dtype=float)
+
+                tpi_map = {}
+                relief_map = {}
+                std_map = {}
+
+                tpi_nbrs = self._kdtree_2km.query_ball_point(unique_coords, r=r_tpi_deg)
+                relief_nbrs = self._kdtree_2km.query_ball_point(unique_coords, r=r_relief_deg)
+                _, nearest_idxs = self._kdtree_2km.query(unique_coords)
+
+                for i, (u_lat, u_lon) in enumerate(unique_coords):
+                    center_elev = elevs_master[nearest_idxs[i]]
+                    # 1. TPI
+                    n_tpi = tpi_nbrs[i]
+                    if len(n_tpi) > 0:
+                        tpi_val = float(center_elev - np.mean(elevs_master[n_tpi]))
+                    else:
+                        tpi_val = 0.0
+                    tpi_map[(u_lat, u_lon)] = tpi_val
+
+                    # 2. Local Relief & Roughness (fractal scaling below master grid resolution)
+                    n_rel = relief_nbrs[i]
+                    base_rel = float(np.max(elevs_master[n_rel]) - np.min(elevs_master[n_rel])) if len(n_rel) > 1 else 10.0
+                    base_std = float(np.std(elevs_master[n_rel])) if len(n_rel) > 1 else 5.0
+                    scale_factor = target_res / 2.0
+                    relief_map[(u_lat, u_lon)] = float(base_rel * (scale_factor ** 0.5))
+                    std_map[(u_lat, u_lon)] = float(base_std * (scale_factor ** 0.35))
+
+                coord_tuples = list(zip(out_df[lat_col], out_df[lon_col]))
+                out_df["tpi_index"] = np.array([tpi_map.get(pt, 0.0) for pt in coord_tuples], dtype=np.float32)
+                out_df["relief_m"] = np.array([relief_map.get(pt, 0.0) for pt in coord_tuples], dtype=np.float32)
+                if "elevation_std" in out_df.columns:
+                    out_df["elevation_std"] = np.array([std_map.get(pt, 0.0) for pt in coord_tuples], dtype=np.float32)
+
+        # 3. Scale-dependent Spatial Texture adaptation (Point Spread Function / spatial smoothing)
+        scale_ratio = target_res / float(base_resolution_km)
+        texture_std_cols = ["b13_std_3x3", "b15_std_3x3", "btd_15_13_std_3x3"]
+        for col in texture_std_cols:
+            if col in out_df.columns:
+                factor = 1.0 / np.sqrt(scale_ratio) if scale_ratio > 0 else 1.0
+                out_df[col] = (out_df[col] * factor).astype(np.float32)
+
+        return out_df
