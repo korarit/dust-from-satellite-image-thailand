@@ -1183,10 +1183,26 @@ def run_phase_4_full(pollutant: str = "pm25", split_date: str = "2026-01-01") ->
             all_gt = pd.concat([train_gt, test_gt], ignore_index=True) if not test_gt.empty else train_gt
             all_gt["timestamp_utc"] = pd.to_datetime(all_gt["timestamp_utc"], utc=True).dt.floor("h")
 
-            # Exact point-in-time merge on location_id and timestamp_utc (Nowcast standard)
+            # Harmonize station identifiers across sat_df and all_gt
+            if "location_id" not in all_gt.columns and "station_code" in all_gt.columns:
+                all_gt["location_id"] = pd.to_numeric(
+                    all_gt["station_code"].astype(str).str.extract(r"(\d+)", expand=False),
+                    errors="coerce"
+                )
+
+            # Determine optimal join key: prefer station_code if present in both, else location_id
+            if "station_code" in sat_df.columns and "station_code" in all_gt.columns:
+                join_key = "station_code"
+            else:
+                join_key = "location_id"
+                if "location_id" in sat_df.columns and "location_id" in all_gt.columns:
+                    sat_df["location_id"] = pd.to_numeric(sat_df["location_id"], errors="coerce")
+                    all_gt["location_id"] = pd.to_numeric(all_gt["location_id"], errors="coerce")
+
+            # Exact point-in-time merge on station identifier and timestamp_utc (Nowcast standard)
             merged_df = sat_df.merge(
-                all_gt[["location_id", "timestamp_utc", tgt_col]].drop_duplicates(),
-                on=["location_id", "timestamp_utc"],
+                all_gt[[join_key, "timestamp_utc", tgt_col]].drop_duplicates(),
+                on=[join_key, "timestamp_utc"],
                 how="inner"
             )
             if not merged_df.empty:
@@ -1205,7 +1221,12 @@ def run_phase_4_full(pollutant: str = "pm25", split_date: str = "2026-01-01") ->
                         merged_df[col] = time_feats[col].values
 
                 merged_df["timestamp"] = merged_df["timestamp_utc"]
-                merged_df["grid_id"] = merged_df["location_id"].astype(str)
+                if "lat" not in merged_df.columns and "latitude" in merged_df.columns:
+                    merged_df["lat"] = merged_df["latitude"]
+                if "lon" not in merged_df.columns and "longitude" in merged_df.columns:
+                    merged_df["lon"] = merged_df["longitude"]
+                grid_col = "location_id" if ("location_id" in merged_df.columns and merged_df["location_id"].notna().any()) else join_key
+                merged_df["grid_id"] = merged_df[grid_col].astype(str)
                 unified_df = merged_df
                 builder = FeatureMatrixBuilder()
                 builder.save_matrix(unified_df, matrix_path)

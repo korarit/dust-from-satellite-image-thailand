@@ -318,14 +318,18 @@ class GroundTruthLoader:
             raise ValueError(f"Ground truth file missing essential columns in {file_path}")
 
         target_name = "observed_pm10" if "pm10" in target_col.lower() else "observed_pm25"
-        standard_df = pd.DataFrame({
+        loc_col = cols.get("location_id") or cols.get("locationid") or cols.get("loc_id")
+        standard_dict = {
             "station_code": df[st_col].astype(str),
             "timestamp_utc": pd.to_datetime(df[ts_col]),
             target_name: pd.to_numeric(df[pm_col], errors="coerce"),
             "latitude": pd.to_numeric(df[lat_col], errors="coerce"),
             "longitude": pd.to_numeric(df[lon_col], errors="coerce"),
             "source": "Historical_Archive"
-        })
+        }
+        if loc_col and loc_col in df.columns:
+            standard_dict["location_id"] = pd.to_numeric(df[loc_col], errors="coerce")
+        standard_df = pd.DataFrame(standard_dict)
 
         standard_df = self.filter_thailand_bounds(standard_df)
         standard_df = self.apply_physical_bounds(standard_df, target_col=target_name)

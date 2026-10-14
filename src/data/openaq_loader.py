@@ -461,6 +461,7 @@ class OpenAQLoader:
         if df_meas.empty:
             return pd.DataFrame()
 
+        df_meas["location_id"] = int(location_id)
         df_meas["station_code"] = f"OPENAQ_{location_id}"
         df_meas["station_name"] = station_name
         df_meas["latitude"] = lat
@@ -468,7 +469,7 @@ class OpenAQLoader:
         df_meas["source"] = "OpenAQ_Air4Thai"
 
         cols = [
-            "station_code", "station_name", "timestamp_utc",
+            "location_id", "station_code", "station_name", "timestamp_utc",
             target_col, "latitude", "longitude", "source"
         ]
         return df_meas[cols]
@@ -547,6 +548,7 @@ class OpenAQLoader:
                 p_df["longitude"] = pd.to_numeric(p_df["lon"], errors="coerce")
                 s_name = p_df["location"].iloc[0] if "location" in p_df.columns and pd.notna(p_df["location"].iloc[0]) else station_name
                 out_df = pd.DataFrame({
+                    "location_id": int(location_id),
                     "station_code": f"OPENAQ_{location_id}",
                     "station_name": s_name,
                     "timestamp_utc": p_df["timestamp_utc"],
@@ -664,12 +666,13 @@ class OpenAQLoader:
                         int(sensor_id), chunk_start, chunk_end, pollutant=pollutant
                     )
                     if not df_chunk.empty:
+                        df_chunk["location_id"] = int(location_id)
                         df_chunk["station_code"] = f"OPENAQ_{location_id}"
                         df_chunk["station_name"] = station_name
                         df_chunk["latitude"] = lat
                         df_chunk["longitude"] = lon
                         df_chunk["source"] = "OpenAQ_API_v3"
-                        cols = ["station_code", "station_name", "timestamp_utc", target_col, "latitude", "longitude", "source"]
+                        cols = ["location_id", "station_code", "station_name", "timestamp_utc", target_col, "latitude", "longitude", "source"]
                         dfs_api.append(df_chunk[cols])
             else:
                 logger.warning("  Location %d: Could not resolve %s sensor for API gap fill", location_id, pollutant.upper())
