@@ -61,7 +61,7 @@
    ดึงข้อมูลความสูงภูมิประเทศจาก AWS S3 Open Data (`s3://copernicus-dem-30m/`) โดยตรง พร้อมระบบ `seed_geo_if_needed()` คัดลอก Master Grid 2.0 km (276,317 เซลล์) และกระเบื้อง DEM ไปยังโฟลเดอร์ปลายทาง (`--dir-data` บน Google Drive) อัตโนมัติ ป้องกันปัญหาไฟล์สูญหาย
 
 5. **การทดสอบเปรียบเทียบขนาดกริด 4 ระดับด้วย Multi-Resolution Downscaling**:
-   แทนที่จะคัดลอกข้อมูลเดียวกัน ระบบใช้โมเดลฟิสิกส์ปรับสเกลธรณีสัณฐานวิทยาตามขนาดกริดจริง ($3\,\text{km}$, $2\,\text{km}$, $1\,\text{km}$, $500\,\text{m}$): ปรับรัศมีวงรอบของ TPI ($R = 3 \times \text{cell\_size}$), คำนวณ Fractal Relief Scaling $H(L)$, Hurst Roughness Scaling $\sigma_{\text{rough}}(L)$, และ Point Spread Function (PSF) Texture Variance เพื่อค้นหา Pareto Sweet Spot ทางวิทยาศาสตร์อย่างแท้จริง
+   แทนที่จะคัดลอกข้อมูลเดียวกัน ระบบใช้โมเดลฟิสิกส์ปรับสเกลธรณีสัณฐานวิทยาตามขนาดกริดจริง ($3\,\text{km}$, $2\,\text{km}$, $1\,\text{km}$, $500\,\text{m}$): ปรับรัศมีวงรอบของ TPI ($R = 3 \times \text{resolution}$), คำนวณ Fractal Relief Scaling $H(L)$, Hurst Roughness Scaling $\sigma_{\text{rough}}(L)$, และ Point Spread Function (PSF) Texture Variance เพื่อค้นหา Pareto Sweet Spot ทางวิทยาศาสตร์อย่างแท้จริง
 
 6. **สถาปัตยกรรมชุดแบบจำลอง 4 ขุนพล และโหมด Fast Direct Training**:
    ผสานจุดเด่นของอัลกอริทึมต้นไม้ตัดสินใจระดับชั้นนำ:
