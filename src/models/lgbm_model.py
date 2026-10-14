@@ -116,7 +116,11 @@ class LGBMDustModel(BaseDustModel):
             raise RuntimeError(f"{self.name} must be fitted before predict.")
 
         X_arr, _ = self._prepare_inputs(X, feature_names=self.feature_names_)
-        preds = self.estimator.predict(X_arr)
+        if self.feature_names_ is not None and len(self.feature_names_) == X_arr.shape[1]:
+            X_in = pd.DataFrame(X_arr, columns=self.feature_names_)
+        else:
+            X_in = X_arr
+        preds = self.estimator.predict(X_in)
         return np.maximum(preds, 0.0)
 
     def get_feature_importance(self, importance_type: str = "gain") -> pd.DataFrame:
