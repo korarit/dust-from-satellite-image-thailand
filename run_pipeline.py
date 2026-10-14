@@ -1212,13 +1212,6 @@ def _enrich_multi_year_matrix(
         out_df["delta_bt13_cadence"] = d_bt13.where(valid_cadence, 0.0).astype(np.float32)
         out_df["delta_btd15_13_cadence"] = d_btd.where(valid_cadence, 0.0).astype(np.float32)
 
-        # Legacy temporal columns populated with physical rate values
-        out_df["delta_bt13_60m"] = rate_bt13
-        out_df["delta_bt13_30m"] = (rate_bt13 * 0.5).astype(np.float32)
-        out_df["delta_bt13_10m"] = (rate_bt13 * (1.0 / 6.0)).astype(np.float32)
-        out_df["delta_btd15_13_60m"] = rate_btd
-        out_df["delta_btd15_13_30m"] = (rate_btd * 0.5).astype(np.float32)
-        out_df["delta_btd15_13_10m"] = (rate_btd * (1.0 / 6.0)).astype(np.float32)
         logger.info("  ✓ Computed authentic temporal dynamics (delta_bt13/btd rates per hour) for %s", stn_key)
 
     # 2. Topography from Master Grid (Copernicus DEM)
@@ -1391,14 +1384,6 @@ def run_phase_4_full(pollutant: str = "pm25", split_date: str = "2026-01-01") ->
             sat_valid["delta_btd15_13_rate_per_hour"] = (d_btd / dt_h.where(has_prev_satellite, np.nan)).fillna(0.0).astype(np.float32)
             sat_valid["delta_bt13_cadence"] = d_bt13.where(has_prev_satellite, 0.0).astype(np.float32)
             sat_valid["delta_btd15_13_cadence"] = d_btd.where(has_prev_satellite, 0.0).astype(np.float32)
-
-            sat_valid["delta_bt13_60m"] = sat_valid["delta_bt13_rate_per_hour"]
-            sat_valid["delta_bt13_30m"] = (sat_valid["delta_bt13_rate_per_hour"] * 0.5).astype(np.float32)
-            sat_valid["delta_bt13_10m"] = (sat_valid["delta_bt13_rate_per_hour"] * (1.0 / 6.0)).astype(np.float32)
-            sat_valid["delta_btd15_13_60m"] = sat_valid["delta_btd15_13_rate_per_hour"]
-            sat_valid["delta_btd15_13_30m"] = (sat_valid["delta_btd15_13_rate_per_hour"] * 0.5).astype(np.float32)
-            sat_valid["delta_btd15_13_10m"] = (sat_valid["delta_btd15_13_rate_per_hour"] * (1.0 / 6.0)).astype(np.float32)
-
             # Skip rows where t - cadence satellite data is missing (Strict Continuous Cadence)
             sat_continuous = sat_valid[has_prev_satellite].copy()
             logger.info("  • Satellite observations with valid t - cadence history: %d/%d (%.1f%% retained)",

@@ -98,12 +98,6 @@ SAT_TEXTURE_COLUMNS = [
 ]
 
 SAT_TEMPORAL_COLUMNS = [
-    "delta_bt13_10m",
-    "delta_bt13_30m",
-    "delta_bt13_60m",
-    "delta_btd15_13_10m",
-    "delta_btd15_13_30m",
-    "delta_btd15_13_60m",
     "delta_bt13_cadence",
     "delta_btd15_13_cadence",
     "delta_bt13_rate_per_hour",
