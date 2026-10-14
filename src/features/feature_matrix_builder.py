@@ -104,6 +104,10 @@ SAT_TEMPORAL_COLUMNS = [
     "delta_btd15_13_10m",
     "delta_btd15_13_30m",
     "delta_btd15_13_60m",
+    "delta_bt13_cadence",
+    "delta_btd15_13_cadence",
+    "delta_bt13_rate_per_hour",
+    "delta_btd15_13_rate_per_hour",
 ]
 
 WEATHER_PRESSURE_COLUMNS = [

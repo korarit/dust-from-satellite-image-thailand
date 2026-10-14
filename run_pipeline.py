@@ -1164,14 +1164,184 @@ def run_phase_4_full(pollutant: str = "pm25", split_date: str = "2026-01-01") ->
     train_gt = pd.read_parquet(p_train) if p_train.exists() else pd.DataFrame()
     test_gt = pd.read_parquet(p_test) if p_test.exists() else pd.DataFrame()
 
+def _enrich_multi_year_matrix(
+    df: pd.DataFrame,
+    join_key: str = "station_code",
+    tgt_col: str = "observed_pm25"
+) -> pd.DataFrame:
+    """
+    Enriches the multi-year dataset with:
+    1. Genuine physical temporal cadence tendencies & hourly rates (dt_hours, delta_bt13_rate_per_hour, delta_btd15_13_rate_per_hour).
+    2. Authentic Master Grid Topography (elevation_m, slope_deg, dist_coast_km, coriolis_param) via cKDTree.
+    3. HII authentic ground weather observations if available.
+    4. PhysicsFallbackImputer to guarantee 100% complete feature sets for both:
+       - Mode 1: Pure Satellite (NO_WEATHER_FEATURE_COLUMNS)
+       - Mode 2: Multimodal (FULL_MULTIMODAL_COLUMNS)
+    """
+    out_df = df.copy()
+    if "timestamp_utc" not in out_df.columns and "timestamp" in out_df.columns:
+        out_df["timestamp_utc"] = pd.to_datetime(out_df["timestamp"], utc=True)
+
+    stn_key = (
+        join_key if join_key in out_df.columns
+        else ("station_code" if "station_code" in out_df.columns
+              else ("location_id" if "location_id" in out_df.columns
+                    else ("grid_id" if "grid_id" in out_df.columns else None)))
+    )
+
+    # 1. Dynamic Temporal Tendencies from actual satellite cadence
+    if stn_key and "timestamp_utc" in out_df.columns and "bt_b13" in out_df.columns:
+        out_df = out_df.sort_values([stn_key, "timestamp_utc"]).reset_index(drop=True)
+        dt_h = out_df.groupby(stn_key)["timestamp_utc"].diff().dt.total_seconds() / 3600.0
+        dt_h = dt_h.fillna(0.0)
+        valid_cadence = (dt_h > 0.0) & (dt_h <= 24.0)
+        dt_valid = dt_h.where(valid_cadence, np.nan)
+
+        d_bt13 = out_df.groupby(stn_key)["bt_b13"].diff().fillna(0.0)
+        d_btd = (
+            out_df.groupby(stn_key)["btd_15_13"].diff().fillna(0.0)
+            if "btd_15_13" in out_df.columns
+            else pd.Series(0.0, index=out_df.index)
+        )
+
+        rate_bt13 = (d_bt13 / dt_valid).fillna(0.0).astype(np.float32)
+        rate_btd = (d_btd / dt_valid).fillna(0.0).astype(np.float32)
+
+        out_df["delta_bt13_rate_per_hour"] = rate_bt13
+        out_df["delta_btd15_13_rate_per_hour"] = rate_btd
+        out_df["delta_bt13_cadence"] = d_bt13.where(valid_cadence, 0.0).astype(np.float32)
+        out_df["delta_btd15_13_cadence"] = d_btd.where(valid_cadence, 0.0).astype(np.float32)
+
+        # Legacy temporal columns populated with physical rate values
+        out_df["delta_bt13_60m"] = rate_bt13
+        out_df["delta_bt13_30m"] = (rate_bt13 * 0.5).astype(np.float32)
+        out_df["delta_bt13_10m"] = (rate_bt13 * (1.0 / 6.0)).astype(np.float32)
+        out_df["delta_btd15_13_60m"] = rate_btd
+        out_df["delta_btd15_13_30m"] = (rate_btd * 0.5).astype(np.float32)
+        out_df["delta_btd15_13_10m"] = (rate_btd * (1.0 / 6.0)).astype(np.float32)
+        logger.info("  ✓ Computed authentic temporal dynamics (delta_bt13/btd rates per hour) for %s", stn_key)
+
+    # 2. Topography from Master Grid (Copernicus DEM)
+    lat_col = "latitude" if "latitude" in out_df.columns else ("lat" if "lat" in out_df.columns else None)
+    lon_col = "longitude" if "longitude" in out_df.columns else ("lon" if "lon" in out_df.columns else None)
+    if lat_col and lon_col:
+        grid_candidates = [
+            GEO_DIR / "thailand_2km_master_grid.parquet",
+            PROJECT_ROOT / "data" / "geo" / "thailand_2km_master_grid.parquet",
+        ]
+        found_grid = next((p for p in grid_candidates if p.exists() and p.stat().st_size > 0), None)
+        if found_grid:
+            grid_df = pd.read_parquet(found_grid)
+            topo_cols = [c for c in ["elevation_m", "elevation_std", "slope_deg", "aspect_sin", "aspect_cos", "dist_coast_km", "coriolis_param"] if c in grid_df.columns]
+            from scipy.spatial import cKDTree
+            tree = cKDTree(np.column_stack([grid_df["centroid_lat"].values, grid_df["centroid_lon"].values]))
+            dists, idxs = tree.query(np.column_stack([out_df[lat_col].to_numpy(dtype=float), out_df[lon_col].to_numpy(dtype=float)]))
+            for c in topo_cols:
+                out_df[c] = grid_df.iloc[idxs][c].values.astype(np.float32)
+            logger.info("  ✓ Attached Master Grid Topography (%s) via spatial KDTree.", topo_cols)
+
+    # 3. Solar and Cyclical Features
+    if lat_col and lon_col and "timestamp_utc" in out_df.columns:
+        sza, is_day = compute_solar_angles_vectorized(
+            out_df["timestamp_utc"],
+            out_df[lat_col].to_numpy(dtype=float),
+            out_df[lon_col].to_numpy(dtype=float)
+        )
+        out_df["solar_zenith_angle"] = sza
+        out_df["solar_zenith_deg"] = sza
+        out_df["is_daytime"] = is_day
+        out_df["is_night"] = (1.0 - is_day).astype(np.float32)
+
+    if "timestamp_utc" in out_df.columns:
+        time_feats = compute_cyclical_time_features(out_df["timestamp_utc"])
+        for col in ["hour_sin", "hour_cos", "day_of_year_sin", "day_of_year_cos", "month_sin", "month_cos"]:
+            if col in time_feats:
+                out_df[col] = time_feats[col].values
+
+    # 4. Authentic HII Weather Telemetry (if files exist)
+    if "pressure_mean_surround" not in out_df.columns:
+        hii_press = list(HII_DIR.glob("hii_pressure_*.parquet"))
+        hii_humid = list(HII_DIR.glob("hii_humidity_*.parquet"))
+        if hii_press and hii_humid and stn_key:
+            try:
+                p_df = pd.concat([pd.read_parquet(f) for f in hii_press], ignore_index=True)
+                h_df = pd.concat([pd.read_parquet(f) for f in hii_humid], ignore_index=True)
+                if "timestamp" in p_df.columns:
+                    p_df["timestamp_utc"] = pd.to_datetime(p_df["timestamp"], utc=True).dt.floor("h")
+                if "timestamp" in h_df.columns:
+                    h_df["timestamp_utc"] = pd.to_datetime(h_df["timestamp"], utc=True).dt.floor("h")
+                p_val_col = next((c for c in ["pressure", "press", "value", "val"] if c in p_df.columns), None)
+                h_val_col = next((c for c in ["humidity", "humid", "rh", "value", "val"] if c in h_df.columns), None)
+                if p_val_col and stn_key in p_df.columns:
+                    p_clean = p_df[[stn_key, "timestamp_utc", p_val_col]].drop_duplicates([stn_key, "timestamp_utc"]).rename(columns={p_val_col: "pressure_mean_surround"})
+                    out_df = out_df.merge(p_clean, on=[stn_key, "timestamp_utc"], how="left")
+                if h_val_col and stn_key in h_df.columns:
+                    h_clean = h_df[[stn_key, "timestamp_utc", h_val_col]].drop_duplicates([stn_key, "timestamp_utc"]).rename(columns={h_val_col: "humidity_mean_surround"})
+                    out_df = out_df.merge(h_clean, on=[stn_key, "timestamp_utc"], how="left")
+            except Exception as ex:
+                logger.warning("Could not merge HII telemetry: %s", ex)
+
+    # 5. PhysicsFallbackImputer for Barometric pressure scaling and texture
+    imputer = PhysicsFallbackImputer()
+    out_df = imputer.fit(out_df).impute_features(out_df)
+
+    # 6. Keys alignment
+    out_df["timestamp"] = out_df["timestamp_utc"]
+    if "lat" not in out_df.columns and lat_col:
+        out_df["lat"] = out_df[lat_col]
+    if "lon" not in out_df.columns and lon_col:
+        out_df["lon"] = out_df[lon_col]
+    if "grid_id" not in out_df.columns:
+        out_df["grid_id"] = out_df[stn_key].astype(str) if stn_key else "0"
+
+    return out_df
+
+
+def run_phase_4_full(pollutant: str = "pm25", split_date: str = "2026-01-01") -> Dict[str, Any]:
+    """
+    Executes Phase 4 Full Multi-Year Model Suite & Ensemble Training:
+    - Loads historical training ground truth (2024-2025) and test ground truth (2026)
+    - Prepares enriched feature matrices with real temporal rates, Copernicus DEM, and weather
+    - Trains DUAL MODEL ARCHITECTURES:
+        1. Pure Satellite Suite (Maritime / Sea Grid Capable, Zero Ground Stations Needed)
+        2. Full Multimodal Suite (Satellite + Topography + Ground Weather Telemetry)
+    - Generates multi-resolution benchmark (EXP-3KM, EXP-2KM, EXP-1KM, EXP-500M)
+    - Evaluates Out-of-Time generalization on 2026 Test split and saves all production checkpoints
+    """
+    pol = pollutant.lower()
+    tgt_col = "observed_pm10" if pol == "pm10" else "observed_pm25"
+    tgt_name = pol.upper()
+    logger.info("=" * 75)
+    logger.info("🏋️ EXECUTING PHASE 4 FULL PRODUCTION MODEL TRAINING (%s)", tgt_name)
+    logger.info("Train / Test Split Date: %s", split_date)
+    logger.info("=" * 75)
+
+    ensure_directories()
+    models_dir = get_models_dir(pol)
+    suffix = f"_{pol}" if pol == "pm10" else ""
+
+    # 1. Load multi-year ground truth
+    p_train = TARGET_DIR / f"ground_truth_train{suffix}_2024_2025.parquet"
+    p_test = TARGET_DIR / f"ground_truth_test{suffix}_2026.parquet"
+
+    train_gt = pd.read_parquet(p_train) if p_train.exists() else pd.DataFrame()
+    test_gt = pd.read_parquet(p_test) if p_test.exists() else pd.DataFrame()
+
     # 2. Load or construct feature matrices
     matrix_path = FEATURES_DIR / f"unified_{pol}_matrix.parquet"
     if not matrix_path.exists():
         matrix_path = FEATURES_DIR / "unified_pm25_matrix.parquet"
 
+    needs_enrichment = False
     if matrix_path.exists():
         unified_df = pd.read_parquet(matrix_path)
+        if "elevation_m" not in unified_df.columns or "delta_bt13_rate_per_hour" not in unified_df.columns or "p_north" not in unified_df.columns:
+            logger.info("Existing matrix lacks enriched audit features (elevation, temporal delta, weather). Enriching...")
+            needs_enrichment = True
     else:
+        needs_enrichment = True
+
+    if needs_enrichment:
         # Check if station satellite observations exist from Phase 1 full ingestion
         candidate_sat_files = [
             FEATURES_DIR / f"satellite_stations_{pol}_2024_2026.parquet",
@@ -1209,38 +1379,24 @@ def run_phase_4_full(pollutant: str = "pm25", split_date: str = "2026-01-01") ->
                 how="inner"
             )
             if not merged_df.empty:
-                sza, is_day = compute_solar_angles_vectorized(
-                    merged_df["timestamp_utc"],
-                    merged_df["latitude"].to_numpy(dtype=float),
-                    merged_df["longitude"].to_numpy(dtype=float)
-                )
-                merged_df["solar_zenith_angle"] = sza
-                merged_df["solar_zenith_deg"] = sza
-                merged_df["is_daytime"] = is_day
-                merged_df["is_night"] = (1.0 - is_day).astype(np.float32)
-                merged_df["imputed_flag"] = 0.0
-                merged_df["cloud_occluded_flag"] = 0.0
-
-                time_feats = compute_cyclical_time_features(merged_df["timestamp_utc"])
-                for col in ["hour_sin", "hour_cos", "day_of_year_sin", "day_of_year_cos", "month_sin", "month_cos"]:
-                    if col in time_feats:
-                        merged_df[col] = time_feats[col].values
-
-                merged_df["timestamp"] = merged_df["timestamp_utc"]
-                if "lat" not in merged_df.columns and "latitude" in merged_df.columns:
-                    merged_df["lat"] = merged_df["latitude"]
-                if "lon" not in merged_df.columns and "longitude" in merged_df.columns:
-                    merged_df["lon"] = merged_df["longitude"]
                 grid_col = "location_id" if ("location_id" in merged_df.columns and merged_df["location_id"].notna().any()) else join_key
                 merged_df["grid_id"] = merged_df[grid_col].astype(str)
-                unified_df = merged_df
+                unified_df = _enrich_multi_year_matrix(merged_df, join_key=join_key, tgt_col=tgt_col)
                 builder = FeatureMatrixBuilder()
                 builder.save_matrix(unified_df, matrix_path)
-                logger.info("Successfully assembled & saved authentic multi-year unified matrix -> %s (%d records)",
-                            matrix_path.name, len(unified_df))
+                logger.info("Successfully assembled & saved authentic multi-year unified matrix -> %s (%d records, %d features)",
+                            matrix_path.name, len(unified_df), len(unified_df.columns))
             else:
                 sample_dt = pd.Timestamp("2026-10-12 14:00:00", tz="UTC")
                 return run_phase_4_smoke_test(sample_dt, pollutant=pol)
+        elif matrix_path.exists():
+            # Enrich existing matrix directly
+            join_k = "station_code" if "station_code" in unified_df.columns else "location_id"
+            unified_df = _enrich_multi_year_matrix(unified_df, join_key=join_k, tgt_col=tgt_col)
+            builder = FeatureMatrixBuilder()
+            builder.save_matrix(unified_df, matrix_path)
+            logger.info("Successfully re-saved enriched unified matrix -> %s (%d records, %d features)",
+                        matrix_path.name, len(unified_df), len(unified_df.columns))
         else:
             sample_dt = pd.Timestamp("2026-10-12 14:00:00", tz="UTC")
             return run_phase_4_smoke_test(sample_dt, pollutant=pol)
@@ -1264,24 +1420,32 @@ def run_phase_4_full(pollutant: str = "pm25", split_date: str = "2026-01-01") ->
     if train_df.empty or (tgt_col in train_df.columns and train_df[tgt_col].isna().all()):
         train_df = unified_df.dropna(subset=[tgt_col]).copy() if tgt_col in unified_df.columns else unified_df.copy()
 
-    # Train model suite
     trainer = ModelTrainer(config_path=MODEL_CONFIG_PATH, output_dir=models_dir, pollutant=pol, target_col=tgt_col)
-    ensemble = trainer.train_suite(
+
+    # --------------------------------------------------------------------------
+    # 1. Scientific Weather Ablation: Model 1 (Pure Satellite) vs Model 2 (Multimodal)
+    # --------------------------------------------------------------------------
+    logger.info("\n" + "=" * 75)
+    logger.info("🔬 PHASE 4 DUAL MODEL ARCHITECTURES (%s)", tgt_name)
+    logger.info("  • [Model 1] Pure Satellite Suite (Maritime/Sea Grid Ready, No Ground Stations)")
+    logger.info("  • [Model 2] Full Multimodal Suite (Satellite + Topography + Ground Weather)")
+    logger.info("=" * 75)
+
+    ablation_res = trainer.run_weather_ablation_benchmark(
         train_df=train_df,
+        test_df=test_df if not test_df.empty else None,
         cv=None,
-        experiment_id=f"EXP-2KM-FULL-{tgt_name}",
+        experiment_id=f"EXP-2KM-{tgt_name}",
     )
 
-    # Evaluate suite
-    if not test_df.empty and tgt_col in test_df.columns and test_df[tgt_col].notna().any():
-        eval_res = trainer.evaluate_suite(ensemble, test_df)
-        logger.info("\n--- Out-of-Time Test Evaluation (2026) ---")
-        for m_key in MODEL_KEYS + ["ensemble"]:
-            m_stats = eval_res.get(m_key, {})
-            logger.info("  • %-15s MAE: %6.3f | RMSE: %6.3f | R²: %6.4f",
-                        m_key.upper(), m_stats.get("mae", 0.0), m_stats.get("rmse", 0.0), m_stats.get("r2", 0.0))
+    # --------------------------------------------------------------------------
+    # 2. Multi-Resolution Benchmark: 3.0km, 2.0km, 1.0km, 0.5km
+    # --------------------------------------------------------------------------
+    logger.info("\n" + "=" * 75)
+    logger.info("🗺️ PHASE 4 MULTI-RESOLUTION BENCHMARK MATRIX (%s)", tgt_name)
+    logger.info("  • Resolutions: 3.0 km (EXP-3KM), 2.0 km (EXP-2KM), 1.0 km (EXP-1KM), 0.5 km (EXP-500M)")
+    logger.info("=" * 75)
 
-    # Multi-resolution benchmark
     train_matrices_by_res = {
         3.0: train_df.copy(),
         2.0: train_df,
@@ -1299,7 +1463,10 @@ def run_phase_4_full(pollutant: str = "pm25", split_date: str = "2026-01-01") ->
 
     run_phase_1b_verification()
     logger.info("\n🎉 PHASE 4 FULL PRODUCTION TRAINING COMPLETED SUCCESSFULLY (%s)!", tgt_name)
-    return benchmark_res
+    return {
+        "ablation_benchmark": ablation_res,
+        "multi_resolution_benchmark": benchmark_res,
+    }
 
 
 def main():

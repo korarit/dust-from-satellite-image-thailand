@@ -97,6 +97,15 @@ class ModelTrainer:
                 ]
             feature_cols = available_features
 
+        # Prune exact duplicate alias features to eliminate multicollinearity
+        check_sample_n = min(len(valid_df), 100)
+        if "btd_14_11" in feature_cols and "btd_13_11" in feature_cols:
+            if np.allclose(valid_df["btd_14_11"].values[:check_sample_n], valid_df["btd_13_11"].values[:check_sample_n], equal_nan=True):
+                feature_cols = [c for c in feature_cols if c != "btd_14_11"]
+        if "btd_10_08" in feature_cols and "btd_13_10" in feature_cols:
+            if np.allclose(valid_df["btd_10_08"].values[:check_sample_n], valid_df["btd_13_10"].values[:check_sample_n], equal_nan=True):
+                feature_cols = [c for c in feature_cols if c != "btd_10_08"]
+
         X = valid_df[feature_cols].copy()
         y = valid_df[self.target_col].astype(float)
 

@@ -590,15 +590,23 @@ class HimawariIRLoader:
                 station_features["btd_13_10"] = (
                     station_features["bt_b13"] - station_features["bt_b10"]
                 ).astype(np.float32)
-                # Backward-compatibility alias for lower moisture / lapse rate
-                station_features["btd_10_08"] = station_features["btd_13_10"]
+                if "bt_b10" in station_features.columns and "bt_b08" in station_features.columns:
+                    station_features["btd_10_08"] = (
+                        station_features["bt_b10"] - station_features["bt_b08"]
+                    ).astype(np.float32)
+                else:
+                    station_features["btd_10_08"] = station_features["btd_13_10"]
 
             if "bt_b13" in station_features.columns and "bt_b11" in station_features.columns:
                 station_features["btd_13_11"] = (
                     station_features["bt_b13"] - station_features["bt_b11"]
                 ).astype(np.float32)
-                # Backward-compatibility alias for particle size
-                station_features["btd_14_11"] = station_features["btd_13_11"]
+                if "bt_b14" in station_features.columns and "bt_b11" in station_features.columns:
+                    station_features["btd_14_11"] = (
+                        station_features["bt_b14"] - station_features["bt_b11"]
+                    ).astype(np.float32)
+                else:
+                    station_features["btd_14_11"] = station_features["btd_13_11"]
 
             station_features["timestamp"] = pd.to_datetime(dt, utc=True)
             return station_features
