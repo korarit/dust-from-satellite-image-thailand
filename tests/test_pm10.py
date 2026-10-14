@@ -65,8 +65,10 @@ from src.models import (
     CatBoostDustModel,
     XGBoostDustModel,
     RandomForestDustModel,
+    ExtraTreesDustModel,
     DustStackingEnsemble,
     ModelTrainer,
+    MODEL_KEYS,
     THAILAND_AQI_THRESHOLDS_PM10,
     assign_aqi_category,
     compute_dust_metrics,
@@ -295,7 +297,7 @@ class TestPM10DedicatedModelSuiteAndEnsemble:
 
         # Fit meta-learner weights
         weights = ensemble.weights
-        assert len(weights) == 4
+        assert len(weights) == len(MODEL_KEYS)
         # All weights non-negative and sum to 1.0
         for w in weights.values():
             assert w >= -1e-6

@@ -1,16 +1,16 @@
-# เอกสารทางเทคนิค: สถาปัตยกรรมชุดแบบจำลอง 4 ขุนพลและการผสานโมเดล
-## (Technical Machine Learning Architecture: The Quartet Ensemble & Spatial-Temporal Stacking)
+# เอกสารทางเทคนิค: สถาปัตยกรรมชุดแบบจำลอง 5 ขุนพลและการผสานโมเดล
+## (Technical Machine Learning Architecture: The Quintet Ensemble & Spatial-Temporal Stacking)
 
 ---
 
-## 1. ปรัชญาและสถาปัตยกรรมภาพรวม (System Philosophy & Quartet Overview)
+## 1. ปรัชญาและสถาปัตยกรรมภาพรวม (System Philosophy & Quintet Overview)
 
 การพยากรณ์ความเข้มข้นของฝุ่นละออง $\text{PM}_{2.5}$ และ $\text{PM}_{10}$ ภาคพื้นดินด้วยข้อมูลดาวเทียมอุตุนิยมวิทยา Himawari-9 และเครือข่ายสถานีโทรมาตร เป็นปัญหาการเรียนรู้ของเครื่องที่มีความซับซ้อนสูง (Complex Non-linear Spatio-Temporal Regression) เนื่องจาก:
 1. ความสัมพันธ์ระหว่างค่าการแผ่รังสีอินฟราเรดกับอนุภาคฝุ่นมีความไม่เป็นเส้นตรงสูง (Highly Non-linear)
 2. เวกเตอร์เกรเดียนต์ความกดอากาศ 4 ทิศทาง ($\|\nabla P\|, \Delta P_{NS}, \Delta P_{EW}$) และตัวแปรอุณหพลศาสตร์มีความแปรปรวนตามฤดูกาล
 3. สถานีตรวจวัดภาคพื้นดินอาจมีสัญญาณรบกวน (Sensor Measurement Noise) จากความชื้นสัมพัทธ์สูงในเขตร้อนชื้น
 
-ระบบ **Thailand Dust Prediction Satellite** จึงออกแบบสถาปัตยกรรม **"ชุดแบบจำลอง 4 ขุนพล" (The Quartet Ensemble)** ร่วมกับ **เมตาเลิร์นเนอร์แบบกำลังสองน้อยสุดที่ไม่เป็นลบ (Non-Negative Least Squares - NNLS Stacking)** เพื่อผสานจุดเด่นของอัลกอริทึมที่แตกต่างกันอย่างสิ้นเชิง 4 สถาปัตยกรรมเข้าด้วยกัน:
+ระบบ **Thailand Dust Prediction Satellite** จึงออกแบบสถาปัตยกรรม **"ชุดแบบจำลอง 5 ขุนพล" (The Quintet Ensemble)** ร่วมกับ **เมตาเลิร์นเนอร์แบบกำลังสองน้อยสุดที่ไม่เป็นลบ (Non-Negative Least Squares - NNLS Stacking)** เพื่อผสานจุดเด่นของอัลกอริทึมที่แตกต่างกันอย่างสิ้นเชิง 5 สถาปัตยกรรมเข้าด้วยกัน:
 
 ```mermaid
 flowchart TD
@@ -21,18 +21,19 @@ flowchart TD
         F4["Solar Astronomy & Cyclical Time (SZA, Coriolis, Hour, Month)"]
     end
 
-    subgraph QuartetSuite ["2. The Quartet Base Learners (Fast Direct / K-Fold OOF Predictions)"]
-        LGB["1. LightGBM<br>• Leaf-wise Tree Growth<br>• GOSS & EFB Sampling<br>• Fast Streaming Inference"]
-        CAT["2. CatBoost<br>• Oblivious Symmetric Trees<br>• Ordered Boosting<br>• Directional Feature Interactions"]
-        XGB["3. XGBoost<br>• Depth-wise Tree Growth<br>• 2nd-order Taylor Hessian Loss<br>• Monotonic Physics Constraints"]
+    subgraph QuintetSuite ["2. The Quintet Base Learners (Fast Direct / K-Fold OOF Predictions)"]
+        LGB["1. LightGBM<br>• Leaf-wise Tree Growth<br>• Tweedie Loss (p=1.5)<br>• Fast Streaming Inference"]
+        CAT["2. CatBoost<br>• Oblivious Symmetric Trees<br>• Tweedie Deviance Loss<br>• Directional Feature Interactions"]
+        XGB["3. XGBoost<br>• Depth-wise Tree Growth<br>• reg:tweedie Loss<br>• Monotonic Physics Ready"]
         RF["4. Random Forest<br>• Bagging (300 Trees, sqrt features)<br>• Random Subspace Sampling<br>• Variance & Noise Reduction"]
+        ET["5. Extra Trees<br>• Extreme Random Cut-points<br>• Outlier Noise Resilience<br>• Ultra-Fast Parallel Training"]
     end
 
     subgraph DualArchitectures ["3. Dual Model Suites & Stacking Optimization"]
         M1["Model 1: Pure Satellite Suite<br>(Maritime / Sea Grid Ready, No Ground Stations)"]
         M2["Model 2: Full Multimodal Suite<br>(Satellite + Topography + Weather Telemetry)"]
         NNLS["Non-Negative Least Squares (NNLS)<br>min ||y - S w||^2, s.t. w_i >= 0, Σ w_i = 1"]
-        Weights["Optimal Physical Weights:<br>w_lgb, w_cat, w_xgb, w_rf"]
+        Weights["Optimal Physical Weights:<br>w_lgb, w_cat, w_xgb, w_rf, w_et"]
     end
 
     subgraph Evaluation ["4. Spatial-Temporal Generalization & Nowcasting"]
@@ -40,8 +41,8 @@ flowchart TD
         Nowcast["Multi-Resolution Engine (500m, 1km, 2km, 3km with distinct scale features)"]
     end
 
-    InputMatrix --> LGB & CAT & XGB & RF
-    LGB & CAT & XGB & RF --> M1 & M2
+    InputMatrix --> LGB & CAT & XGB & RF & ET
+    LGB & CAT & XGB & RF & ET --> M1 & M2
     M1 & M2 --> NNLS --> Weights
     Weights --> OOT --> Nowcast
 ```
@@ -55,15 +56,14 @@ flowchart TD
 
 ---
 
-## 2. เจาะลึกอัลกอริทึมของแบบจำลองทั้ง 4 ขุนพล (The 4 Base Learners)
+## 2. เจาะลึกอัลกอริทึมของแบบจำลองทั้ง 5 ขุนพล (The 5 Base Learners - Quintet)
 
 ### 2.1 ขุนพลที่ 1: LightGBM (Leaf-wise Gradient Boosting Decision Tree)
 พัฒนาโดย Microsoft Research (Ke et al., 2017) ทำหน้าที่เป็นแกนนำด้าน **ความเร็วในการประมวลผลสตรีมมิ่งระดับมิลลิวินาที**:
 - **การเติบโตของต้นไม้แบบ Leaf-wise**: แตกกิ่งของโหนดที่มีค่าการลดลงของฟังก์ชันการสูญเสีย (Loss Reduction) สูงที่สุด แทนการเติบโตทีละชั้นแบบ Depth-wise ทำให้บรรลุค่าความแม่นยำสูงกว่าด้วยจำนวนโหนดที่น้อยกว่า
 - **Gradient-based One-Side Sampling (GOSS)**: คัดเลือกตัวอย่างที่มีค่าเกรเดียนต์ขนาดใหญ่ (ข้อมูลที่ทำนายยาก) ไว้ทั้งหมด และสุ่มตัวอย่างที่มีค่าเกรเดียนต์ขนาดเล็กด้วยความน่าจะเป็นที่กำหนด พร้อมปรับค่าน้ำหนักเพื่อรักษาการกระจายตัวของข้อมูลเดิม
 - **Exclusive Feature Bundling (EFB)**: รวมกลุ่มฟีเจอร์ที่ไม่เกิดค่าพร้อมกันเพื่อลดมิติข้อมูล
-- **Huber Loss Objective**: ใช้ Huber Loss เพื่อลดความไวต่อค่าผิดปกติ (Outliers) ของฝุ่นชั่วคราว:
-  $$L_\delta(y, f(x)) = \begin{cases} \frac{1}{2}(y - f(x))^2, & |y - f(x)| \le \delta \\ \delta |y - f(x)| - \frac{1}{2}\delta^2, & |y - f(x)| > \delta \end{cases}$$
+- **Tweedie Loss Objective ($p = 1.5$)**: ปรับจูนสู่ Tweedie Deviance Loss เพื่อโมเดลความแปรปรวนแบบอัตราส่วนต่อเนื่องและกำจัดการทำนายค่าลบ
 
 ---
 
@@ -71,7 +71,7 @@ flowchart TD
 พัฒนาโดย Yandex (Prokhorenkova et al., 2018) ทำหน้าที่เป็นแกนนำด้าน **การวิเคราะห์ความสัมพันธ์ความกดอากาศหลากมิติ**:
 - **ต้นไม้ตัดสินใจแบบสมมาตร (Oblivious / Symmetric Trees)**: ทุกโหนดในระดับชั้นเดียวกันใช้เงื่อนไขการตัดฟีเจอร์เดียวกัน ส่งผลให้โครงสร้างโมเดลมีความสมดุลสูง ป้องกันอาการ Overfitting ได้ดีเยี่ยม และทำงานรวดเร็วระดับซีพียูเวกเตอร์ไรเซชัน
 - **Ordered Boosting เพื่อป้องกัน Target Leakage**: ในขั้นตอนการคำนวณเกรเดียนต์ของตัวอย่างที่ $i$ โมเดลจะใช้เฉพาะข้อมูลตัวอย่างที่เกิดขึ้นก่อนหน้าในลำดับการสุ่มเรียงสับเปลี่ยน (Random Permutation) ทำให้ไม่มีข้อมูลเป้าหมายรั่วไหลเข้าสู่โมเดล (Prediction Shift Prevention)
-- **ความเหมาะสมกับข้อมูลสภาพอากาศ**: สามารถจับปฏิสัมพันธ์ที่ไม่เป็นเส้นตรงระหว่างค่าความกดอากาศ 4 ทิศทาง ($P_N, P_S, P_E, P_W$) และความชื้นสัมพัทธ์ได้อย่างแม่นยำที่สุดในตาราง Benchmark
+- **ความเหมาะสมกับข้อมูลสภาพอากาศ**: สามารถจับปฏิสัมพันธ์ที่ไม่เป็นเส้นตรงระหว่างค่าความกดอากาศ 4 ทิศทาง ($P_N, P_S, P_E, P_W$) และความชื้นสัมพัทธ์ได้อย่างแม่นยำที่สุดในตาราง Benchmark พร้อมใช้ Tweedie Loss Function ($p=1.5$)
 
 ---
 
@@ -83,6 +83,7 @@ flowchart TD
 - **พจน์ Regularization ($\Omega(f)$)**:
   $$\Omega(f_t) = \gamma T + \frac{1}{2} \lambda \sum_{j=1}^T w_j^2$$
   ควบคุมจำนวนใบไม้ ($T$) และขนาดของค่าน้ำหนัก ($w_j$) ไม่ให้เกิดการ Overfit กับสถานีวัดฝุ่นเฉพาะจุด
+- **Objective `reg:tweedie`**: กำหนด $p=1.5$ เพื่อขับเคลื่อน second-order hessian optimization ให้สอดคล้องกับพฤติกรรมฝุ่นละออง
 
 ---
 
@@ -96,10 +97,20 @@ flowchart TD
 
 ---
 
-## 3. การบังคับข้อจำกัดทางฟิสิกส์แบบทางเดียว (Physics-Informed Monotonic Constraints)
+### 2.5 ขุนพลที่ 5: Extra Trees (Extremely Randomized Trees)
+พัฒนาโดย Geurts, Ernst, & Wehenkel (2006) ทำหน้าที่เป็นแกนนำด้าน **การลดความแปรปรวนขั้นสุดยอดและการต้านทานสัญญาณรบกวนดาวเทียม (Extreme Variance Reduction & High Noise Tolerance)**:
+- **การสุ่มเกณฑ์ตัดโหนดแบบสุ่มสมบูรณ์ (Extreme Randomization of Cut-Points)**: ต่างจาก Random Forest ที่ค้นหาจุดตัดที่ดีที่สุด (Optimal Cut-point) ในแต่ละฟีเจอร์ย่อย อัลกอริทึม Extra Trees จะสุ่มจุดตัด $a \in [\min(x), \max(x)]$ อย่างอิสระสำหรับแต่ละฟีเจอร์ แล้วเลือกจุดตัดที่ดีที่สุดจากการสุ่มนั้น
+- **ประโยชน์ในงานพยากรณ์ฝุ่น**:
+  - ลดทอนความแปรปรวน (Variance) ลงต่ำกว่า Random Forest ธรรมดาอย่างเห็นได้ชัด
+  - ไม่ Overfit ไปตามสัญญาณรบกวนเฉพาะพิกเซล (Pixel Noise / Sensor Glitches) ของดาวเทียมหรือเซนเซอร์ภาคพื้นดิน
+  - ความเร็วในการฝึกสอนที่รวดเร็วกว่า Random Forest อย่างมาก เนื่องจากไม่ต้องค้นหาและเรียงลำดับจุดตัดที่เหมาะสมที่สุดทุกจุด
+
+---
+
+## 3. การบังคับข้อจำกัดทางฟิสิกส์และการแจกแจงทางสถิติ (Physics & Statistical Loss Modeling)
 
 ### 3.1 ตารางข้อจำกัดทางฟิสิกส์สำหรับแบบจำลอง (Monotonic Constraints Table)
-ในสภาวะจริงทางอุตุนิยมวิทยา มีฟีเจอร์บางประการที่มีทิศทางความสัมพันธ์กับความเข้มข้นของฝุ่นอย่างชัดเจนตามกฎเกณฑ์ฟิสิกส์บรรยากาศ หากปล่อยให้โมเดลเรียนรู้อย่างอิสระ อาจเกิดกรณีที่ต้นไม้ตัดสินใจทำนายสวนทางกับความเป็นจริงในพื้นที่ที่ข้อมูลเบาบาง ระบบจึงกำหนด **Monotonic Constraints** ให้แก่โมเดล LightGBM และ XGBoost:
+ในสภาวะจริงทางอุตุนิยมวิทยา มีฟีเจอร์บางประการที่มีทิศทางความสัมพันธ์กับความเข้มข้นของฝุ่นอย่างชัดเจนตามกฎเกณฑ์ฟิสิกส์บรรยากาศ หากปล่อยให้โมเดลเรียนรู้อย่างอิสระ อาจเกิดกรณีที่ต้นไม้ตัดสินใจทำนายสวนทางกับความเป็นจริงในพื้นที่ที่ข้อมูลเบาบาง ระบบจึงรองรับ **Monotonic Constraints** ให้แก่โมเดล LightGBM และ XGBoost:
 
 | ฟีเจอร์ (Feature) | ทิศทางบังคับ (Constraint) | เหตุผลและกฎทางฟิสิกส์บรรยากาศรองรับ |
 | :--- | :---: | :--- |
@@ -113,10 +124,24 @@ flowchart TD
 ในสภาวะที่ไม่มีข้อมูลสถานีโทรมาตรภาคพื้นดิน ($P, RH$ ขาดหายหรือไม่ครอบคลุม):
 - ระบบจะใช้ **$BTD_{13-10}$ (Lower Water Vapor / Lapse Rate)** เป็นตัวแทนของความชื้นและเสถียรภาพบรรยากาศ
 - ผสานกับ **Copernicus DEM 30m (TPI Index)** ในการระบุแอ่งกระทะกักฝุ่น
-- ทำให้โมเดลชุดแบบจำลอง 4 ขุนพลยังคงรักษาความแม่นยำทางฟิสิกส์ได้อย่างต่อเนื่องโดยไม่ต้องพึ่งพาเซนเซอร์อุตุนิยมวิทยาภาคพื้นดิน
+- ทำให้โมเดลชุดแบบจำลอง 5 ขุนพลยังคงรักษาความแม่นยำทางฟิสิกส์ได้อย่างต่อเนื่องโดยไม่ต้องพึ่งพาเซนเซอร์อุตุนิยมวิทยาภาคพื้นดิน
 
 ### 3.3 โหมดการเรียนรู้แบบปลดล็อกความไม่เป็นเส้นตรง (Unconstrained Full Non-Linear Mode)
-ในกรณีที่ต้องการให้แบบจำลองค้นหารูปแบบความสัมพันธ์แบบ Non-linear เชิงลึกและป้องกันไม่ให้ Gradient Boosting Trees (โดยเฉพาะ LightGBM และ CatBoost) ติดข้อจำกัดโครงสร้างจน R² ตก สามารถกำหนด `monotonic_constraints: {}` ใน [model_config.yaml](file:///e:/water-analysis-project/dust-prediction-satelite/configs/model_config.yaml) เพื่อให้โมเดลทั้ง 4 ตัวเรียนรู้ได้อย่างอิสระเต็มศักยภาพ และเปิดทางให้ LightGBM ใช้ฟังก์ชันจุดประสงค์ L1 (MAE) ได้โดยตรง
+ในกรณีที่ต้องการให้แบบจำลองค้นหารูปแบบความสัมพันธ์แบบ Non-linear เชิงลึกและป้องกันไม่ให้ Gradient Boosting Trees ติดข้อจำกัดโครงสร้างจน R² ตก สามารถกำหนด `monotonic_constraints: {}` ใน [model_config.yaml](file:///e:/water-analysis-project/dust-prediction-satelite/configs/model_config.yaml) เพื่อให้โมเดลทั้ง 5 ตัวเรียนรู้ได้อย่างอิสระเต็มศักยภาพ
+
+### 3.4 การใช้ฟังก์ชันเป้าหมาย Tweedie Deviance Loss (Tweedie Distribution Modeling)
+ข้อมูลความเข้มข้นของฝุ่นละออง ($\text{PM}_{2.5}$ และ $\text{PM}_{10}$) ในธรรมชาติมีลักษณะเฉพาะทางสถิติ:
+1. **ค่าต้องเป็นบวกเสมอ ($y \ge 0$)**: ไม่มีความเข้มข้นติดลบในเชิงกายภาพ
+2. **การแจกแจงแบบเบ้ขวาอย่างรุนแรง (Heavily Right-skewed Distribution)**: ข้อมูลส่วนใหญ่มีความเข้มข้นต่ำ (ช่วงอากาศดีหรือหน้าฝน) แต่มีส่วนหางยาว (Heavy Tail) ในช่วงวิกฤตหมอกควันไฟป่า
+3. **ความแปรปรวนแปรผันตามค่าเฉลี่ย ($\text{Var}(Y) = \phi \mu^p$)**: เมื่อฝุ่นเข้มข้นสูง ค่าความคลาดเคลื่อนจะกว้างขึ้นตามธรรมชาติ
+
+ระบบจึงนำ **Tweedie Deviance Loss ($1 < p < 2$, โดยตั้งค่า $p = 1.5$ ซึ่งตรงกับการแจกแจงแบบ Compound Poisson-Gamma)** มาใช้เป็นฟังก์ชันจุดประสงค์หลักในโมเดลตระกูล Gradient Boosting (LightGBM, CatBoost, XGBoost):
+
+$$d(y, \mu) = 2 \left( \frac{y^{2-p}}{(1-p)(2-p)} - \frac{y \mu^{1-p}}{1-p} + \frac{\mu^{2-p}}{2-p} \right)$$
+
+- **จุดเด่นเหนือ L2 Loss (MSE)**: MSE จะถูกบิดเบือนอย่างรุนแรงจาก Outliers ในช่วงวิกฤต ทำให้โมเดล Overpredict ในช่วงปกติ
+- **จุดเด่นเหนือ L1 Loss (MAE)**: MAE มีอนุพันธ์ไม่ต่อเนื่องที่ $\hat{y} = y$ ทำให้ Gradient Boosting หาจุดต่ำสุดได้ยาก แต่ Tweedie Loss มีอนุพันธ์อันดับ 1 (Gradient) และอันดับ 2 (Hessian) ที่ต่อเนื่องและเรียบเนียน (Smooth Convex Surface)
+- **การรักษาความผิดพลาดสัมพัทธ์ (Relative Error Penalization)**: Tweedie Loss ให้บทลงโทษความคลาดเคลื่อนตามสัดส่วนของสเกลฝุ่น ทำให้โมเดลแม่นยำอย่างเป็นธรรมทั้งในยามที่ฝุ่นเบาบาง ($5\text{--}15\,\mu\text{g/m}^3$) และยามวิกฤต ($> 100\,\mu\text{g/m}^3$)
 
 ---
 
@@ -124,7 +149,7 @@ flowchart TD
 
 ### 4.1 โหมดการฝึกสอน Fast Direct Training (`cv = 1`) สำหรับชุดข้อมูลขนาดใหญ่ (> 600,000 แถว)
 เมื่อประมวลผลข้อมูลหลายปี (Multi-Year Ingestion 2024–2026) ปริมาณข้อมูลจะสูงถึง **611,725 ตัวอย่าง**:
-- การทำ K-Fold แบบเดิม ($K=5$) จะต้องเทรนโมเดล 4 ขุนพลซ้ำถึง 20 ครั้ง ซึ่งใช้เวลานานหลายชั่วโมงบน Colab
+- การทำ K-Fold แบบเดิม ($K=5$) จะต้องเทรนโมเดล 5 ขุนพลซ้ำถึง 25 ครั้ง ซึ่งใช้เวลานานหลายชั่วโมงบน Colab
 - ระบบจึงรองรับ **Fast Direct Training Mode (`cv = 1`)**:
   - แบ่งพาร์ติชันการฝึกสอน: **561,725 ตัวอย่าง** สำหรับ Train Partition
   - กันชุดตรวจสอบ Out-of-Sample: **50,000 ตัวอย่าง** สำหรับ Validation Partition
@@ -134,7 +159,7 @@ flowchart TD
 ### 4.2 การหาค่าน้ำหนักที่เหมาะสมที่สุด (Optimization Formulation)
 ตามทฤษฎีของ Breiman (1996) และอัลกอริทึมของ Lawson & Hanson (1974):
 
-$$\min_{\mathbf{w}} \frac{1}{2} \|\mathbf{y} - \mathbf{S} \mathbf{w}\|_2^2 \quad \text{subject to } w_k \ge 0, \quad \sum_{k=1}^4 w_k = 1.0$$
+$$\min_{\mathbf{w}} \frac{1}{2} \|\mathbf{y} - \mathbf{S} \mathbf{w}\|_2^2 \quad \text{subject to } w_k \ge 0, \quad \sum_{k=1}^5 w_k = 1.0$$
 
 #### ทำไมต้องบังคับ $w_k \ge 0$ (Non-Negative Weights)?
 - ในการทำ Stacking ทั่วไปที่ใช้ Linear Regression ธรรมดา ค่าสัมประสิทธิ์ของโมเดลตัวใดตัวหนึ่งอาจติดลบ ($w_i < 0$) เพื่อหักล้าง Error ของอีกโมเดลหนึ่ง (Negative Collinearity Cancellation)

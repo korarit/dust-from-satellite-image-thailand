@@ -25,6 +25,7 @@ from src.models.lgbm_model import LGBMDustModel
 from src.models.catboost_model import CatBoostDustModel
 from src.models.xgboost_model import XGBoostDustModel
 from src.models.random_forest_model import RandomForestDustModel
+from src.models.extra_trees_model import ExtraTreesDustModel
 from src.models.ensemble_model import DustStackingEnsemble, MODEL_KEYS
 from src.models.trainer import ModelTrainer
 
@@ -38,6 +39,7 @@ __all__ = [
     "CatBoostDustModel",
     "XGBoostDustModel",
     "RandomForestDustModel",
+    "ExtraTreesDustModel",
     "DustStackingEnsemble",
     "MODEL_KEYS",
     "ModelTrainer",

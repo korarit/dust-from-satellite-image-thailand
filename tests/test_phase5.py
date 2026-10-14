@@ -44,6 +44,7 @@ from src.evaluation import (
 from src.models import (
     LGBMDustModel,
     DustStackingEnsemble,
+    MODEL_KEYS,
 )
 from src.data.provenance_auditor import CodeASTScanner
 
@@ -286,7 +287,7 @@ def test_multi_resolution_benchmark_suite(regional_grid_dataset, tmp_path):
     )
 
     assert "leaderboard" in benchmark_res
-    assert len(benchmark_res["leaderboard"]) == 4 * 5  # 4 resolutions x 5 models
+    assert len(benchmark_res["leaderboard"]) == 4 * (len(MODEL_KEYS) + 1)  # 4 resolutions x (5 base models + ensemble)
     assert "research_questions" in benchmark_res
     rqs = benchmark_res["research_questions"]
     assert "RQ1_Optimal_Resolution" in rqs

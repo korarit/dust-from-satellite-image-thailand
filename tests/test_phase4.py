@@ -30,6 +30,7 @@ from src.models import (
     CatBoostDustModel,
     XGBoostDustModel,
     RandomForestDustModel,
+    ExtraTreesDustModel,
     DustStackingEnsemble,
     ModelTrainer,
     compute_dust_metrics,
@@ -176,6 +177,27 @@ def test_random_forest_model_wrapper(deterministic_training_data):
     assert np.isclose(imp_df["normalized_importance"].sum(), 1.0)
 
 
+def test_extra_trees_model_wrapper(deterministic_training_data):
+    """Verifies Extra Trees regressor wrapper and extreme cut-point randomization."""
+    df, f_cols, target = deterministic_training_data
+    X = df[f_cols]
+    y = df[target]
+
+    model = ExtraTreesDustModel(
+        model_params={"n_estimators": 20, "max_depth": 5, "min_samples_split": 2},
+    )
+    model.fit(X, y)
+    assert model.is_fitted_
+
+    preds = model.predict(X)
+    assert len(preds) == len(X)
+    assert np.all(preds >= 0.0)
+
+    imp_df = model.get_feature_importance()
+    assert len(imp_df) == len(f_cols)
+    assert np.isclose(imp_df["normalized_importance"].sum(), 1.0)
+
+
 def test_dust_stacking_ensemble(deterministic_training_data, tmp_path):
     """
     Verifies DustStackingEnsemble:
@@ -195,6 +217,7 @@ def test_dust_stacking_ensemble(deterministic_training_data, tmp_path):
             "catboost": {"iterations": 20, "learning_rate": 0.1, "depth": 4},
             "xgboost": {"n_estimators": 20, "learning_rate": 0.1, "max_depth": 3},
             "random_forest": {"n_estimators": 20, "max_depth": 5, "min_samples_split": 2},
+            "extra_trees": {"n_estimators": 20, "max_depth": 5, "min_samples_split": 2},
         },
         "features": {
             "monotonic_constraints": {"pressure_grad_mag": -1, "btd_15_13": -1}
@@ -306,6 +329,7 @@ def test_weather_ablation_benchmark_full_vs_no_weather(deterministic_training_da
             "catboost": {"iterations": 10, "learning_rate": 0.1, "depth": 3},
             "xgboost": {"n_estimators": 10, "learning_rate": 0.1, "max_depth": 3},
             "random_forest": {"n_estimators": 10, "max_depth": 4, "min_samples_split": 2},
+            "extra_trees": {"n_estimators": 10, "max_depth": 4, "min_samples_split": 2},
         },
         "features": {
             "monotonic_constraints": {"pressure_grad_mag": -1, "btd_15_13": -1}
@@ -319,7 +343,7 @@ def test_weather_ablation_benchmark_full_vs_no_weather(deterministic_training_da
     )
 
     assert "comparison_table" in res
-    assert len(res["comparison_table"]) == 5  # ensemble, lightgbm, catboost, xgboost, random_forest
+    assert len(res["comparison_table"]) == len(MODEL_KEYS) + 1  # ensemble + 5 base learners
     assert res["full_features_count"] > res["no_weather_features_count"]
     assert "eval_full" in res
     assert "eval_no_weather" in res
@@ -394,4 +418,26 @@ def test_spatial_defect_features_and_weather_timezone_alignment():
     assert len(merged) == 1
     assert merged["val1"].iloc[0] == 10.0
     assert merged["val2"].iloc[0] == 20.0
+
+
+def test_tweedie_loss_boosters_execution(deterministic_training_data):
+    """Verifies that LightGBM, XGBoost, and CatBoost train successfully with Tweedie loss."""
+    df, f_cols, target = deterministic_training_data
+    X = df[f_cols]
+    y = np.maximum(df[target].values, 0.5)
+
+    lgb = LGBMDustModel(model_params={"objective": "tweedie", "tweedie_variance_power": 1.5, "n_estimators": 10, "verbose": -1})
+    lgb.fit(X, y)
+    assert lgb.is_fitted_
+    assert len(lgb.predict(X)) == len(X)
+
+    xgb_m = XGBoostDustModel(model_params={"objective": "reg:tweedie", "tweedie_variance_power": 1.5, "n_estimators": 10})
+    xgb_m.fit(X, y)
+    assert xgb_m.is_fitted_
+    assert len(xgb_m.predict(X)) == len(X)
+
+    cat = CatBoostDustModel(model_params={"loss_function": "Tweedie:variance_power=1.5", "iterations": 10, "verbose": 0})
+    cat.fit(X, y)
+    assert cat.is_fitted_
+    assert len(cat.predict(X)) == len(X)
 

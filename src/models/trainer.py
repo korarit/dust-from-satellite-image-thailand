@@ -385,26 +385,19 @@ class ModelTrainer:
             eval_no_w = self.evaluate_suite(ensemble_no_weather, test_df, no_weather_cols)
         else:
             # Use OOF metrics if no separate test split
-            eval_full = {
-                "ensemble": ensemble_full.oof_metrics_.get("ensemble", {}),
-                "lightgbm": ensemble_full.oof_metrics_.get("lightgbm", {}),
-                "catboost": ensemble_full.oof_metrics_.get("catboost", {}),
-                "xgboost": ensemble_full.oof_metrics_.get("xgboost", {}),
-                "random_forest": ensemble_full.oof_metrics_.get("random_forest", {}),
-                "weights": dict(ensemble_full.weights),
-            }
-            eval_no_w = {
-                "ensemble": ensemble_no_weather.oof_metrics_.get("ensemble", {}),
-                "lightgbm": ensemble_no_weather.oof_metrics_.get("lightgbm", {}),
-                "catboost": ensemble_no_weather.oof_metrics_.get("catboost", {}),
-                "xgboost": ensemble_no_weather.oof_metrics_.get("xgboost", {}),
-                "random_forest": ensemble_no_weather.oof_metrics_.get("random_forest", {}),
-                "weights": dict(ensemble_no_weather.weights),
-            }
+            eval_full = {"ensemble": ensemble_full.oof_metrics_.get("ensemble", {})}
+            for m_k in MODEL_KEYS:
+                eval_full[m_k] = ensemble_full.oof_metrics_.get(m_k, {})
+            eval_full["weights"] = dict(ensemble_full.weights)
+
+            eval_no_w = {"ensemble": ensemble_no_weather.oof_metrics_.get("ensemble", {})}
+            for m_k in MODEL_KEYS:
+                eval_no_w[m_k] = ensemble_no_weather.oof_metrics_.get(m_k, {})
+            eval_no_w["weights"] = dict(ensemble_no_weather.weights)
 
         # 5. Build detailed ablation comparison
         rows = []
-        for model_key in ["ensemble", "lightgbm", "catboost", "xgboost", "random_forest"]:
+        for model_key in ["ensemble"] + MODEL_KEYS:
             stats_f = eval_full.get(model_key, {})
             stats_nw = eval_no_w.get(model_key, {})
 

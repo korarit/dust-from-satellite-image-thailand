@@ -26,19 +26,21 @@ from src.models.lgbm_model import LGBMDustModel
 from src.models.catboost_model import CatBoostDustModel
 from src.models.xgboost_model import XGBoostDustModel
 from src.models.random_forest_model import RandomForestDustModel
+from src.models.extra_trees_model import ExtraTreesDustModel
 
 logger = logging.getLogger(__name__)
 
-MODEL_KEYS = ["lightgbm", "catboost", "xgboost", "random_forest"]
+MODEL_KEYS = ["lightgbm", "catboost", "xgboost", "random_forest", "extra_trees"]
 
 
 class DustStackingEnsemble(BaseDustModel):
     """
-    Stacking & Blending Ensemble combining the 4-Model Quartet:
-    1. LightGBM (Leaf-wise speed & Huber loss)
+    Stacking & Blending Ensemble combining the 5-Model Quintet:
+    1. LightGBM (Leaf-wise speed & Tweedie loss)
     2. CatBoost (Oblivious trees & directional interactions)
-    3. XGBoost (Depth-wise growth & monotonic physics constraints)
+    3. XGBoost (Depth-wise growth & Tweedie loss)
     4. Random Forest (Bagging variance reduction & outlier damping)
+    5. Extra Trees (Extreme cut-point randomization & noise damping)
     """
 
     def __init__(
@@ -75,10 +77,13 @@ class DustStackingEnsemble(BaseDustModel):
             "random_forest": RandomForestDustModel(
                 model_params=models_cfg.get("random_forest", {}),
             ),
+            "extra_trees": ExtraTreesDustModel(
+                model_params=models_cfg.get("extra_trees", {}),
+            ),
         }
 
-        # Meta-learner weights: w_lgb, w_cat, w_xgb, w_rf
-        self.weights: Dict[str, float] = {k: 0.25 for k in MODEL_KEYS}
+        # Meta-learner weights: uniform initialization
+        self.weights: Dict[str, float] = {k: 1.0 / len(MODEL_KEYS) for k in MODEL_KEYS}
         self.oof_predictions_: Optional[pd.DataFrame] = None
         self.oof_metrics_: Dict[str, Dict[str, float]] = {}
 
@@ -430,6 +435,7 @@ class DustStackingEnsemble(BaseDustModel):
             "catboost": CatBoostDustModel,
             "xgboost": XGBoostDustModel,
             "random_forest": RandomForestDustModel,
+            "extra_trees": ExtraTreesDustModel,
         }
         for m_key, cls_type in model_classes.items():
             m_path_pol = load_dir / f"{m_key}_model_{pol}.joblib"
@@ -472,6 +478,10 @@ class DustStackingEnsemble(BaseDustModel):
         elif model_key == "random_forest":
             return RandomForestDustModel(
                 model_params=models_cfg.get("random_forest", {}),
+            )
+        elif model_key == "extra_trees":
+            return ExtraTreesDustModel(
+                model_params=models_cfg.get("extra_trees", {}),
             )
         else:
             raise ValueError(f"Unknown model key: {model_key}")
