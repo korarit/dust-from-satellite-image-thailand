@@ -1209,12 +1209,15 @@ def run_phase_4_full(pollutant: str = "pm25", split_date: str = "2026-01-01") ->
                 how="inner"
             )
             if not merged_df.empty:
-                zenith, azimuth = compute_solar_angles_vectorized(
-                    merged_df["latitude"].values, merged_df["longitude"].values, merged_df["timestamp_utc"]
+                sza, is_day = compute_solar_angles_vectorized(
+                    merged_df["timestamp_utc"],
+                    merged_df["latitude"].to_numpy(dtype=float),
+                    merged_df["longitude"].to_numpy(dtype=float)
                 )
-                merged_df["solar_zenith_deg"] = zenith
-                merged_df["solar_azimuth_deg"] = azimuth
-                merged_df["is_night"] = (zenith > 85.0).astype(np.float32)
+                merged_df["solar_zenith_angle"] = sza
+                merged_df["solar_zenith_deg"] = sza
+                merged_df["is_daytime"] = is_day
+                merged_df["is_night"] = (1.0 - is_day).astype(np.float32)
                 merged_df["imputed_flag"] = 0.0
                 merged_df["cloud_occluded_flag"] = 0.0
 

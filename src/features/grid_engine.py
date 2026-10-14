@@ -200,39 +200,94 @@ def compute_solar_zenith_angle(
 
 
 def compute_solar_angles_vectorized(
-    timestamps: pd.Series,
-    lats: np.ndarray,
-    lons: np.ndarray
+    timestamps: Any,
+    lats: Any,
+    lons: Any = None
 ) -> Tuple[np.ndarray, np.ndarray]:
-    """Vectorized calculation of Solar Zenith Angles and daytime flags."""
-    n = len(lats)
-    sza_arr = np.zeros(n, dtype=np.float32)
-    day_arr = np.zeros(n, dtype=np.int32)
+    """
+    Vectorized calculation of Solar Zenith Angles and daytime flags using NOAA Solar Model.
+    Supports both (timestamps, lats, lons) and (lats, lons, timestamps) argument orders.
+    """
+    # Flexible argument order detection: check if arg 1 is coordinates and arg 3 is timestamps
+    if lons is not None:
+        is_first_coords = (
+            (isinstance(timestamps, (np.ndarray, pd.Series)) and pd.api.types.is_numeric_dtype(timestamps) and not pd.api.types.is_datetime64_any_dtype(timestamps))
+            or (isinstance(timestamps, (list, tuple)) and len(timestamps) > 0 and isinstance(timestamps[0], (int, float)))
+        )
+        if is_first_coords:
+            actual_lats = np.asarray(timestamps, dtype=float)
+            actual_lons = np.asarray(lats, dtype=float)
+            actual_ts = lons
+        else:
+            actual_ts = timestamps
+            actual_lats = np.asarray(lats, dtype=float)
+            actual_lons = np.asarray(lons, dtype=float)
+    else:
+        actual_ts = timestamps
+        actual_lats = np.asarray(lats, dtype=float)
+        actual_lons = np.zeros_like(actual_lats)
 
-    ts_list = pd.to_datetime(timestamps).tolist() if isinstance(timestamps, (pd.Series, list)) else [pd.to_datetime(timestamps)] * n
+    n = len(actual_lats)
+    if n == 0:
+        return np.array([], dtype=np.float32), np.array([], dtype=np.int32)
 
-    for i in range(n):
-        sza, day = compute_solar_zenith_angle(ts_list[i], float(lats[i]), float(lons[i]))
-        sza_arr[i] = sza
-        day_arr[i] = day
+    if isinstance(actual_ts, (pd.Series, pd.DatetimeIndex, list, tuple, np.ndarray)):
+        dt_idx = pd.DatetimeIndex(actual_ts)
+        if len(dt_idx) == 1 and n > 1:
+            dt_idx = pd.DatetimeIndex([dt_idx[0]] * n)
+    else:
+        dt_idx = pd.DatetimeIndex([pd.to_datetime(actual_ts)] * n)
 
-    return sza_arr, day_arr
+    # Vectorized NOAA Solar Astronomical Model
+    day_of_year = dt_idx.dayofyear.values
+    hour = dt_idx.hour.values + dt_idx.minute.values / 60.0 + dt_idx.second.values / 3600.0
+
+    gamma = 2.0 * np.pi / 365.0 * (day_of_year - 1 + (hour - 12.0) / 24.0)
+
+    eqtime = 229.18 * (
+        0.000075 + 0.001868 * np.cos(gamma) - 0.032077 * np.sin(gamma)
+        - 0.014615 * np.cos(2.0 * gamma) - 0.040849 * np.sin(2.0 * gamma)
+    )
+
+    decl = (
+        0.006918 - 0.399912 * np.cos(gamma) + 0.070257 * np.sin(gamma)
+        - 0.006758 * np.cos(2.0 * gamma) + 0.000907 * np.sin(2.0 * gamma)
+        - 0.002697 * np.cos(3.0 * gamma) + 0.00148 * np.sin(3.0 * gamma)
+    )
+
+    time_offset = eqtime + 4.0 * actual_lons
+    tst = hour * 60.0 + time_offset
+    ha = (tst / 4.0) - 180.0
+    ha_rad = np.radians(ha)
+    lat_rad = np.radians(actual_lats)
+
+    cos_sza = np.sin(lat_rad) * np.sin(decl) + np.cos(lat_rad) * np.cos(decl) * np.cos(ha_rad)
+    cos_sza = np.clip(cos_sza, -1.0, 1.0)
+    sza_deg = np.degrees(np.arccos(cos_sza)).astype(np.float32)
+    is_day = (sza_deg < 85.0).astype(np.int32)
+
+    return sza_deg, is_day
 
 
 def compute_cyclical_time_features(timestamps: Union[pd.Series, pd.DatetimeIndex, List[Any]]) -> pd.DataFrame:
-    """Computes cyclical hour and month sin/cos representations."""
+    """Computes cyclical hour, day of year, and month sin/cos representations."""
     dt_idx = pd.DatetimeIndex(timestamps)
     hours = dt_idx.hour + dt_idx.minute / 60.0
     months = dt_idx.month - 1  # 0 to 11
+    doy = dt_idx.dayofyear - 1
 
     hour_sin = np.sin(2.0 * np.pi * hours / 24.0).astype(np.float32)
     hour_cos = np.cos(2.0 * np.pi * hours / 24.0).astype(np.float32)
     month_sin = np.sin(2.0 * np.pi * months / 12.0).astype(np.float32)
     month_cos = np.cos(2.0 * np.pi * months / 12.0).astype(np.float32)
+    doy_sin = np.sin(2.0 * np.pi * doy / 365.25).astype(np.float32)
+    doy_cos = np.cos(2.0 * np.pi * doy / 365.25).astype(np.float32)
 
     return pd.DataFrame({
         "hour_sin": hour_sin,
         "hour_cos": hour_cos,
+        "day_of_year_sin": doy_sin,
+        "day_of_year_cos": doy_cos,
         "month_sin": month_sin,
         "month_cos": month_cos,
     })
