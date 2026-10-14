@@ -1212,7 +1212,17 @@ def _enrich_multi_year_matrix(
         out_df["delta_bt13_cadence"] = d_bt13.where(valid_cadence, 0.0).astype(np.float32)
         out_df["delta_btd15_13_cadence"] = d_btd.where(valid_cadence, 0.0).astype(np.float32)
 
-        logger.info("  ✓ Computed authentic temporal dynamics (delta_bt13/btd rates per hour) for %s", stn_key)
+        # Spatial Differences (Defects) relative to 3x3 window and 3-pixel surrounding neighborhood
+        if "bt_b13" in out_df.columns and "b13_mean_3x3" in out_df.columns:
+            out_df["b13_diff_mean_3x3"] = (out_df["bt_b13"] - out_df["b13_mean_3x3"]).astype(np.float32)
+        if "btd_15_13" in out_df.columns and "btd_15_13_mean_3x3" in out_df.columns:
+            out_df["btd_15_13_diff_mean_3x3"] = (out_df["btd_15_13"] - out_df["btd_15_13_mean_3x3"]).astype(np.float32)
+        if "bt_b13" in out_df.columns and "b13_mean_rad3" in out_df.columns:
+            out_df["b13_diff_mean_rad3"] = (out_df["bt_b13"] - out_df["b13_mean_rad3"]).astype(np.float32)
+        if "btd_15_13" in out_df.columns and "btd_15_13_mean_rad3" in out_df.columns:
+            out_df["btd_15_13_diff_mean_rad3"] = (out_df["btd_15_13"] - out_df["btd_15_13_mean_rad3"]).astype(np.float32)
+
+        logger.info("  ✓ Computed authentic temporal dynamics (delta_bt13/btd rates per hour) and spatial defects for %s", stn_key)
 
     # 2. Topography from Master Grid (Copernicus DEM)
     lat_col = "latitude" if "latitude" in out_df.columns else ("lat" if "lat" in out_df.columns else None)
@@ -1252,25 +1262,50 @@ def _enrich_multi_year_matrix(
                 out_df[col] = time_feats[col].values
 
     # 4. Authentic HII Weather Telemetry (if files exist)
-    if "pressure_mean_surround" not in out_df.columns:
+    if "pressure_mean_surround" not in out_df.columns or out_df["pressure_mean_surround"].isna().all():
         hii_press = list(HII_DIR.glob("hii_pressure_*.parquet"))
         hii_humid = list(HII_DIR.glob("hii_humidity_*.parquet"))
-        if hii_press and hii_humid and stn_key:
+        if (hii_press or hii_humid) and stn_key:
             try:
-                p_df = pd.concat([pd.read_parquet(f) for f in hii_press], ignore_index=True)
-                h_df = pd.concat([pd.read_parquet(f) for f in hii_humid], ignore_index=True)
-                if "timestamp" in p_df.columns:
-                    p_df["timestamp_utc"] = pd.to_datetime(p_df["timestamp"], utc=True).dt.floor("h")
-                if "timestamp" in h_df.columns:
-                    h_df["timestamp_utc"] = pd.to_datetime(h_df["timestamp"], utc=True).dt.floor("h")
-                p_val_col = next((c for c in ["pressure", "press", "value", "val"] if c in p_df.columns), None)
-                h_val_col = next((c for c in ["humidity", "humid", "rh", "value", "val"] if c in h_df.columns), None)
-                if p_val_col and stn_key in p_df.columns:
-                    p_clean = p_df[[stn_key, "timestamp_utc", p_val_col]].drop_duplicates([stn_key, "timestamp_utc"]).rename(columns={p_val_col: "pressure_mean_surround"})
-                    out_df = out_df.merge(p_clean, on=[stn_key, "timestamp_utc"], how="left")
-                if h_val_col and stn_key in h_df.columns:
-                    h_clean = h_df[[stn_key, "timestamp_utc", h_val_col]].drop_duplicates([stn_key, "timestamp_utc"]).rename(columns={h_val_col: "humidity_mean_surround"})
-                    out_df = out_df.merge(h_clean, on=[stn_key, "timestamp_utc"], how="left")
+                # Standardize timestamp_utc to timezone-naive UTC for robust merging
+                if "timestamp_utc" in out_df.columns:
+                    ts_out = pd.to_datetime(out_df["timestamp_utc"])
+                    if getattr(ts_out.dt, "tz", None) is not None:
+                        out_df["timestamp_utc"] = ts_out.dt.tz_convert("UTC").dt.tz_localize(None)
+                    else:
+                        out_df["timestamp_utc"] = ts_out
+
+                if hii_press:
+                    p_df = pd.concat([pd.read_parquet(f) for f in hii_press], ignore_index=True)
+                    if "timestamp" in p_df.columns:
+                        ts_p = pd.to_datetime(p_df["timestamp"])
+                        if getattr(ts_p.dt, "tz", None) is not None:
+                            p_df["timestamp_utc"] = ts_p.dt.tz_convert("UTC").dt.tz_localize(None).dt.floor("h")
+                        else:
+                            p_df["timestamp_utc"] = ts_p.dt.floor("h")
+                    p_val_col = next((c for c in ["pressure", "press", "value", "val"] if c in p_df.columns), None)
+                    if p_val_col and stn_key in p_df.columns:
+                        p_clean = p_df[[stn_key, "timestamp_utc", p_val_col]].drop_duplicates([stn_key, "timestamp_utc"]).rename(columns={p_val_col: "pressure_mean_surround"})
+                        if "pressure_mean_surround" in out_df.columns:
+                            out_df = out_df.drop(columns=["pressure_mean_surround"])
+                        out_df = out_df.merge(p_clean, on=[stn_key, "timestamp_utc"], how="left")
+                        logger.info("  ✓ Attached authentic HII pressure observations (%d records).", len(p_clean))
+
+                if hii_humid:
+                    h_df = pd.concat([pd.read_parquet(f) for f in hii_humid], ignore_index=True)
+                    if "timestamp" in h_df.columns:
+                        ts_h = pd.to_datetime(h_df["timestamp"])
+                        if getattr(ts_h.dt, "tz", None) is not None:
+                            h_df["timestamp_utc"] = ts_h.dt.tz_convert("UTC").dt.tz_localize(None).dt.floor("h")
+                        else:
+                            h_df["timestamp_utc"] = ts_h.dt.floor("h")
+                    h_val_col = next((c for c in ["humidity", "humid", "rh", "value", "val"] if c in h_df.columns), None)
+                    if h_val_col and stn_key in h_df.columns:
+                        h_clean = h_df[[stn_key, "timestamp_utc", h_val_col]].drop_duplicates([stn_key, "timestamp_utc"]).rename(columns={h_val_col: "humidity_mean_surround"})
+                        if "humidity_mean_surround" in out_df.columns:
+                            out_df = out_df.drop(columns=["humidity_mean_surround"])
+                        out_df = out_df.merge(h_clean, on=[stn_key, "timestamp_utc"], how="left")
+                        logger.info("  ✓ Attached authentic HII humidity observations (%d records).", len(h_clean))
             except Exception as ex:
                 logger.warning("Could not merge HII telemetry: %s", ex)
 
@@ -1328,8 +1363,13 @@ def run_phase_4_full(pollutant: str = "pm25", split_date: str = "2026-01-01") ->
     needs_enrichment = False
     if matrix_path.exists():
         unified_df = pd.read_parquet(matrix_path)
-        if "elevation_m" not in unified_df.columns or "delta_bt13_rate_per_hour" not in unified_df.columns or "p_north" not in unified_df.columns:
-            logger.info("Existing matrix lacks enriched audit features (elevation, temporal delta, weather). Enriching...")
+        if (
+            "elevation_m" not in unified_df.columns
+            or "delta_bt13_rate_per_hour" not in unified_df.columns
+            or "p_north" not in unified_df.columns
+            or "b13_diff_mean_3x3" not in unified_df.columns
+        ):
+            logger.info("Existing matrix lacks enriched audit features (elevation, temporal delta, weather, spatial defects). Enriching...")
             needs_enrichment = True
     else:
         needs_enrichment = True

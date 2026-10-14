@@ -95,6 +95,14 @@ SAT_TEXTURE_COLUMNS = [
     "b15_std_3x3",
     "btd_15_13_mean_3x3",
     "btd_15_13_std_3x3",
+    "b13_diff_mean_3x3",
+    "btd_15_13_diff_mean_3x3",
+    "b13_mean_rad3",
+    "b13_std_rad3",
+    "b13_diff_mean_rad3",
+    "btd_15_13_mean_rad3",
+    "btd_15_13_std_rad3",
+    "btd_15_13_diff_mean_rad3",
 ]
 
 SAT_TEMPORAL_COLUMNS = [
@@ -404,27 +412,40 @@ class PhysicsFallbackImputer:
             else:
                 out_df[col] = np.float32(0.0)
 
-        # 4. Impute 3x3 Texture Columns
+        # 4. Impute Spatial Texture & Defect Columns
+        if "b13_diff_mean_3x3" not in out_df.columns and "bt_b13" in out_df.columns and "b13_mean_3x3" in out_df.columns:
+            out_df["b13_diff_mean_3x3"] = (out_df["bt_b13"] - out_df["b13_mean_3x3"]).astype(np.float32)
+        if "btd_15_13_diff_mean_3x3" not in out_df.columns and "btd_15_13" in out_df.columns and "btd_15_13_mean_3x3" in out_df.columns:
+            out_df["btd_15_13_diff_mean_3x3"] = (out_df["btd_15_13"] - out_df["btd_15_13_mean_3x3"]).astype(np.float32)
+        if "b13_diff_mean_rad3" not in out_df.columns and "bt_b13" in out_df.columns and "b13_mean_rad3" in out_df.columns:
+            out_df["b13_diff_mean_rad3"] = (out_df["bt_b13"] - out_df["b13_mean_rad3"]).astype(np.float32)
+        if "btd_15_13_diff_mean_rad3" not in out_df.columns and "btd_15_13" in out_df.columns and "btd_15_13_mean_rad3" in out_df.columns:
+            out_df["btd_15_13_diff_mean_rad3"] = (out_df["btd_15_13"] - out_df["btd_15_13_mean_rad3"]).astype(np.float32)
+
         texture_base_map = {
             "b13_mean_3x3": "bt_b13",
             "b13_min_3x3": "bt_b13",
             "b13_max_3x3": "bt_b13",
             "b15_mean_3x3": "bt_b15",
             "btd_15_13_mean_3x3": "btd_15_13",
+            "b13_mean_rad3": "b13_mean_3x3",
+            "b13_std_rad3": "b13_std_3x3",
+            "btd_15_13_mean_rad3": "btd_15_13_mean_3x3",
+            "btd_15_13_std_rad3": "btd_15_13_std_3x3",
         }
         for col in SAT_TEXTURE_COLUMNS:
             if col in out_df.columns:
                 nans = out_df[col].isna()
                 if nans.any():
                     imputed_mask |= nans
-                    if "std" in col:
+                    if "std" in col or "diff" in col:
                         out_df[col] = out_df[col].fillna(0.0).astype(np.float32)
                     elif col in texture_base_map and texture_base_map[col] in out_df.columns:
                         out_df[col] = out_df[col].fillna(out_df[texture_base_map[col]]).astype(np.float32)
                     else:
                         out_df[col] = out_df[col].fillna(CLIMATOLOGY_SURFACE_BT_K).astype(np.float32)
             else:
-                if "std" in col:
+                if "std" in col or "diff" in col:
                     out_df[col] = np.float32(0.0)
                 elif col in texture_base_map and texture_base_map[col] in out_df.columns:
                     out_df[col] = out_df[texture_base_map[col]].astype(np.float32)

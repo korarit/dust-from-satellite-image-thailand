@@ -13,11 +13,12 @@ general:
 
 features:
   # Physics Monotonicity Constraints:
-  # -1 : Feature increase -> Predicted PM2.5 decrease
-  # +1 : Feature increase -> Predicted PM2.5 increase
-  monotonic_constraints:
-    pressure_grad_mag: -1   # Calm atmospheric conditions (lower ||∇P||) -> higher dust accumulation
-    btd_15_13: 1            # Higher split-window BTD (BT15 - BT13 increases as B13 is absorbed by silicate/dust) -> higher PM2.5
+  # Monotonic constraints can overly restrict tree splits in complex, non-linear atmospheric conditions.
+  # Set to empty {} to unlock full multi-model non-linear learning for LightGBM and CatBoost.
+  # Re-enable specific constraints below if strict monotonic physics behavior is required.
+  monotonic_constraints: {}
+    # pressure_grad_mag: -1   # Calm atmospheric conditions (lower ||∇P||) -> higher dust accumulation
+    # btd_15_13: 1            # Higher split-window BTD (BT15 - BT13 increases as B13 is absorbed by silicate/dust) -> higher PM2.5
 
 models:
   lightgbm:

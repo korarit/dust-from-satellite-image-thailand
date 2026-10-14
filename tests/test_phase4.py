@@ -344,3 +344,54 @@ def test_codebase_ast_scanner_compliance():
 
     assert len(violations) == 0, f"Found {len(violations)} AST violations in src/: {violations}"
 
+
+def test_spatial_defect_features_and_weather_timezone_alignment():
+    """
+    Verifies:
+    1. Satellite spatial texture extracts both 3x3 and 3-pixel surrounding defects.
+    2. Datetime timezone normalization handles mixed tz-aware and tz-naive series cleanly.
+    """
+    from src.features.satellite_tabularizer import SatelliteTabularizer
+
+    tab = SatelliteTabularizer()
+    # 10x10 synthetic test grid with hot center
+    b13 = np.full((10, 10), 290.0, dtype=np.float32)
+    b15 = np.full((10, 10), 292.0, dtype=np.float32)
+    b13[5, 5] = 300.0  # Hot anomaly at center
+    b15[5, 5] = 301.0
+
+    res = tab.extract_3x3_texture(b13, b15, np.array([5]), np.array([5]))
+
+    # Verify 3x3 stats and defect
+    assert "b13_diff_mean_3x3" in res
+    assert "btd_15_13_diff_mean_3x3" in res
+    assert res["b13_diff_mean_3x3"][0] > 0.0  # 300 - mean(patch) > 0
+
+    # Verify 3-pixel surrounding neighborhood stats and defect
+    assert "b13_mean_rad3" in res
+    assert "b13_diff_mean_rad3" in res
+    assert "btd_15_13_mean_rad3" in res
+    assert "btd_15_13_diff_mean_rad3" in res
+    assert res["b13_diff_mean_rad3"][0] > 0.0
+
+    # Test timezone alignment
+    tz_aware_dt = pd.to_datetime(["2024-03-01 10:00:00"], utc=True)
+    tz_naive_dt = pd.to_datetime(["2024-03-01 10:00:00"])
+
+    # Normalization helper
+    def norm_ts(s):
+        ts = pd.to_datetime(s)
+        if isinstance(ts, pd.DatetimeIndex):
+            return ts.tz_convert("UTC").tz_localize(None) if ts.tz is not None else ts
+        elif hasattr(ts, "dt"):
+            return ts.dt.tz_convert("UTC").dt.tz_localize(None) if getattr(ts.dt, "tz", None) is not None else ts
+        return ts
+
+    df1 = pd.DataFrame({"station_code": ["STN1"], "timestamp_utc": norm_ts(tz_aware_dt), "val1": [10.0]})
+    df2 = pd.DataFrame({"station_code": ["STN1"], "timestamp_utc": norm_ts(tz_naive_dt), "val2": [20.0]})
+
+    merged = df1.merge(df2, on=["station_code", "timestamp_utc"], how="inner")
+    assert len(merged) == 1
+    assert merged["val1"].iloc[0] == 10.0
+    assert merged["val2"].iloc[0] == 20.0
+

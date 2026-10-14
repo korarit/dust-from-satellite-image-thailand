@@ -14,8 +14,8 @@
 
 ```mermaid
 flowchart TD
-    subgraph InputMatrix ["1. Unified Feature Matrix (N samples x 49 Clean Features)"]
-        F1["Core 5 Satellite IR Features (BTs: B07, B10, B11, B13, B15; BTDs: 15-13, 13-07, 13-10, 13-11; Texture, Cadence Dynamics)"]
+    subgraph InputMatrix ["1. Unified Feature Matrix (N samples x Multi-Scale Clean Features)"]
+        F1["Core 5 Satellite IR Features (BTs: B07-B15; BTDs: 15-13, 13-07, 13-10, 13-11; 3x3 Texture, 3-Pixel Defect/Diff Residuals, Cadence Dynamics)"]
         F2["Directional Atmospheric Telemetry (4 Quadrants, ||∇P||, ||∇RH||)"]
         F3["Copernicus DEM 30m Topography (Elevation, TPI, Slope, Aspect)"]
         F4["Solar Astronomy & Cyclical Time (SZA, Coriolis, Hour, Month)"]
@@ -114,6 +114,9 @@ flowchart TD
 - ระบบจะใช้ **$BTD_{13-10}$ (Lower Water Vapor / Lapse Rate)** เป็นตัวแทนของความชื้นและเสถียรภาพบรรยากาศ
 - ผสานกับ **Copernicus DEM 30m (TPI Index)** ในการระบุแอ่งกระทะกักฝุ่น
 - ทำให้โมเดลชุดแบบจำลอง 4 ขุนพลยังคงรักษาความแม่นยำทางฟิสิกส์ได้อย่างต่อเนื่องโดยไม่ต้องพึ่งพาเซนเซอร์อุตุนิยมวิทยาภาคพื้นดิน
+
+### 3.3 โหมดการเรียนรู้แบบปลดล็อกความไม่เป็นเส้นตรง (Unconstrained Full Non-Linear Mode)
+ในกรณีที่ต้องการให้แบบจำลองค้นหารูปแบบความสัมพันธ์แบบ Non-linear เชิงลึกและป้องกันไม่ให้ Gradient Boosting Trees (โดยเฉพาะ LightGBM และ CatBoost) ติดข้อจำกัดโครงสร้างจน R² ตก สามารถกำหนด `monotonic_constraints: {}` ใน [model_config.yaml](file:///e:/water-analysis-project/dust-prediction-satelite/configs/model_config.yaml) เพื่อให้โมเดลทั้ง 4 ตัวเรียนรู้ได้อย่างอิสระเต็มศักยภาพ และเปิดทางให้ LightGBM ใช้ฟังก์ชันจุดประสงค์ L1 (MAE) ได้โดยตรง
 
 ---
 

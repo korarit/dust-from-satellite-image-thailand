@@ -109,8 +109,10 @@ class SatelliteTabularizer:
         col_indices: np.ndarray,
     ) -> Dict[str, np.ndarray]:
         """
-        Computes 3x3 window statistics (mean, std, min, max) for given row/col locations.
-        Window size is 3x3 pixels centered on (r, c).
+        Computes spatial window statistics (mean, std, min, max) and surrounding
+        spatial differences (defect/contrast) for given row/col locations:
+        - 3x3 immediate window (radius 1)
+        - 7x7 surrounding window (radius 3 pixels)
         """
         n = len(row_indices)
         h, w = b13_grid.shape
@@ -126,6 +128,18 @@ class SatelliteTabularizer:
         btd_mean = np.full(n, np.nan, dtype=np.float32)
         btd_std = np.full(n, np.nan, dtype=np.float32)
 
+        b13_diff_3x3 = np.zeros(n, dtype=np.float32)
+        btd_diff_3x3 = np.zeros(n, dtype=np.float32)
+
+        # Surrounding 3-pixel neighborhood (radius 3 = 7x7 patch)
+        b13_mean_rad3 = np.full(n, np.nan, dtype=np.float32)
+        b13_std_rad3 = np.full(n, np.nan, dtype=np.float32)
+        b13_diff_rad3 = np.zeros(n, dtype=np.float32)
+
+        btd_mean_rad3 = np.full(n, np.nan, dtype=np.float32)
+        btd_std_rad3 = np.full(n, np.nan, dtype=np.float32)
+        btd_diff_rad3 = np.zeros(n, dtype=np.float32)
+
         btd_grid = b15_grid - b13_grid
 
         for i in range(n):
@@ -135,6 +149,10 @@ class SatelliteTabularizer:
             if r < 0 or r >= h or c < 0 or c >= w:
                 continue
 
+            center_b13 = b13_grid[r, c]
+            center_btd = btd_grid[r, c]
+
+            # 1. Immediate 3x3 patch (radius 1)
             r_min = max(0, r - 1)
             r_max = min(h, r + 2)
             c_min = max(0, c - 1)
@@ -149,18 +167,50 @@ class SatelliteTabularizer:
             valid_btd = patch_btd[~np.isnan(patch_btd)]
 
             if len(valid_b13) > 0:
-                b13_mean[i] = float(np.mean(valid_b13))
+                m13 = float(np.mean(valid_b13))
+                b13_mean[i] = m13
                 b13_std[i] = float(np.std(valid_b13)) if len(valid_b13) > 1 else 0.0
                 b13_min[i] = float(np.min(valid_b13))
                 b13_max[i] = float(np.max(valid_b13))
+                if not np.isnan(center_b13):
+                    b13_diff_3x3[i] = float(center_b13 - m13)
 
             if len(valid_b15) > 0:
                 b15_mean[i] = float(np.mean(valid_b15))
                 b15_std[i] = float(np.std(valid_b15)) if len(valid_b15) > 1 else 0.0
 
             if len(valid_btd) > 0:
-                btd_mean[i] = float(np.mean(valid_btd))
+                mbtd = float(np.mean(valid_btd))
+                btd_mean[i] = mbtd
                 btd_std[i] = float(np.std(valid_btd)) if len(valid_btd) > 1 else 0.0
+                if not np.isnan(center_btd):
+                    btd_diff_3x3[i] = float(center_btd - mbtd)
+
+            # 2. Surrounding 3-pixel neighborhood (radius 3: 7x7 patch)
+            r_min3 = max(0, r - 3)
+            r_max3 = min(h, r + 4)
+            c_min3 = max(0, c - 3)
+            c_max3 = min(w, c + 4)
+
+            patch3_b13 = b13_grid[r_min3:r_max3, c_min3:c_max3]
+            patch3_btd = btd_grid[r_min3:r_max3, c_min3:c_max3]
+
+            v3_b13 = patch3_b13[~np.isnan(patch3_b13)]
+            v3_btd = patch3_btd[~np.isnan(patch3_btd)]
+
+            if len(v3_b13) > 0:
+                m13_r3 = float(np.mean(v3_b13))
+                b13_mean_rad3[i] = m13_r3
+                b13_std_rad3[i] = float(np.std(v3_b13)) if len(v3_b13) > 1 else 0.0
+                if not np.isnan(center_b13):
+                    b13_diff_rad3[i] = float(center_b13 - m13_r3)
+
+            if len(v3_btd) > 0:
+                mbtd_r3 = float(np.mean(v3_btd))
+                btd_mean_rad3[i] = mbtd_r3
+                btd_std_rad3[i] = float(np.std(v3_btd)) if len(v3_btd) > 1 else 0.0
+                if not np.isnan(center_btd):
+                    btd_diff_rad3[i] = float(center_btd - mbtd_r3)
 
         return {
             "b13_mean_3x3": b13_mean,
@@ -171,6 +221,14 @@ class SatelliteTabularizer:
             "b15_std_3x3": b15_std,
             "btd_15_13_mean_3x3": btd_mean,
             "btd_15_13_std_3x3": btd_std,
+            "b13_diff_mean_3x3": b13_diff_3x3,
+            "btd_15_13_diff_mean_3x3": btd_diff_3x3,
+            "b13_mean_rad3": b13_mean_rad3,
+            "b13_std_rad3": b13_std_rad3,
+            "b13_diff_mean_rad3": b13_diff_rad3,
+            "btd_15_13_mean_rad3": btd_mean_rad3,
+            "btd_15_13_std_rad3": btd_std_rad3,
+            "btd_15_13_diff_mean_rad3": btd_diff_rad3,
         }
 
     @staticmethod
