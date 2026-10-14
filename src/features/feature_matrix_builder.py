@@ -474,11 +474,11 @@ class PhysicsFallbackImputer:
         )
         # Barometric elevation scale factor: P(z) = P0 * (1 - L*z/T0)^5.25588
         if "elevation_m" in out_df.columns:
-            z_arr = np.maximum(out_df["elevation_m"].fillna(0.0).to_numpy(dtype=float), 0.0)
-            f_baro = (1.0 - (0.0065 * z_arr) / 288.15) ** 5.25588
+            z_s = out_df["elevation_m"].fillna(0.0).clip(lower=0.0).astype(float)
+            f_baro = (1.0 - (0.0065 * z_s) / 288.15) ** 5.25588
             p_elevation_adjusted = (p_mean * f_baro).astype(np.float32)
         else:
-            p_elevation_adjusted = np.float32(p_mean)
+            p_elevation_adjusted = pd.Series(np.float32(p_mean), index=out_df.index, dtype=np.float32)
 
         for p_dir in ["p_north", "p_south", "p_east", "p_west", "pressure_mean_surround"]:
             if p_dir in out_df.columns:

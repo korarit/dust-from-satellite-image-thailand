@@ -188,6 +188,31 @@ def test_physics_fallback_imputer():
     assert np.isclose(imputed.loc[imputed["grid_id"] == "G_CLEAR", "btd_15_13"].iloc[0], -2.0)
 
 
+def test_physics_fallback_imputer_barometric_elevation():
+    """
+    Verifies that PhysicsFallbackImputer handles barometric pressure scaling with elevation_m
+    without throwing TypeError on Series.fillna (e.g. pandas 2.x+ ndarray restriction).
+    """
+    df = pd.DataFrame({
+        "grid_id": ["G1", "G2", "G3"],
+        "elevation_m": [0.0, 500.0, 1000.0],
+        "p_north": [1013.25, np.nan, np.nan],
+        "p_south": [np.nan, 950.0, np.nan],
+        "pressure_mean_surround": [np.nan, 955.0, np.nan],
+    })
+
+    imputer = PhysicsFallbackImputer()
+    imputed = imputer.fit(df).impute_features(df)
+
+    assert not imputed["p_north"].isna().any()
+    assert not imputed["p_south"].isna().any()
+    assert not imputed["pressure_mean_surround"].isna().any()
+    # Higher elevation should scale down pressure: P(1000m) < P(0m)
+    p_mean_g1 = imputed.loc[imputed["grid_id"] == "G1", "p_north"].iloc[0]
+    p_mean_g3 = imputed.loc[imputed["grid_id"] == "G3", "p_north"].iloc[0]
+    assert p_mean_g1 > p_mean_g3
+
+
 def test_build_snapshot_matrix_end_to_end():
     """
     Verifies end-to-end matrix assembly with standard keys, features, and float32 precision.
