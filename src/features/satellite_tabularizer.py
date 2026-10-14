@@ -179,29 +179,23 @@ class SatelliteTabularizer:
         past_10m_df: Optional[pd.DataFrame] = None,
         past_30m_df: Optional[pd.DataFrame] = None,
         past_60m_df: Optional[pd.DataFrame] = None,
+        past_cadence_df: Optional[pd.DataFrame] = None,
+        cadence_hours: float = 3.0,
         key_col: str = "grid_id",
     ) -> pd.DataFrame:
         """
         Computes Group 4 temporal dynamic tendencies:
-        - delta_bt13_10m, delta_bt13_30m, delta_bt13_60m
-        - delta_btd15_13_10m, delta_btd15_13_30m, delta_btd15_13_60m
+        - delta_bt13_cadence, delta_btd15_13_cadence
+        - delta_bt13_rate_per_hour, delta_btd15_13_rate_per_hour
+        - (Optional legacy) delta_bt13_10m/30m/60m if explicit past frames are provided.
         Ensures strict temporal order: past observation time < current run time.
         """
         out_df = current_df.copy()
         n = len(out_df)
 
-        # Default tendencies are zero or NaN
-        out_df["delta_bt13_10m"] = np.zeros(n, dtype=np.float32)
-        out_df["delta_bt13_30m"] = np.zeros(n, dtype=np.float32)
-        out_df["delta_bt13_60m"] = np.zeros(n, dtype=np.float32)
-        out_df["delta_btd15_13_10m"] = np.zeros(n, dtype=np.float32)
-        out_df["delta_btd15_13_30m"] = np.zeros(n, dtype=np.float32)
-        out_df["delta_btd15_13_60m"] = np.zeros(n, dtype=np.float32)
-
-        def _calc_delta(past_df: Optional[pd.DataFrame], suffix: str):
+        def _calc_delta(past_df: Optional[pd.DataFrame]):
             if past_df is None or past_df.empty:
-                return
-
+                return None, None
             if key_col in out_df.columns and key_col in past_df.columns:
                 merged = out_df[[key_col, "bt_b13", "btd_15_13"]].merge(
                     past_df[[key_col, "bt_b13", "btd_15_13"]],
@@ -212,16 +206,33 @@ class SatelliteTabularizer:
                 d_bt13 = (merged["bt_b13"] - merged["bt_b13_past"]).fillna(0.0).to_numpy(dtype=np.float32)
                 d_btd = (merged["btd_15_13"] - merged["btd_15_13_past"]).fillna(0.0).to_numpy(dtype=np.float32)
             else:
-                # Direct index alignment
                 d_bt13 = (out_df["bt_b13"].values - past_df["bt_b13"].values).astype(np.float32)
                 d_btd = (out_df["btd_15_13"].values - past_df["btd_15_13"].values).astype(np.float32)
+            return d_bt13, d_btd
 
-            out_df[f"delta_bt13_{suffix}"] = d_bt13
-            out_df[f"delta_btd15_13_{suffix}"] = d_btd
+        # 1. Authentic Cadence Tendency & Hourly Rates
+        ref_past = past_cadence_df if past_cadence_df is not None else (past_60m_df if past_60m_df is not None else past_30m_df)
+        d_c_bt13, d_c_btd = _calc_delta(ref_past)
+        eff_hours = max(cadence_hours, 0.1) if past_cadence_df is not None else (1.0 if past_60m_df is not None else 0.5)
 
-        _calc_delta(past_10m_df, "10m")
-        _calc_delta(past_30m_df, "30m")
-        _calc_delta(past_60m_df, "60m")
+        out_df["delta_bt13_cadence"] = d_c_bt13 if d_c_bt13 is not None else np.zeros(n, dtype=np.float32)
+        out_df["delta_btd15_13_cadence"] = d_c_btd if d_c_btd is not None else np.zeros(n, dtype=np.float32)
+        out_df["delta_bt13_rate_per_hour"] = (out_df["delta_bt13_cadence"] / eff_hours).astype(np.float32)
+        out_df["delta_btd15_13_rate_per_hour"] = (out_df["delta_btd15_13_cadence"] / eff_hours).astype(np.float32)
+
+        # 2. Legacy sub-intervals (populated when explicit sub-frames are provided in tests)
+        if past_10m_df is not None:
+            d_bt, d_btd = _calc_delta(past_10m_df)
+            out_df["delta_bt13_10m"] = d_bt
+            out_df["delta_btd15_13_10m"] = d_btd
+        if past_30m_df is not None:
+            d_bt, d_btd = _calc_delta(past_30m_df)
+            out_df["delta_bt13_30m"] = d_bt
+            out_df["delta_btd15_13_30m"] = d_btd
+        if past_60m_df is not None:
+            d_bt, d_btd = _calc_delta(past_60m_df)
+            out_df["delta_bt13_60m"] = d_bt
+            out_df["delta_btd15_13_60m"] = d_btd
 
         return out_df
 
@@ -291,10 +302,10 @@ class SatelliteTabularizer:
         # Compute BTDs
         res_df = self.compute_btds(res_df)
 
-        # Compute Temporal Tendencies if past scenes exist
+        # Compute Temporal Tendencies
+        past_dfs = {}
         if past_scenes:
-            past_dfs = {}
-            for t_key in ["10m", "30m", "60m"]:
+            for t_key in ["10m", "30m", "60m", "cadence", "past"]:
                 if t_key in past_scenes and past_scenes[t_key] is not None:
                     past_scn = past_scenes[t_key]
                     past_sub = grid_df.copy()
@@ -305,18 +316,12 @@ class SatelliteTabularizer:
                         past_sub["btd_15_13"] = (b15_p - past_sub["bt_b13"]).astype(np.float32)
                     past_dfs[t_key] = past_sub
 
-            res_df = self.compute_temporal_tendencies(
-                res_df,
-                past_10m_df=past_dfs.get("10m"),
-                past_30m_df=past_dfs.get("30m"),
-                past_60m_df=past_dfs.get("60m"),
-            )
-        else:
-            n = len(res_df)
-            for col in [
-                "delta_bt13_10m", "delta_bt13_30m", "delta_bt13_60m",
-                "delta_btd15_13_10m", "delta_btd15_13_30m", "delta_btd15_13_60m"
-            ]:
-                res_df[col] = np.zeros(n, dtype=np.float32)
+        res_df = self.compute_temporal_tendencies(
+            res_df,
+            past_10m_df=past_dfs.get("10m"),
+            past_30m_df=past_dfs.get("30m"),
+            past_60m_df=past_dfs.get("60m"),
+            past_cadence_df=past_dfs.get("cadence") or past_dfs.get("past"),
+        )
 
         return res_df
