@@ -26,6 +26,8 @@ from src.models.catboost_model import CatBoostDustModel
 from src.models.xgboost_model import XGBoostDustModel
 from src.models.random_forest_model import RandomForestDustModel
 from src.models.extra_trees_model import ExtraTreesDustModel
+from src.models.figs_model import FIGSDustModel
+from src.models.nystroem_model import NystroemRidgeDustModel
 from src.models.ensemble_model import DustStackingEnsemble, MODEL_KEYS
 from src.models.trainer import ModelTrainer
 
@@ -40,6 +42,8 @@ __all__ = [
     "XGBoostDustModel",
     "RandomForestDustModel",
     "ExtraTreesDustModel",
+    "FIGSDustModel",
+    "NystroemRidgeDustModel",
     "DustStackingEnsemble",
     "MODEL_KEYS",
     "ModelTrainer",

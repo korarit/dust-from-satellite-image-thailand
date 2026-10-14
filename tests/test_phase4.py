@@ -31,6 +31,8 @@ from src.models import (
     XGBoostDustModel,
     RandomForestDustModel,
     ExtraTreesDustModel,
+    FIGSDustModel,
+    NystroemRidgeDustModel,
     DustStackingEnsemble,
     ModelTrainer,
     compute_dust_metrics,
@@ -198,10 +200,52 @@ def test_extra_trees_model_wrapper(deterministic_training_data):
     assert np.isclose(imp_df["normalized_importance"].sum(), 1.0)
 
 
+def test_figs_model_wrapper(deterministic_training_data):
+    """Verifies FIGS regressor wrapper, interpretable rules, and prediction constraints."""
+    df, f_cols, target = deterministic_training_data
+    X = df[f_cols]
+    y = df[target]
+
+    model = FIGSDustModel(
+        model_params={"max_rules": 12, "max_trees": 3, "random_state": 42},
+    )
+    model.fit(X, y)
+    assert model.is_fitted_
+
+    preds = model.predict(X)
+    assert len(preds) == len(X)
+    assert np.all(preds >= 0.0)
+
+    imp_df = model.get_feature_importance()
+    assert len(imp_df) == len(f_cols)
+    assert np.isclose(imp_df["normalized_importance"].sum(), 1.0)
+
+
+def test_nystroem_model_wrapper(deterministic_training_data):
+    """Verifies Nystroem Fast Kernel Ridge regressor wrapper and projected importances."""
+    df, f_cols, target = deterministic_training_data
+    X = df[f_cols]
+    y = df[target]
+
+    model = NystroemRidgeDustModel(
+        model_params={"n_components": 20, "alpha": 1.0, "random_state": 42},
+    )
+    model.fit(X, y)
+    assert model.is_fitted_
+
+    preds = model.predict(X)
+    assert len(preds) == len(X)
+    assert np.all(preds >= 0.0)
+
+    imp_df = model.get_feature_importance()
+    assert len(imp_df) == len(f_cols)
+    assert np.isclose(imp_df["normalized_importance"].sum(), 1.0)
+
+
 def test_dust_stacking_ensemble(deterministic_training_data, tmp_path):
     """
     Verifies DustStackingEnsemble:
-    - K-Fold OOF generation across all 4 base models
+    - K-Fold OOF generation across all 7 base models
     - Non-Negative Least Squares (NNLS) meta-weights (w_i >= 0, sum(w) = 1.0)
     - Component and blended predictions
     - Cross-model feature attribution
@@ -218,6 +262,8 @@ def test_dust_stacking_ensemble(deterministic_training_data, tmp_path):
             "xgboost": {"n_estimators": 20, "learning_rate": 0.1, "max_depth": 3},
             "random_forest": {"n_estimators": 20, "max_depth": 5, "min_samples_split": 2},
             "extra_trees": {"n_estimators": 20, "max_depth": 5, "min_samples_split": 2},
+            "figs": {"max_rules": 10, "max_trees": 3, "random_state": 42},
+            "nystroem": {"n_components": 20, "alpha": 1.0, "random_state": 42},
         },
         "features": {
             "monotonic_constraints": {"pressure_grad_mag": -1, "btd_15_13": -1}

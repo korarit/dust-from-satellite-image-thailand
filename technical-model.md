@@ -1,16 +1,16 @@
-# เอกสารทางเทคนิค: สถาปัตยกรรมชุดแบบจำลอง 5 ขุนพลและการผสานโมเดล
-## (Technical Machine Learning Architecture: The Quintet Ensemble & Spatial-Temporal Stacking)
+# เอกสารทางเทคนิค: สถาปัตยกรรมชุดแบบจำลอง 7 ขุนพลและการผสานโมเดล
+## (Technical Machine Learning Architecture: The Septet Ensemble & Spatial-Temporal Stacking)
 
 ---
 
-## 1. ปรัชญาและสถาปัตยกรรมภาพรวม (System Philosophy & Quintet Overview)
+## 1. ปรัชญาและสถาปัตยกรรมภาพรวม (System Philosophy & Septet Overview)
 
 การพยากรณ์ความเข้มข้นของฝุ่นละออง $\text{PM}_{2.5}$ และ $\text{PM}_{10}$ ภาคพื้นดินด้วยข้อมูลดาวเทียมอุตุนิยมวิทยา Himawari-9 และเครือข่ายสถานีโทรมาตร เป็นปัญหาการเรียนรู้ของเครื่องที่มีความซับซ้อนสูง (Complex Non-linear Spatio-Temporal Regression) เนื่องจาก:
 1. ความสัมพันธ์ระหว่างค่าการแผ่รังสีอินฟราเรดกับอนุภาคฝุ่นมีความไม่เป็นเส้นตรงสูง (Highly Non-linear)
 2. เวกเตอร์เกรเดียนต์ความกดอากาศ 4 ทิศทาง ($\|\nabla P\|, \Delta P_{NS}, \Delta P_{EW}$) และตัวแปรอุณหพลศาสตร์มีความแปรปรวนตามฤดูกาล
 3. สถานีตรวจวัดภาคพื้นดินอาจมีสัญญาณรบกวน (Sensor Measurement Noise) จากความชื้นสัมพัทธ์สูงในเขตร้อนชื้น
 
-ระบบ **Thailand Dust Prediction Satellite** จึงออกแบบสถาปัตยกรรม **"ชุดแบบจำลอง 5 ขุนพล" (The Quintet Ensemble)** ร่วมกับ **เมตาเลิร์นเนอร์แบบกำลังสองน้อยสุดที่ไม่เป็นลบ (Non-Negative Least Squares - NNLS Stacking)** เพื่อผสานจุดเด่นของอัลกอริทึมที่แตกต่างกันอย่างสิ้นเชิง 5 สถาปัตยกรรมเข้าด้วยกัน:
+ระบบ **Thailand Dust Prediction Satellite** จึงออกแบบสถาปัตยกรรม **"ชุดแบบจำลอง 7 ขุนพล" (The Septet Ensemble)** ร่วมกับ **เมตาเลิร์นเนอร์แบบกำลังสองน้อยสุดที่ไม่เป็นลบ (Non-Negative Least Squares - NNLS Stacking)** เพื่อผสานจุดเด่นของอัลกอริทึมที่แตกต่างกันอย่างสิ้นเชิง 7 สถาปัตยกรรมเข้าด้วยกัน:
 
 ```mermaid
 flowchart TD
@@ -21,19 +21,21 @@ flowchart TD
         F4["Solar Astronomy & Cyclical Time (SZA, Coriolis, Hour, Month)"]
     end
 
-    subgraph QuintetSuite ["2. The Quintet Base Learners (Fast Direct / K-Fold OOF Predictions)"]
+    subgraph SeptetSuite ["2. The Septet Base Learners (Fast Direct / K-Fold OOF Predictions)"]
         LGB["1. LightGBM<br>• Leaf-wise Tree Growth<br>• Tweedie Loss (p=1.5)<br>• Fast Streaming Inference"]
         CAT["2. CatBoost<br>• Oblivious Symmetric Trees<br>• Tweedie Deviance Loss<br>• Directional Feature Interactions"]
         XGB["3. XGBoost<br>• Depth-wise Tree Growth<br>• reg:tweedie Loss<br>• Monotonic Physics Ready"]
         RF["4. Random Forest<br>• Bagging (300 Trees, sqrt features)<br>• Random Subspace Sampling<br>• Variance & Noise Reduction"]
         ET["5. Extra Trees<br>• Extreme Random Cut-points<br>• Outlier Noise Resilience<br>• Ultra-Fast Parallel Training"]
+        FIGS["6. FIGS (UC Berkeley)<br>• Greedy Tree Sums<br>• Explicit Split Rules<br>• Ultra-Lightweight (<50KB)"]
+        NYS["7. Nystroem Ridge<br>• RBF Kernel Approximation<br>• Continuous Non-linear Curve<br>• Ultra-Fast Closed-Form (<1s)"]
     end
 
     subgraph DualArchitectures ["3. Dual Model Suites & Stacking Optimization"]
         M1["Model 1: Pure Satellite Suite<br>(Maritime / Sea Grid Ready, No Ground Stations)"]
         M2["Model 2: Full Multimodal Suite<br>(Satellite + Topography + Weather Telemetry)"]
         NNLS["Non-Negative Least Squares (NNLS)<br>min ||y - S w||^2, s.t. w_i >= 0, Σ w_i = 1"]
-        Weights["Optimal Physical Weights:<br>w_lgb, w_cat, w_xgb, w_rf, w_et"]
+        Weights["Optimal Physical Weights:<br>w_lgb, w_cat, w_xgb, w_rf, w_et, w_figs, w_nys"]
     end
 
     subgraph Evaluation ["4. Spatial-Temporal Generalization & Nowcasting"]
@@ -41,8 +43,8 @@ flowchart TD
         Nowcast["Multi-Resolution Engine (500m, 1km, 2km, 3km with distinct scale features)"]
     end
 
-    InputMatrix --> LGB & CAT & XGB & RF & ET
-    LGB & CAT & XGB & RF & ET --> M1 & M2
+    InputMatrix --> LGB & CAT & XGB & RF & ET & FIGS & NYS
+    LGB & CAT & XGB & RF & ET & FIGS & NYS --> M1 & M2
     M1 & M2 --> NNLS --> Weights
     Weights --> OOT --> Nowcast
 ```
@@ -56,7 +58,7 @@ flowchart TD
 
 ---
 
-## 2. เจาะลึกอัลกอริทึมของแบบจำลองทั้ง 5 ขุนพล (The 5 Base Learners - Quintet)
+## 2. เจาะลึกอัลกอริทึมของแบบจำลองทั้ง 7 ขุนพล (The 7 Base Learners - Septet)
 
 ### 2.1 ขุนพลที่ 1: LightGBM (Leaf-wise Gradient Boosting Decision Tree)
 พัฒนาโดย Microsoft Research (Ke et al., 2017) ทำหน้าที่เป็นแกนนำด้าน **ความเร็วในการประมวลผลสตรีมมิ่งระดับมิลลิวินาที**:
@@ -107,6 +109,22 @@ flowchart TD
 
 ---
 
+### 2.6 ขุนพลที่ 6: FIGS (Fast Interpretable Greedy-Tree Sums)
+พัฒนาโดย Tan, Singh, & Yu จาก UC Berkeley (2022) ทำหน้าที่เป็นแกนนำด้าน **โครงสร้างกฎการตัดสินใจขนาดจิ๋วและความโปร่งใสสูงสุด (Micro-Rules Structure & Extreme Transparency)**:
+- **หลักการผลรวมต้นไม้แบบละโมบ (Greedy Tree Sums)**: แทนที่จะปลูกต้นไม้ลึกนับร้อยต้น FIGS ปลูกต้นไม้ขนาดเล็กพร้อมกันเพียง 3–5 ต้น โดยจำกัดกฎการตัดแบ่ง (Splits) ทั้งระบบไว้เพียง 15–20 กฎ
+- **การแยกส่วนประกอบแบบบวก (Disentangling Additive Components)**: แต่ละต้นไม้เล็กจะรับหน้าที่อธิบาย Residual เฉพาะมิติ (เช่น ต้นที่ 1 ดูเฉพาะผลต่างหน้าต่างคู่ $BTD_{15-13}$, ต้นที่ 2 ดูความชันความกดอากาศ)
+- **ความเบาและการอนุมานระดับไมโครวินาที**: โมเดลมีขนาดไม่ถึง 50 KB เดินตามกฎ IF-ELSE เพียงไม่กี่ชั้น สามารถพยากรณ์กริดดาวเทียมนับล้านจุดได้อย่างรวดเร็ว
+
+---
+
+### 2.7 ขุนพลที่ 7: Nyström Fast Kernel Ridge Regression
+ประยุกต์ทฤษฎี Nyström Sampling สู่การประมาณค่าเคอร์เนลไม่เป็นเส้นตรง (Scikit-Learn Native):
+- **การแก้ปัญหาข้อจำกัด $O(N^2)$ ของ Kernel SVM**: ในชุดข้อมูล 600,000 แถว Kernel Matrix จะมีขนาดใหญ่จนเกิด Out-Of-Memory อัลกอริทึม Nyström จึงสุ่มตัวอย่าง Landmark เพียง 120 จุด แล้วฉายฟังก์ชันเข้าสู่ Infinite-dimensional Hilbert Space
+- **สมการปิด Regularized Ridge**: แก้สมการแบบ Closed-form ลู่เข้าสู่คำตอบในเวลาไม่ถึง 1 วินาทีบน CPU
+- **การจับความสัมพันธ์แบบเส้นโค้งต่อเนื่อง (Continuous Non-linear Curves)**: แตกต่างจาก Tree-based models ที่ตัดแบ่งระนาบเป็นขั้นบันได (Step functions) โมเดลเคอร์เนลจะให้ฟังก์ชันที่ต่อเนื่องและเรียบเนียน ช่วยถ่วงดุลความชันในการทำ Stacking Ensemble
+
+---
+
 ## 3. การบังคับข้อจำกัดทางฟิสิกส์และการแจกแจงทางสถิติ (Physics & Statistical Loss Modeling)
 
 ### 3.1 ตารางข้อจำกัดทางฟิสิกส์สำหรับแบบจำลอง (Monotonic Constraints Table)
@@ -124,10 +142,10 @@ flowchart TD
 ในสภาวะที่ไม่มีข้อมูลสถานีโทรมาตรภาคพื้นดิน ($P, RH$ ขาดหายหรือไม่ครอบคลุม):
 - ระบบจะใช้ **$BTD_{13-10}$ (Lower Water Vapor / Lapse Rate)** เป็นตัวแทนของความชื้นและเสถียรภาพบรรยากาศ
 - ผสานกับ **Copernicus DEM 30m (TPI Index)** ในการระบุแอ่งกระทะกักฝุ่น
-- ทำให้โมเดลชุดแบบจำลอง 5 ขุนพลยังคงรักษาความแม่นยำทางฟิสิกส์ได้อย่างต่อเนื่องโดยไม่ต้องพึ่งพาเซนเซอร์อุตุนิยมวิทยาภาคพื้นดิน
+- ทำให้โมเดลชุดแบบจำลอง 7 ขุนพลยังคงรักษาความแม่นยำทางฟิสิกส์ได้อย่างต่อเนื่องโดยไม่ต้องพึ่งพาเซนเซอร์อุตุนิยมวิทยาภาคพื้นดิน
 
 ### 3.3 โหมดการเรียนรู้แบบปลดล็อกความไม่เป็นเส้นตรง (Unconstrained Full Non-Linear Mode)
-ในกรณีที่ต้องการให้แบบจำลองค้นหารูปแบบความสัมพันธ์แบบ Non-linear เชิงลึกและป้องกันไม่ให้ Gradient Boosting Trees ติดข้อจำกัดโครงสร้างจน R² ตก สามารถกำหนด `monotonic_constraints: {}` ใน [model_config.yaml](file:///e:/water-analysis-project/dust-prediction-satelite/configs/model_config.yaml) เพื่อให้โมเดลทั้ง 5 ตัวเรียนรู้ได้อย่างอิสระเต็มศักยภาพ
+ในกรณีที่ต้องการให้แบบจำลองค้นหารูปแบบความสัมพันธ์แบบ Non-linear เชิงลึกและป้องกันไม่ให้ Gradient Boosting Trees ติดข้อจำกัดโครงสร้างจน R² ตก สามารถกำหนด `monotonic_constraints: {}` ใน [model_config.yaml](file:///e:/water-analysis-project/dust-prediction-satelite/configs/model_config.yaml) เพื่อให้โมเดลทั้ง 7 ตัวเรียนรู้ได้อย่างอิสระเต็มศักยภาพ
 
 ### 3.4 การใช้ฟังก์ชันเป้าหมาย Tweedie Deviance Loss (Tweedie Distribution Modeling)
 ข้อมูลความเข้มข้นของฝุ่นละออง ($\text{PM}_{2.5}$ และ $\text{PM}_{10}$) ในธรรมชาติมีลักษณะเฉพาะทางสถิติ:
@@ -149,7 +167,7 @@ $$d(y, \mu) = 2 \left( \frac{y^{2-p}}{(1-p)(2-p)} - \frac{y \mu^{1-p}}{1-p} + \f
 
 ### 4.1 โหมดการฝึกสอน Fast Direct Training (`cv = 1`) สำหรับชุดข้อมูลขนาดใหญ่ (> 600,000 แถว)
 เมื่อประมวลผลข้อมูลหลายปี (Multi-Year Ingestion 2024–2026) ปริมาณข้อมูลจะสูงถึง **611,725 ตัวอย่าง**:
-- การทำ K-Fold แบบเดิม ($K=5$) จะต้องเทรนโมเดล 5 ขุนพลซ้ำถึง 25 ครั้ง ซึ่งใช้เวลานานหลายชั่วโมงบน Colab
+- การทำ K-Fold แบบเดิม ($K=5$) จะต้องเทรนโมเดล 7 ขุนพลซ้ำถึง 35 ครั้ง ซึ่งใช้เวลานานหลายชั่วโมงบน Colab
 - ระบบจึงรองรับ **Fast Direct Training Mode (`cv = 1`)**:
   - แบ่งพาร์ติชันการฝึกสอน: **561,725 ตัวอย่าง** สำหรับ Train Partition
   - กันชุดตรวจสอบ Out-of-Sample: **50,000 ตัวอย่าง** สำหรับ Validation Partition
@@ -159,7 +177,7 @@ $$d(y, \mu) = 2 \left( \frac{y^{2-p}}{(1-p)(2-p)} - \frac{y \mu^{1-p}}{1-p} + \f
 ### 4.2 การหาค่าน้ำหนักที่เหมาะสมที่สุด (Optimization Formulation)
 ตามทฤษฎีของ Breiman (1996) และอัลกอริทึมของ Lawson & Hanson (1974):
 
-$$\min_{\mathbf{w}} \frac{1}{2} \|\mathbf{y} - \mathbf{S} \mathbf{w}\|_2^2 \quad \text{subject to } w_k \ge 0, \quad \sum_{k=1}^5 w_k = 1.0$$
+$$\min_{\mathbf{w}} \frac{1}{2} \|\mathbf{y} - \mathbf{S} \mathbf{w}\|_2^2 \quad \text{subject to } w_k \ge 0, \quad \sum_{k=1}^7 w_k = 1.0$$
 
 #### ทำไมต้องบังคับ $w_k \ge 0$ (Non-Negative Weights)?
 - ในการทำ Stacking ทั่วไปที่ใช้ Linear Regression ธรรมดา ค่าสัมประสิทธิ์ของโมเดลตัวใดตัวหนึ่งอาจติดลบ ($w_i < 0$) เพื่อหักล้าง Error ของอีกโมเดลหนึ่ง (Negative Collinearity Cancellation)

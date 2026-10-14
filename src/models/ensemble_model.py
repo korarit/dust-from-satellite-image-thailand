@@ -27,20 +27,32 @@ from src.models.catboost_model import CatBoostDustModel
 from src.models.xgboost_model import XGBoostDustModel
 from src.models.random_forest_model import RandomForestDustModel
 from src.models.extra_trees_model import ExtraTreesDustModel
+from src.models.figs_model import FIGSDustModel
+from src.models.nystroem_model import NystroemRidgeDustModel
 
 logger = logging.getLogger(__name__)
 
-MODEL_KEYS = ["lightgbm", "catboost", "xgboost", "random_forest", "extra_trees"]
+MODEL_KEYS = [
+    "lightgbm",
+    "catboost",
+    "xgboost",
+    "random_forest",
+    "extra_trees",
+    "figs",
+    "nystroem",
+]
 
 
 class DustStackingEnsemble(BaseDustModel):
     """
-    Stacking & Blending Ensemble combining the 5-Model Quintet:
+    Stacking & Blending Ensemble combining the 7-Model Septet:
     1. LightGBM (Leaf-wise speed & Tweedie loss)
     2. CatBoost (Oblivious trees & directional interactions)
     3. XGBoost (Depth-wise growth & Tweedie loss)
     4. Random Forest (Bagging variance reduction & outlier damping)
     5. Extra Trees (Extreme cut-point randomization & noise damping)
+    6. FIGS (Fast Interpretable Greedy-Tree Sums)
+    7. Nystroem (Fast Approximate Kernel Ridge Regression)
     """
 
     def __init__(
@@ -60,7 +72,7 @@ class DustStackingEnsemble(BaseDustModel):
         feat_cfg = self.config.get("features", {})
         self.mono_constraints: Dict[str, int] = feat_cfg.get("monotonic_constraints", {})
 
-        # Instantiate 4 base learners
+        # Instantiate 7 base learners
         self.base_models: Dict[str, BaseDustModel] = {
             "lightgbm": LGBMDustModel(
                 model_params=models_cfg.get("lightgbm", {}),
@@ -79,6 +91,12 @@ class DustStackingEnsemble(BaseDustModel):
             ),
             "extra_trees": ExtraTreesDustModel(
                 model_params=models_cfg.get("extra_trees", {}),
+            ),
+            "figs": FIGSDustModel(
+                model_params=models_cfg.get("figs", {}),
+            ),
+            "nystroem": NystroemRidgeDustModel(
+                model_params=models_cfg.get("nystroem", {}),
             ),
         }
 
@@ -436,6 +454,8 @@ class DustStackingEnsemble(BaseDustModel):
             "xgboost": XGBoostDustModel,
             "random_forest": RandomForestDustModel,
             "extra_trees": ExtraTreesDustModel,
+            "figs": FIGSDustModel,
+            "nystroem": NystroemRidgeDustModel,
         }
         for m_key, cls_type in model_classes.items():
             m_path_pol = load_dir / f"{m_key}_model_{pol}.joblib"
@@ -482,6 +502,14 @@ class DustStackingEnsemble(BaseDustModel):
         elif model_key == "extra_trees":
             return ExtraTreesDustModel(
                 model_params=models_cfg.get("extra_trees", {}),
+            )
+        elif model_key == "figs":
+            return FIGSDustModel(
+                model_params=models_cfg.get("figs", {}),
+            )
+        elif model_key == "nystroem":
+            return NystroemRidgeDustModel(
+                model_params=models_cfg.get("nystroem", {}),
             )
         else:
             raise ValueError(f"Unknown model key: {model_key}")

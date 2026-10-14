@@ -13,12 +13,14 @@ This is crucial for **Maritime / Sea Grids (Gulf of Thailand & Andaman Sea)** an
 
 | Model | Full MAE (µg/m³) | No-Weather MAE (µg/m³) | ΔMAE | Error Diff (%) | Full R² | No-Weather R² | Full AQI Acc (%) | No-Weather AQI Acc (%) |
 | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **ENSEMBLE** | 0.62 | 0.53 | -0.09 | -13.9% | 0.986 | 0.989 | 100.0% | 100.0% |
+| **ENSEMBLE** | 0.56 | 0.41 | -0.15 | -27.5% | 0.989 | 0.994 | 100.0% | 100.0% |
 | **LIGHTGBM** | 5.71 | 5.71 | 0.00 | 0.0% | 0.189 | 0.189 | 60.0% | 60.0% |
 | **CATBOOST** | 6.34 | 6.32 | -0.02 | -0.3% | 0.040 | 0.048 | 60.0% | 60.0% |
 | **XGBOOST** | 3.22 | 3.22 | 0.00 | 0.0% | 0.707 | 0.707 | 100.0% | 100.0% |
 | **RANDOM_FOREST** | 1.29 | 1.00 | -0.29 | -22.4% | 0.942 | 0.972 | 97.5% | 92.5% |
 | **EXTRA_TREES** | 0.62 | 0.54 | -0.08 | -13.0% | 0.987 | 0.990 | 100.0% | 100.0% |
+| **FIGS** | 1.77 | 0.76 | -1.00 | -56.9% | 0.809 | 0.989 | 80.0% | 90.0% |
+| **NYSTROEM** | 4.47 | 4.04 | -0.43 | -9.5% | 0.493 | 0.561 | 80.0% | 90.0% |
 
 ## 3. Scientific Insights for Maritime / Sea Grids
 - **Optical & Infrared Independence**: Satellite infrared brightness temperature differences (BTD15-13, BTD14-11) and texture features continue to detect aerosol optical depth and smoke plume transport over open water.
