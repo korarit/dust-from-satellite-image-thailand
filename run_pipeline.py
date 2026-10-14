@@ -1372,9 +1372,41 @@ def run_phase_4_full(pollutant: str = "pm25", split_date: str = "2026-01-01") ->
                     sat_df["location_id"] = pd.to_numeric(sat_df["location_id"], errors="coerce")
                     all_gt["location_id"] = pd.to_numeric(all_gt["location_id"], errors="coerce")
 
+            # 1. Require authentic satellite readings and ground truth dust target
+            sat_valid = sat_df.dropna(subset=["bt_b13"]).copy()
+            gt_valid = all_gt.dropna(subset=[tgt_col]).copy()
+
+            # 2. Compute authentic temporal dynamics on sat_valid BEFORE merging
+            sat_valid = sat_valid.sort_values([join_key, "timestamp_utc"]).reset_index(drop=True)
+            dt_h = sat_valid.groupby(join_key)["timestamp_utc"].diff().dt.total_seconds() / 3600.0
+            has_prev_satellite = (dt_h > 0.0) & (dt_h <= 12.0)
+
+            d_bt13 = sat_valid.groupby(join_key)["bt_b13"].diff()
+            d_btd = (
+                sat_valid.groupby(join_key)["btd_15_13"].diff()
+                if "btd_15_13" in sat_valid.columns
+                else pd.Series(0.0, index=sat_valid.index)
+            )
+            sat_valid["delta_bt13_rate_per_hour"] = (d_bt13 / dt_h.where(has_prev_satellite, np.nan)).fillna(0.0).astype(np.float32)
+            sat_valid["delta_btd15_13_rate_per_hour"] = (d_btd / dt_h.where(has_prev_satellite, np.nan)).fillna(0.0).astype(np.float32)
+            sat_valid["delta_bt13_cadence"] = d_bt13.where(has_prev_satellite, 0.0).astype(np.float32)
+            sat_valid["delta_btd15_13_cadence"] = d_btd.where(has_prev_satellite, 0.0).astype(np.float32)
+
+            sat_valid["delta_bt13_60m"] = sat_valid["delta_bt13_rate_per_hour"]
+            sat_valid["delta_bt13_30m"] = (sat_valid["delta_bt13_rate_per_hour"] * 0.5).astype(np.float32)
+            sat_valid["delta_bt13_10m"] = (sat_valid["delta_bt13_rate_per_hour"] * (1.0 / 6.0)).astype(np.float32)
+            sat_valid["delta_btd15_13_60m"] = sat_valid["delta_btd15_13_rate_per_hour"]
+            sat_valid["delta_btd15_13_30m"] = (sat_valid["delta_btd15_13_rate_per_hour"] * 0.5).astype(np.float32)
+            sat_valid["delta_btd15_13_10m"] = (sat_valid["delta_btd15_13_rate_per_hour"] * (1.0 / 6.0)).astype(np.float32)
+
+            # Skip rows where t - cadence satellite data is missing (Strict Continuous Cadence)
+            sat_continuous = sat_valid[has_prev_satellite].copy()
+            logger.info("  • Satellite observations with valid t - cadence history: %d/%d (%.1f%% retained)",
+                        len(sat_continuous), len(sat_valid), 100.0 * len(sat_continuous) / max(1, len(sat_valid)))
+
             # Exact point-in-time merge on station identifier and timestamp_utc (Nowcast standard)
-            merged_df = sat_df.merge(
-                all_gt[[join_key, "timestamp_utc", tgt_col]].drop_duplicates(),
+            merged_df = sat_continuous.merge(
+                gt_valid[[join_key, "timestamp_utc", tgt_col]].drop_duplicates(),
                 on=[join_key, "timestamp_utc"],
                 how="inner"
             )
