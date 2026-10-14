@@ -13,11 +13,11 @@ This is crucial for **Maritime / Sea Grids (Gulf of Thailand & Andaman Sea)** an
 
 | Model | Full MAE (µg/m³) | No-Weather MAE (µg/m³) | ΔMAE | Error Diff (%) | Full R² | No-Weather R² | Full AQI Acc (%) | No-Weather AQI Acc (%) |
 | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| **ENSEMBLE** | 1.13 | 1.06 | -0.06 | -5.7% | 0.956 | 0.971 | 97.5% | 92.5% |
+| **ENSEMBLE** | 1.29 | 1.00 | -0.29 | -22.3% | 0.941 | 0.972 | 97.5% | 92.5% |
 | **LIGHTGBM** | 5.71 | 5.71 | 0.00 | 0.0% | 0.189 | 0.189 | 60.0% | 60.0% |
 | **CATBOOST** | 6.34 | 6.32 | -0.02 | -0.3% | 0.040 | 0.048 | 60.0% | 60.0% |
 | **XGBOOST** | 3.22 | 3.22 | 0.00 | 0.0% | 0.707 | 0.707 | 100.0% | 100.0% |
-| **RANDOM_FOREST** | 1.13 | 1.06 | -0.07 | -5.8% | 0.957 | 0.971 | 97.5% | 92.5% |
+| **RANDOM_FOREST** | 1.29 | 1.00 | -0.29 | -22.4% | 0.942 | 0.972 | 97.5% | 92.5% |
 
 ## 3. Scientific Insights for Maritime / Sea Grids
 - **Optical & Infrared Independence**: Satellite infrared brightness temperature differences (BTD15-13, BTD14-11) and texture features continue to detect aerosol optical depth and smoke plume transport over open water.

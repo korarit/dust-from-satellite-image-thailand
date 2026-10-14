@@ -23,15 +23,17 @@
 
 วิกฤตการณ์มลพิษทางอากาศจากฝุ่นละอองขนาดไม่เกิน 2.5 ไมครอน ($\text{PM}_{2.5}$) และฝุ่นละอองขนาดไม่เกิน 10 ไมครอน ($\text{PM}_{10}$) ในประเทศไทยและภูมิภาคเอเชียตะวันออกเฉียงใต้มีลักษณะผันผวนตามฤดูกาลและมีข้อจำกัดอย่างยิ่งจากความเบาบางของสถานีตรวจวัดภาคพื้นดิน ขณะเดียวกันแบบจำลองทำนายฝุ่นที่พึ่งพาค่าความลึกเชิงแสงของละอองลอย (AOD) ในช่วงคลื่นแสงที่ตามองเห็น (Visible Spectrum) ประสบปัญหาบอดสนิทในช่วงเวลากลางคืนและเมื่อมีเมฆหรือหมอกควันหนาทึบ
 
-งานวิจัยนี้นำเสนอโครงร่างการพยากรณ์ค่าฝุ่นแบบปัจจุบันทันด่วน (Real-Time Nowcasting) ที่ผสานหลักการทางฟิสิกส์บรรยากาศเข้ากับปัญญาประดิษฐ์ เพื่อประเมินความเข้มข้นของทั้ง **$\text{PM}_{2.5}$** (ฝุ่นละเอียดจากการเผาไหม้และหมอกควันชีวมวล) และ **$\text{PM}_{10}$** (ฝุ่นหยาบจากการฟุ้งกระจาย หน้าดิน และแร่ธาตุ) ภาคพื้นดินอย่างต่อเนื่องตลอด 24 ชั่วโมงครอบคลุมทั่วประเทศไทย โดยทำการทดลองเปรียบเทียบผลกระทบของขนาดกริดเชิงพื้นที่ 4 ระดับ (**500 เมตร, 1 กิโลเมตร, 2 กิโลเมตร, และ 3 กิโลเมตร**) บนทุกกริดอย่างเท่าเทียมและเป็นมาตรฐานเดียวกัน
+งานวิจัยนี้นำเสนอโครงร่างการพยากรณ์ค่าฝุ่นแบบปัจจุบันทันด่วน (Real-Time Nowcasting) ที่ผสานหลักการทางฟิสิกส์บรรยากาศเข้ากับปัญญาประดิษฐ์ เพื่อประเมินความเข้มข้นของทั้ง **$\text{PM}_{2.5}$** (ฝุ่นละเอียดจากการเผาไหม้และหมอกควันชีวมวล) และ **$\text{PM}_{10}$** (ฝุ่นหยาบจากการฟุ้งกระจาย หน้าดิน และแร่ธาตุ) ภาคพื้นดินอย่างต่อเนื่องตลอด 24 ชั่วโมงครอบคลุมทั่วประเทศไทย บนสถาปัตยกรรมฟีเจอร์แกนหลักที่สะอาดบริสุทธิ์ **49 ฟีเจอร์ (Clean 49 Feature Schema)** โดยไม่มีการจำลองหรือ Mock ค่าใดๆ ทั้งสิ้น
 
-งานนี้ใช้ชุด **5 แถบคลื่นอินฟราเรดแกนหลัก (Core 5 IR Bands: B07, B10, B11, B13, B15)** จากเซนเซอร์ **Advanced Himawari Imager (AHI)** บนดาวเทียมอุตุนิยมวิทยา **Himawari-9** ที่ได้รับการคัดสรรอย่างเคร่งครัดตามหลักฟิสิกส์บรรยากาศสำหรับการพยากรณ์ฝุ่นระดับผิวดิน (ตัดแบนด์บรรยากาศชั้นบนและแบนด์ซ้ำซ้อนออก เพื่อประหยัดพื้นที่ดิสก์และแบนด์วิธได้ 50%) พร้อมสถาปัตยกรรม **Station-Centric Streaming Extraction (0 MB Persistent Raw Disk Footprint)** ที่ดึงข้อมูลเฉพาะพิกัดสถานีจริงสำหรับการฝึกสอน ทำให้สามารถประมวลผลย้อนหลังหลายปีบนสภาพแวดล้อม Google Colab ได้โดยไม่มีปัญหาคอขวดของพื้นที่ดิสก์ ผสานเข้ากับเวกเตอร์ความแตกต่างความกดอากาศ 4 ทิศทาง (เหนือ, ใต้, ตะวันออก, ตะวันตก) จากเครือข่ายโทรมาตร สสน. (HII) พร้อมกลไกป้องกันการรั่วไหลของข้อมูล (Zero Spatial Leakage: KD-Tree Exclusion) และดัชนีแอ่งกระทะกักฝุ่น (TPI) จาก **Copernicus DEM 30m**
+ระบบรองรับสถาปัตยกรรมแบบจำลอง 2 รูปแบบ (**Dual Model Architectures**):
+1. **Model 1: Pure Satellite Suite (34 ฟีเจอร์)**: สถาปัตยกรรมดาวเทียมเพียว ทำงานได้โดยไม่ต้องพึ่งพาสถานีตรวจวัดอากาศภาคพื้นดิน เหมาะสำหรับพื้นที่ห่างไกล ทะเล นอกชายฝั่ง (Offshore & Maritime) และการติดตามหมอกควันข้ามแดน
+2. **Model 2: Full Multimodal Suite (49 ฟีเจอร์)**: สถาปัตยกรรมพหุรูปแบบ ผสานคลื่นรังสีดาวเทียมเข้ากับเวกเตอร์ความต่างความกดอากาศ 4 ทิศทาง (เหนือ, ใต้, ตะวันออก, ตะวันตก) จากเครือข่ายโทรมาตร สสน. (HII) พร้อมกลไกป้องกันการรั่วไหลของข้อมูล (Zero Spatial Leakage: KD-Tree Exclusion) และค่าความชื้นสัมพัทธ์
 
-การทดลองใช้ชุดแบบจำลอง 4 ขุนพล (The Quartet Ensemble: **LightGBM**, **CatBoost**, **XGBoost**, และ **Random Forest**) ผสานน้ำหนักการทำนายด้วย **Non-Negative Least Squares (NNLS) Stacking** ผลการทดสอบเชิงประจักษ์พบว่า:
-- **แบบจำลอง $\text{PM}_{2.5}$**: บรรลุค่าสัมประสิทธิ์การตัดสินใจ ($R^2$) สูงสุดถึง **0.979**, ค่าความคลาดเคลื่อนสัมบูรณ์เฉลี่ย (MAE) ต่ำสุดเพียง **0.24 - 0.30 $\mu\text{g/m}^3$**, และความแม่นยำในการจำแนกระดับสีดัชนีคุณภาพอากาศ (AQI Color Classification) สูงถึง **97.5%**
-- **แบบจำลอง $\text{PM}_{10}$**: บรรลุค่าสัมประสิทธิ์การตัดสินใจ ($R^2$) สูงสุดถึง **0.996**, ค่าความคลาดเคลื่อนสัมบูรณ์เฉลี่ย (MAE) ต่ำสุดเพียง **0.19 $\mu\text{g/m}^3$**, และความแม่นยำในการจำแนกระดับสีดัชนีคุณภาพอากาศสูงถึง **100.0%** (High-Risk Alert Recall 100%)
+งานนี้ใช้ชุด **5 แถบคลื่นอินฟราเรดแกนหลัก (Core 5 IR Bands: B07, B10, B11, B13, B15)** จากเซนเซอร์ **Advanced Himawari Imager (AHI)** บนดาวเทียมอุตุนิยมวิทยา **Himawari-9** พร้อมสถาปัตยกรรม **Station-Centric Streaming Extraction (0 MB Persistent Raw Disk Footprint)** ที่ดึงข้อมูลเฉพาะพิกัดสถานีจริงสำหรับการฝึกสอน และคำนวณพลศาสตร์การเปลี่ยนแปลงตามความถี่จริงของดาวเทียม (**Cadence Dynamics**: $\Delta_{\text{cad}} T_{b,13}$, $\Delta_{\text{cad}} BTD_{15,13}$ และอัตราการเปลี่ยนแปลงต่อชั่วโมง $\dot{T}_{b,13}, \dot{BTD}_{15,13}$) พร้อมแบบจำลองความสูงภูมิประเทศ **Copernicus DEM 30m** จาก AWS S3 Open Data แท้ 100% พร้อมระบบ Auto-Seeding ไปยัง External Storage/Google Drive (`--dir-data`)
 
-โดยมีความเร็วในการประมวลผลระดับมิลลิวินาทีพร้อมสำหรับการปฏิบัติการเตือนภัยจริงแบบเรียลไทม์
+ในการทดลองเปรียบเทียบผลกระทบของขนาดกริดเชิงพื้นที่ 4 ระดับ (**500 เมตร, 1 กิโลเมตร, 2 กิโลเมตร, และ 3 กิโลเมตร**) ระบบใช้เอนจิน **Multi-Resolution Topographic Downscaling** ปรับคำนวณสเกล TPI ($R = 3 \times \text{resolution}$), Local Relief, Fractal Roughness Scaling, และ PSF Texture Variance แยกตามความละเอียดจริงในแต่ละกริด
+
+การฝึกสอนใช้ชุดแบบจำลอง 4 ขุนพล (The Quartet Ensemble: **LightGBM**, **CatBoost**, **XGBoost**, และ **Random Forest**) ผสานน้ำหนักการทำนายด้วย **Non-Negative Least Squares (NNLS) Stacking** พร้อมโหมด **Fast Direct Training Mode (`cv = 1`)** สำหรับชุดข้อมูลยักษ์หลายปีระดับประเทศ (> 610,000 ตัวอย่าง) พร้อมการรายงานความคืบหน้าแบบ Real-Time โดยบนชุดข้อมูลจริงระดับประเทศปี 2024–2026 โมเดล XGBoost บรรลุค่า $R^2 = 0.6035$ และ MAE $8.38\,\mu\text{g/m}^3$ (บนชุดข้อมูลฝึกสอน 561,725 ตัวอย่าง และชุดประเมิน 50,000 ตัวอย่าง) พร้อมสำหรับการปฏิบัติการเตือนภัยจริงแบบเรียลไทม์
 
 ---
 
@@ -44,27 +46,31 @@
    - **Biomass Hotspot Contrast ($\text{BTD}_{13-07}$)**: $\text{BTD}_{13-07} = T_b(10.4\,\mu\text{m}) - T_b(3.9\,\mu\text{m})$ ตรวจจับความเปรียบต่างจุดความร้อนไฟป่าและการเผาชีวมวลตามกฎของวีน (Wooster et al., 2005)
    - **Lower Water Vapor & Stability Proxy ($\text{BTD}_{13-10}$)**: $\text{BTD}_{13-10} = T_b(10.4\,\mu\text{m}) - T_b(7.3\,\mu\text{m})$ ทำหน้าที่เป็นตัวแทนความชื้นโทรโพสเฟียร์ชั้นล่างและสภาวะอุณหภูมิผกผัน (Thermal Inversion Capping) ชดเชยการขาดสถานีวัดอากาศภาคพื้นดิน (Che et al., 2019; Zhang et al., 2020)
    - **SO₂ & Secondary Aerosol Index ($\text{BTD}_{13-11}$)**: $\text{BTD}_{13-11} = T_{b}(10.4\,\mu\text{m}) - T_{b}(8.6\,\mu\text{m})$ ตรวจจับหมอกควันและสารประกอบซัลเฟต แทนที่ช่อง B14 เดิมอย่างไร้รอยต่อ (Strabala et al., 1994)
+   - **Cadence Dynamics & Hourly Rates**: คำนวณความแปรผันของ $T_{b,13}$ และ $BTD_{15-13}$ ตามช่วงเวลา Cadence จริง ($\Delta_{\text{cad}}$) และอัตราต่อชั่วโมง ($\dot{T}_{b,13}, \dot{BTD}_{15,13}$ ในหน่วย $\mathrm{K}/\mathrm{hr}$) เพื่อตรวจจับการก่อตัวหรือสลายตัวของม่านหมอกควัน
    - **Spatial Texture Matrices**: คำนวณค่าเบี่ยงเบนมาตรฐานเชิงพื้นที่ในหน้าต่าง $3 \times 3$ ($\sigma_{3\times 3}$) เพื่อแยกแยะม่านหมอกควันฝุ่นละอองออกจากขอบเมฆทั่วไป
 
-2. **สถาปัตยกรรม Station-Centric Streaming และการป้องกัน Data Leakage**:
+2. **สถาปัตยกรรมโมเดลคู่ (Dual Model Architectures)**:
+   - **Model 1 (Pure Satellite Suite - 34 ฟีเจอร์)**: ตัดข้อมูลเซนเซอร์ภาคพื้นดินออกทั้งหมด พึ่งพาเฉพาะ 5 Core IR Bands, BTDs, Cadence Dynamics, Copernicus DEM, Solar Geometry และ Temporal Encodings เพื่อให้โมเดลสามารถพยากรณ์ครอบคลุมพื้นที่ทางทะเล นอกชายฝั่ง และประเทศเพื่อนบ้านได้ 100%
+   - **Model 2 (Full Multimodal Suite - 49 ฟีเจอร์)**: เสริมพลังด้วยข้อมูลโทรมาตรความกดอากาศ 4 ทิศทาง ($\Delta P_{NS}, \Delta P_{EW}, \|\nabla P\|$) และความชื้นสัมพัทธ์ภาคพื้นดิน สำหรับพื้นที่ในแผ่นดินที่มีเครือข่ายสถานีตรวจวัดหนาแน่น
+
+3. **สถาปัตยกรรม Station-Centric Streaming และการป้องกัน Data Leakage**:
    - **สกัดเฉพาะพิกัดสถานีแบบ On-the-Fly**: แทนที่จะโหลดและเก็บภาพราสเตอร์เต็มประเทศ 276,000 พิกเซล (4.37 TB) ระบบสกัดเฉพาะพิกัดสถานีจริง (~170–618 แห่ง) และลบราสเตอร์ดิบทิ้งทันที (`cleanup_raw=True`) ทำให้ลดการใช้ดิสก์เหลือ 0 MB เหมาะสมอย่างยิ่งสำหรับ Google Colab
    - **KD-Tree Radial Exclusion ($r \ge 2.0\text{ km}$)**: ตัดสถานีภายในรัศมีกริดออกอย่างเคร่งครัด แล้วประมาณค่าความกดอากาศภายนอก 4 ทิศทาง พร้อมคำนวณเวกเตอร์ความชัน $\|\nabla P\|$ เพื่อจำลองสภาพอากาศปิด ลมสงบ
 
-3. **การสร้างดัชนีแอ่งกระทะจาก Copernicus DEM 30m จริง 100%**:
-   สกัดสถิติความสูงเฉลี่ย, ความลาดชัน (Slope), ทิศทางลาดชัน (Aspect), และ **Topographic Position Index (TPI)**:
-   $$\text{TPI} = z_0 - \bar{z}_R$$
-   (เมื่อ $z_0$ คือความสูงของจุดศูนย์กลางกริด และ $\bar{z}_R$ คือความสูงเฉลี่ยของภูมิประเทศโดยรอบ) ค่า TPI ที่ติดลบมากๆ แสดงถึงสภาวะก้นหุบเขาหรือแอ่งกระทะ ซึ่งเป็นสาเหตุสำคัญของการเกิดปรากฏการณ์อุณหภูมิผกผัน (Thermal Inversion) ที่กักขังฝุ่นในภาคเหนือของไทย
+4. **Copernicus DEM 30m แท้ 100% พร้อมระบบ Auto-Seeding**:
+   ดึงข้อมูลความสูงภูมิประเทศจาก AWS S3 Open Data (`s3://copernicus-dem-30m/`) โดยตรง พร้อมระบบ `seed_geo_if_needed()` คัดลอก Master Grid 2.0 km (276,317 เซลล์) และกระเบื้อง DEM ไปยังโฟลเดอร์ปลายทาง (`--dir-data` บน Google Drive) อัตโนมัติ ป้องกันปัญหาไฟล์สูญหาย
 
-4. **การทดสอบเปรียบเทียบขนาดกริด 4 ระดับอย่างเท่าเทียม (Multi-Resolution Discretization Experiment)**:
-   วิเคราะห์เชิงลึกเปรียบเทียบขนาดกริด $3\,\text{km}$, $2\,\text{km}$, $1\,\text{km}$ (Pareto Sweet Spot), และ $500\,\text{m}$ (Ultra-High Resolution) ภายใต้ชุดฟีเจอร์และกระบวนการประเมินเดียวกันทั้งหมด เพื่อค้นหาจุดสมดุลที่ดีที่สุดระหว่างความละเอียดเชิงพื้นที่และความเร็วในการประมวลผล (Compute Pareto Frontier)
+5. **การทดสอบเปรียบเทียบขนาดกริด 4 ระดับด้วย Multi-Resolution Downscaling**:
+   แทนที่จะคัดลอกข้อมูลเดียวกัน ระบบใช้โมเดลฟิสิกส์ปรับสเกลธรณีสัณฐานวิทยาตามขนาดกริดจริง ($3\,\text{km}$, $2\,\text{km}$, $1\,\text{km}$, $500\,\text{m}$): ปรับรัศมีวงรอบของ TPI ($R = 3 \times \text{cell\_size}$), คำนวณ Fractal Relief Scaling $H(L)$, Hurst Roughness Scaling $\sigma_{\text{rough}}(L)$, และ Point Spread Function (PSF) Texture Variance เพื่อค้นหา Pareto Sweet Spot ทางวิทยาศาสตร์อย่างแท้จริง
 
-5. **สถาปัตยกรรมชุดแบบจำลอง 4 ขุนพล (The Quartet Ensemble Architecture)**:
+6. **สถาปัตยกรรมชุดแบบจำลอง 4 ขุนพล และโหมด Fast Direct Training**:
    ผสานจุดเด่นของอัลกอริทึมต้นไม้ตัดสินใจระดับชั้นนำ:
    - **LightGBM**: ประมวลผลรวดเร็วแบบ Leaf-wise เหมาะสำหรับงานสตรีมมิ่งความเร็วสูง
    - **CatBoost**: โครงสร้างสมมาตร (Oblivious Trees) จัดการความสัมพันธ์ที่ไม่เป็นเชิงเส้นของความกดอากาศ 4 ทิศทางได้ดีเยี่ยม
    - **XGBoost**: ควบคุมความซับซ้อนของโมเดลด้วย Regularization และรักษาความสัมพันธ์เชิงฟิสิกส์
-   - **Random Forest**: สุ่มแบ่งข้อมูล (Bagging) เพื่อลดความแปรปรวน (Variance Reduction) และต้านทานสัญญาณรบกวนภายนอก
+   - **Random Forest**: สุ่มแบ่งข้อมูล (Bagging) พร้อมออปติไมซ์ `n_estimators = 300` และ `max_features = 'sqrt'` แบบขนานเต็มทุกคอร์ CPU เพื่อลด Variance
    - **NNLS Stacking Meta-Learner**: ค้นหาน้ำหนักรวมโมเดลที่เหมาะสมที่สุดโดยจำกัดค่าน้ำหนักไม่ให้ติดลบ ($w_i \ge 0$)
+   - **Fast Direct Mode (`cv = 1`)**: รองรับชุดข้อมูลขนาดใหญ่ (> 600k แถว) แสดงเวลาและตัวชี้วัดแบบ Real-Time ทุกโมเดล
 
 ---
 
@@ -73,35 +79,43 @@
 ```mermaid
 flowchart TD
     subgraph DataSources ["1. การรวบรวมข้อมูลหลากมิติ (Data Ingestion)"]
-        H9["ดาวเทียม Himawari-9 AHI (AWS S3 Open Data)<br>5 แถบคลื่นแกนหลัก: B07, B10, B11, B13, B15<br>ความถี่เวลา: t, t-10m, t-30m, t-60m"]
+        H9["ดาวเทียม Himawari-9 AHI (AWS S3 Open Data)<br>5 แถบคลื่นแกนหลัก: B07, B10, B11, B13, B15<br>Cadence: t, t - cadence-hours (จริง 100%)"]
         HII["โทรมาตรสภาพอากาศภาคพื้นดิน สสน. (HII)<br>ความกดอากาศบรรยากาศ และ ความชื้นสัมพัทธ์"]
-        DEM["แบบจำลองความสูงภูมิประเทศ Copernicus DEM 30m<br>Elevation, Slope, Aspect, TPI แอ่งกระทะ"]
+        DEM["แบบจำลองความสูงภูมิประเทศ Copernicus DEM 30m (AWS Open Data)<br>Auto-Seeded Master Grid (276,317 cells) & DEM Tiles"]
         GT["สถานีตรวจวัดฝุ่นภาคพื้นดิน PCD Air4Thai & OpenAQ<br>การตรวจวัดฝุ่นจริงทั้ง PM2.5 และ PM10"]
     end
 
-    subgraph FeatureEngineering ["2. วิศวกรรมฟีเจอร์และสตรีมมิ่ง (Feature Engineering)"]
-        SatTab["Satellite Tabularizer / Station Extraction<br>• ค่าอุณหภูมิความสว่างจุดสถานี (Core 5 IR BTs Kelvin)<br>• คู่ผลต่างฟิสิกส์ BTD (15-13, 13-07, 13-10, 13-11)<br>• สถิติเนื้อภาพเชิงพื้นที่ 3x3 Texture และ Temporal Tendencies<br>• Zero Persistent Disk Footprint (ลบราสเตอร์ดิบทันทีหลังสกัด)"]
-        DirPress["Directional Weather Engine<br>• ป้องกัน Data Leakage: ตัดสถานีรัศมี < 2.0 km<br>• ความกดอากาศ 4 ทิศทาง (N, S, E, W)<br>• เวกเตอร์ความชัน: ||∇P||, ΔP_NS, ΔP_EW<br>• ความชื้นสัมพัทธ์และ ||∇RH||"]
-        GridEng["Multi-Resolution Grid Engine<br>พิกัดกริด UTM Zone 47N (EPSG:32647)<br>4 ระดับความละเอียด: 500m, 1km, 2km, 3km"]
+    subgraph FeatureEngineering ["2. วิศวกรรมฟีเจอร์และสตรีมมิ่ง (49 Clean Features Schema)"]
+        SatTab["Satellite Tabularizer / Station Streaming<br>• Core 5 IR Brightness Temperatures (B07, B10, B11, B13, B15)<br>• Atmospheric BTDs: 15-13, 13-07, 13-10, 13-11<br>• Cadence Dynamics: Δ_cad Tb13, Δ_cad BTD15-13, dTb13/dt, dBTD15-13/dt<br>• Spatial 3x3 Textures & Solar Geometry (SZA, SAA)<br>• Zero Persistent Disk Footprint (ลบไฟล์ดิบทันที)"]
+        DirPress["Directional Weather Engine (15 Feats)<br>• ป้องกัน Data Leakage: ตัดสถานีรัศมี < 2.0 km<br>• ความกดอากาศ 4 ทิศทาง (N, S, E, W)<br>• เวกเตอร์ความชัน: ||∇P||, ΔP_NS, ΔP_EW<br>• ความชื้นสัมพัทธ์ 4 ทิศทาง และ ||∇RH||"]
+        GridEng["Multi-Resolution Topographic Downscaling<br>พิกัดกริด UTM Zone 47N (EPSG:32647)<br>4 ระดับความละเอียด: 500m, 1km, 2km, 3km<br>Scale-Adapted TPI, Relief, Roughness & PSF Texture"]
     end
 
-    subgraph ModelingSuite ["3. ชุดแบบจำลอง 4 ขุนพลและการผสานโมเดล (The Quartet Ensemble)"]
-        LGB["LightGBM<br>(เร็วที่สุด, Leaf-wise GBDT)"]
-        CAT["CatBoost<br>(จัดการปฏิสัมพันธ์ความกดอากาศได้แม่นยำ)"]
-        XGB["XGBoost<br>(เสถียรภาพสูง, Depth-wise GBDT)"]
-        RF["Random Forest<br>(ลด Variance, ทนต่อ Noise ภาคพื้นดิน)"]
-        Meta["NNLS Stacking Meta-Learner<br>หาค่าน้ำหนักเหมาะสมที่สุด: min ||y - Σ w_i * f_i(x)||^2, w_i >= 0"]
+    subgraph ModelingSuite ["3. สถาปัตยกรรมโมเดลคู่ & ชุด 4 ขุนพล (Dual Architectures)"]
+        subgraph Architectures ["สถาปัตยกรรมทางเลือก"]
+            M1["Model 1: Pure Satellite Suite (34 Feats)<br>สำหรับพื้นที่ไร้สถานี / ทางทะเล / นอกชายฝั่ง"]
+            M2["Model 2: Full Multimodal Suite (49 Feats)<br>ผสานความกดอากาศ 4 ทิศทางและความชื้น"]
+        end
+        subgraph Quartet ["The Quartet Ensemble"]
+            LGB["LightGBM (Leaf-wise GBDT)"]
+            CAT["CatBoost (Oblivious Trees)"]
+            XGB["XGBoost (Depth-wise GBDT)"]
+            RF["Random Forest (300 Trees, sqrt features)"]
+            Meta["NNLS Stacking Meta-Learner (Non-Negative Weights)"]
+        end
     end
 
     subgraph EvaluationInference ["4. การประเมินผลและการพยากรณ์ปัจจุบัน (Evaluation & Nowcasting)"]
-        CV["การทดสอบเชิงพื้นที่และเวลา (Spatial-Temporal Cross Validation)"]
+        CV["Fast Direct Training (cv=1) หรือ 5-Fold Spatial CV"]
         Map["แผนที่ความเข้มข้น PM2.5 และ PM10 แบบกริด 2 มิติทั่วประเทศ<br>(GeoTIFF, Parquet, Interactive HTML Map)"]
     end
 
     H9 --> SatTab
     HII --> DirPress
     DEM --> GridEng
-    SatTab & DirPress & GridEng & GT --> ModelingSuite
+    SatTab & GridEng --> M1
+    SatTab & DirPress & GridEng --> M2
+    M1 & M2 --> Quartet
     LGB & CAT & XGB & RF --> Meta
     Meta --> CV --> Map
 ```
@@ -370,15 +384,16 @@ python run_pipeline.py --phase 2
 python run_pipeline.py --phase 2 --start-date "2023-01-01 00:00:00"
 ```
 **การทำงานใน Phase 2:**
-1. สร้างและโหลดกริดพิกัด UTM Zone 47N (EPSG:32647) ครอบคลุมประเทศไทย
-2. สกัดฟีเจอร์ความกดอากาศ 4 ทิศทาง (IDW Quadrants) พร้อมบังคับ **Proximity Exclusion Buffer (< 2.0 km)** เพื่อป้องกัน Data Leakage
-3. คำนวณผลต่างอุณหภูมิความสว่างหน้าต่างคู่ ($BTD_{15-13}$), จุดความร้อน ($BTD_{13-07}$), เสถียรภาพบรรยากาศและความชื้นชั้นล่าง ($BTD_{13-10}$), ขนาดอนุภาคและซัลเฟต ($BTD_{13-11}$), ดัชนีฝุ่นสีแดง WMO ($R_{\mathrm{dust}}$), สถิติเนื้อภาพ $3\times 3$, และอัตราการเปลี่ยนแปลงย้อนหลัง
-4. ผสานดัชนีแอ่งกระทะกักฝุ่น (TPI), ความลาดชัน (Slope), ทิศทางลาดชัน (Aspect), มุมดวงอาทิตย์ (NOAA SZA), และค่าโคริออลิส
-5. บันทึกตัวอย่างฟีเจอร์ลง `reports/phase2_feature_sample.parquet`
+1. สร้างและโหลดกริดพิกัด UTM Zone 47N (EPSG:32647) ครอบคลุมประเทศไทย พร้อมดึง **Copernicus DEM 30m** จาก AWS S3 Open Data และระบบ Auto-Seeding ไฟล์ Master Grid (276,317 เซลล์) ไปยังโฟลเดอร์ `--dir-data`
+2. สกัดฟีเจอร์ความกดอากาศ 4 ทิศทาง (IDW Quadrants) และความชื้นสัมพัทธ์ พร้อมบังคับ **Proximity Exclusion Buffer (< 2.0 km)** เพื่อป้องกัน Data Leakage
+3. คำนวณผลต่างอุณหภูมิความสว่างหน้าต่างคู่ ($BTD_{15-13}$), จุดความร้อน ($BTD_{13-07}$), เสถียรภาพบรรยากาศและความชื้นชั้นล่าง ($BTD_{13-10}$), ขนาดอนุภาคและซัลเฟต ($BTD_{13-11}$), ดัชนีฝุ่นสีแดง WMO ($R_{\mathrm{dust}}$), สถิติเนื้อภาพ $3\times 3$
+4. คำนวณพลศาสตร์ความถี่จริงของดาวเทียม (**Cadence Dynamics**): ความแปรผันของ $T_{b,13}$ และ $BTD_{15-13}$ ตามช่วงเวลาจริง ($\Delta_{\text{cad}}$) และอัตราการเปลี่ยนแปลงต่อชั่วโมง ($\dot{T}_{b,13}, \dot{BTD}_{15,13}$ ในหน่วย $\mathrm{K}/\mathrm{hr}$)
+5. ผสานดัชนีแอ่งกระทะกักฝุ่น (TPI), ความลาดชัน (Slope), ทิศทางลาดชัน (Aspect), มุมดวงอาทิตย์ (NOAA SZA), และค่าโคริออลิส
+6. บันทึกตัวอย่างฟีเจอร์ลง `reports/phase2_feature_sample.parquet`
 
 ---
 
-#### 3.4 การรัน Phase 3: การประกอบเมทริกซ์ฟีเจอร์รวมและการป้องกันการรั่วไหล (Unified Feature Pipeline)
+#### 3.4 การรัน Phase 3: การประกอบเมทริกซ์ฟีเจอร์รวมและการปรับสเกลหลากความละเอียด (Unified Feature Pipeline & Multi-Res Scaling)
 ผสานข้อมูลฟีเจอร์ทั้งหมดเข้ากับค่าตรวจวัดจริงภาคพื้นดิน พร้อมการป้องกัน Data Leakage อย่างเข้มงวด:
 ```bash
 # รวมเมทริกซ์ฟีเจอร์สำหรับ PM2.5
@@ -393,12 +408,13 @@ python run_pipeline.py --phase 3 --pollutant all
 **การทำงานใน Phase 3:**
 1. จับคู่พิกัดสถานีตรวจวัดภาคพื้นดินเข้ากับกริดเซลล์ด้วยโครงสร้าง cKDTree
 2. บังคับใช้ **Strict Temporal Anti-Leakage (Zero Look-Ahead Bias)** โดยใช้เฉพาะข้อมูลก่อนหน้าเวลาสังเกตการณ์
-3. จัดการค่าสูญหายด้วย **Physics Fallback Imputer** รับประกันฟีเจอร์ครบ 52+ คอลัมน์โดยไม่มีค่า NaN
-4. เซฟข้อมูลในฟอร์แมต Apache Parquet (บีบอัด Snappy) พร้อมแบ่งชุดข้อมูล Train/Test
+3. จัดการค่าสูญหายด้วย **Physics Fallback Imputer** รับประกันชุด **49 ฟีเจอร์แกนหลักที่สะอาดบริสุทธิ์ (Clean 49 Feature Schema)** ปราศจาก mock/zero fields
+4. รันเอนจิน **Multi-Resolution Topographic Downscaling** สร้างเมทริกซ์ฟีเจอร์ที่ปรับสเกลตามขนาดกริดจริง (3.0 km, 2.0 km, 1.0 km, 0.5 km) ผ่านแบบจำลอง Fractal Relief $H(L)$, Hurst Roughness $\sigma_{\text{rough}}(L)$, และ Point Spread Function (PSF) Texture Factor
+5. เซฟข้อมูลในฟอร์แมต Apache Parquet (บีบอัด Snappy) พร้อมแบ่งชุดข้อมูล Train/Test
 
 ---
 
-#### 3.5 การรัน Phase 4: การเทรนโมเดล 4 ขุนพลและการรวมโมเดล (Model Training & Stacking Ensemble)
+#### 3.5 การรัน Phase 4: การเทรนโมเดล 4 ขุนพลและสถาปัตยกรรมโมเดลคู่ (Model Training & Dual Architectures)
 ฝึกสอนโมเดล Machine Learning Quartet ร่วมกับข้อจำกัดฟิสิกส์ทางเดียว และหาค่าน้ำหนักรวมด้วย Non-Negative Least Squares:
 ```bash
 # เทรนโมเดลสำหรับ PM2.5 (ค่าเริ่มต้น)
@@ -411,10 +427,12 @@ python run_pipeline.py --phase 4 --pollutant pm10
 python run_pipeline.py --phase 4 --pollutant all
 ```
 **การทำงานใน Phase 4:**
-1. ฝึกสอนโมเดล 4 อัลกอริทึม: LightGBM, CatBoost, XGBoost, Random Forest
-2. กำหนด **Monotonic Constraints** บังคับทิศทางตามกฎฟิสิกส์บรรยากาศ (ห้ามทำนายสวนทางกับความเป็นจริง)
-3. รวมโมเดลด้วย **Non-Negative Stacking Meta-Learner (NNLS)** ป้องกันค่าน้ำหนักติดลบ
-4. ส่งออกโมเดลและ Metadata ของแต่ละระดับความละเอียด (3km, 2km, 1km, 500m) สู่โฟลเดอร์ `models/`
+1. รองรับสถาปัตยกรรมทางเลือก: **Model 1: Pure Satellite Suite (34 ฟีเจอร์)** สำหรับพื้นที่นอกชายฝั่ง/ทางทะเล/ไร้สถานี และ **Model 2: Full Multimodal Suite (49 ฟีเจอร์)** ผสานความกดอากาศและความชื้น
+2. ฝึกสอนโมเดล 4 อัลกอริทึม: LightGBM, CatBoost, XGBoost, และ Random Forest (300 ต้น, `max_features='sqrt'` ขนานเต็มคอร์)
+3. กำหนด **Monotonic Constraints** บังคับทิศทางตามกฎฟิสิกส์บรรยากาศ (ห้ามทำนายสวนทางกับความเป็นจริง)
+4. โหมด **Fast Direct Training Mode (`cv = 1`)** ออกแบบสำหรับชุดข้อมูลขนาดใหญ่ระดับประเทศ (> 610,000 ตัวอย่าง) แสดงผลการฝึกสอนและตัวชี้วัดความแม่นยำแบบ Real-Time ทีละโมเดล
+5. รวมโมเดลด้วย **Non-Negative Stacking Meta-Learner (NNLS)** ป้องกันค่าน้ำหนักติดลบ
+6. ส่งออกโมเดลและ Metadata ของแต่ละระดับความละเอียด (3km, 2km, 1km, 500m) สู่โฟลเดอร์ `models/`
 
 ---
 

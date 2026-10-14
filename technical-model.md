@@ -14,36 +14,44 @@
 
 ```mermaid
 flowchart TD
-    subgraph InputMatrix ["1. Unified Feature Matrix (N samples x 48+ features)"]
-        F1["Core 5 Satellite IR Features (BTs: B07, B10, B11, B13, B15; BTDs: 15-13, 13-07, 13-10, 13-11; Texture, Dynamics)"]
+    subgraph InputMatrix ["1. Unified Feature Matrix (N samples x 49 Clean Features)"]
+        F1["Core 5 Satellite IR Features (BTs: B07, B10, B11, B13, B15; BTDs: 15-13, 13-07, 13-10, 13-11; Texture, Cadence Dynamics)"]
         F2["Directional Atmospheric Telemetry (4 Quadrants, ||∇P||, ||∇RH||)"]
         F3["Copernicus DEM 30m Topography (Elevation, TPI, Slope, Aspect)"]
         F4["Solar Astronomy & Cyclical Time (SZA, Coriolis, Hour, Month)"]
     end
 
-    subgraph QuartetSuite ["2. The Quartet Base Learners (K-Fold OOF Predictions)"]
+    subgraph QuartetSuite ["2. The Quartet Base Learners (Fast Direct / K-Fold OOF Predictions)"]
         LGB["1. LightGBM<br>• Leaf-wise Tree Growth<br>• GOSS & EFB Sampling<br>• Fast Streaming Inference"]
         CAT["2. CatBoost<br>• Oblivious Symmetric Trees<br>• Ordered Boosting<br>• Directional Feature Interactions"]
         XGB["3. XGBoost<br>• Depth-wise Tree Growth<br>• 2nd-order Taylor Hessian Loss<br>• Monotonic Physics Constraints"]
-        RF["4. Random Forest<br>• Bagging (Bootstrap Aggregation)<br>• Random Subspace Sampling<br>• Variance & Noise Reduction"]
+        RF["4. Random Forest<br>• Bagging (300 Trees, sqrt features)<br>• Random Subspace Sampling<br>• Variance & Noise Reduction"]
     end
 
-    subgraph MetaStacking ["3. Meta-Learner Optimization (NNLS Stacking)"]
-        OOF["Out-Of-Fold Prediction Matrix S (N x 4)"]
+    subgraph DualArchitectures ["3. Dual Model Suites & Stacking Optimization"]
+        M1["Model 1: Pure Satellite Suite<br>(Maritime / Sea Grid Ready, No Ground Stations)"]
+        M2["Model 2: Full Multimodal Suite<br>(Satellite + Topography + Weather Telemetry)"]
         NNLS["Non-Negative Least Squares (NNLS)<br>min ||y - S w||^2, s.t. w_i >= 0, Σ w_i = 1"]
         Weights["Optimal Physical Weights:<br>w_lgb, w_cat, w_xgb, w_rf"]
     end
 
     subgraph Evaluation ["4. Spatial-Temporal Generalization & Nowcasting"]
-        CV["Regional Hold-out Cross-Validation (5 Regions)"]
-        Nowcast["Multi-Resolution Nowcast Engine (500m, 1km, 2km, 3km)"]
+        OOT["Out-of-Time Cutoff (2024-2025 Train vs 2026 Test)"]
+        Nowcast["Multi-Resolution Engine (500m, 1km, 2km, 3km with distinct scale features)"]
     end
 
     InputMatrix --> LGB & CAT & XGB & RF
-    LGB & CAT & XGB & RF --> OOF
-    OOF --> NNLS --> Weights
-    Weights --> CV --> Nowcast
+    LGB & CAT & XGB & RF --> M1 & M2
+    M1 & M2 --> NNLS --> Weights
+    Weights --> OOT --> Nowcast
 ```
+
+### 1.1 สถาปัตยกรรมโมเดลคู่ขนาน (Dual Model Architecture Strategy)
+1. **Model 1: Pure Satellite Suite (โหมดดาวเทียมล้วน / พร้อมสำหรับพื้นที่ทางทะเลและชายแดน)**:
+   - ใช้เฉพาะฟีเจอร์จากดาวเทียม Himawari-9 (IR Bands, BTDs, Texture, Cadence Dynamics) ผสานกับภูมิประเทศ Copernicus DEM, ระยะห่างชายฝั่ง และมุมดวงอาทิตย์
+   - **ไม่ต้องพึ่งพาเซนเซอร์สภาพอากาศภาคพื้นดินแม้แต่จุดเดียว**: ปฏิบัติการได้ 100% บนพื้นที่อ่าวไทย ทะเลอันดามัน และแนวเทือกเขาชายแดนห่างไกล
+2. **Model 2: Full Multimodal Suite (โหมดมัลติโมดอลสมบูรณ์)**:
+   - เสริมข้อมูลความกดอากาศ 4 ทิศทาง ($\|\nabla P\|$) และความชื้นสัมพัทธ์จากเครือข่ายโทรมาตร สสน. (HII) เพื่อเพิ่มความแม่นยำสูงสุดในเขตแผ่นดินใหญ่และเมืองหลวง
 
 ---
 
@@ -80,10 +88,10 @@ flowchart TD
 
 ### 2.4 ขุนพลที่ 4: Random Forest (Bootstrap Aggregation / Bagging)
 พัฒนาโดย Leo Breiman (2001) ทำหน้าที่เป็นแกนนำด้าน **การลดความแปรปรวนและการต้านทานสัญญาณรบกวน (Variance Reduction & Noise Damping)**:
-- **หลักการ Bagging**: สุ่มสร้างต้นไม้ตัดสินใจอิสระจำนวนมาก ($B$ ต้น) จากตัวอย่างข้อมูลที่สุ่มแบบคืนที่ (Bootstrap Samples) และสุ่มเลือกกลุ่มฟีเจอร์ย่อย (Random Subspaces) ในทุกๆ การแยกโหนด
+- **หลักการ Bagging**: สุ่มสร้างต้นไม้ตัดสินใจอิสระจำนวน 300 ต้น (`n_estimators = 300`) โดยจำกัดการสุ่มกลุ่มฟีเจอร์ย่อยด้วย `max_features = 'sqrt'` (ประมาณ 7 ฟีเจอร์ต่อการแตกกิ่ง) จากตัวอย่างข้อมูลที่สุ่มแบบคืนที่ (Bootstrap Samples)
 - **การลดค่าความแปรปรวน (Variance Reduction)**:
   $$\text{Var}(\bar{f}) = \rho \sigma^2 + \frac{1 - \rho}{B} \sigma^2$$
-  เมื่อจำนวนต้นไม้ $B \to \infty$ ค่าความแปรปรวนของส่วนสุ่มจะลดลงเหลือเพียง $\rho \sigma^2$
+  เมื่อจำนวนต้นไม้ $B = 300$ ค่าความแปรปรวนของส่วนสุ่มจะลดลงเหลือเพียง $\rho \sigma^2$
 - **บทบาทในระบบ**: ทำหน้าที่เป็นตัวหน่วง (Damper) ถ่วงดุลไม่ให้โมเดลกลุ่ม Boosting ตอบสนองต่อสัญญาณรบกวนที่ผิดพลาดของเซนเซอร์ภาคพื้นดินรุนแรงเกินไป
 
 ---
@@ -111,11 +119,14 @@ flowchart TD
 
 ## 4. สถาปัตยกรรมรวมโมเดล Stacking ด้วย Non-Negative Least Squares (NNLS)
 
-### 4.1 การสร้างเมทริกซ์การทำนาย Out-Of-Fold (OOF Cross-Validation Matrix)
-เพื่อป้องกันปัญหา Data Leakage ในระดับเมตาเลิร์นเนอร์ (Meta-Learner Overfitting) ระบบจะไม่ใช้ข้อมูลที่โมเดลเคยเห็นในการหาค่าน้ำหนัก แต่จะแบ่งข้อมูลการเทรนออกเป็น 5 ส่วน ($K=5$ Folds):
-1. ในแต่ละ Fold $k$ นำโมเดล 4 ขุนพลที่เทรนจาก $K-1$ Folds มาทำนายข้อมูลใน Fold $k$ ที่ถูกกันไว้
-2. ประกอบผลทำนายของทั้ง 4 โมเดลเป็นเมทริกซ์ Out-Of-Fold:
-   $$\mathbf{S} \in \mathbb{R}^{N \times 4} = [\hat{\mathbf{y}}_{\text{lgb}}^{\text{oof}}, \; \hat{\mathbf{y}}_{\text{cat}}^{\text{oof}}, \; \hat{\mathbf{y}}_{\text{xgb}}^{\text{oof}}, \; \hat{\mathbf{y}}_{\text{rf}}^{\text{oof}}]$$
+### 4.1 โหมดการฝึกสอน Fast Direct Training (`cv = 1`) สำหรับชุดข้อมูลขนาดใหญ่ (> 600,000 แถว)
+เมื่อประมวลผลข้อมูลหลายปี (Multi-Year Ingestion 2024–2026) ปริมาณข้อมูลจะสูงถึง **611,725 ตัวอย่าง**:
+- การทำ K-Fold แบบเดิม ($K=5$) จะต้องเทรนโมเดล 4 ขุนพลซ้ำถึง 20 ครั้ง ซึ่งใช้เวลานานหลายชั่วโมงบน Colab
+- ระบบจึงรองรับ **Fast Direct Training Mode (`cv = 1`)**:
+  - แบ่งพาร์ติชันการฝึกสอน: **561,725 ตัวอย่าง** สำหรับ Train Partition
+  - กันชุดตรวจสอบ Out-of-Sample: **50,000 ตัวอย่าง** สำหรับ Validation Partition
+  - แสดงผลลัพธ์แบบเรียลไทม์ (Real-time Model Logging): แสดงเวลาที่ใช้จริง, Val MAE, RMSE, และ $R^2$ ทันทีที่แต่ละขุนพลเทรนเสร็จสิ้น
+  - ใช้ผลทำนายบน Validation Partition ในการค้นหาน้ำหนัก NNLS Stacking ที่เหมาะสมที่สุดโดยไม่เกิดการ Overfitting
 
 ### 4.2 การหาค่าน้ำหนักที่เหมาะสมที่สุด (Optimization Formulation)
 ตามทฤษฎีของ Breiman (1996) และอัลกอริทึมของ Lawson & Hanson (1974):

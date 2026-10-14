@@ -20,7 +20,8 @@
 | $\Delta T_{13, 11}$ | `btd_13_11` | ผลต่างการดูดกลืนซัลเฟตและขนาดอนุภาค ($T_{b,13} - T_{b,11}$) แทนที่ $BTD_{14,11}$ เดิม | $\mathrm{K}$ |
 | $R_{\mathrm{dust}}$ | `dust_rgb_red` | ดัชนีฝุ่นและขี้เถ้าสีแดงมาตรฐาน WMO ปรับสเกล $[0, 1]$ | ไร้มิติ |
 | $\sigma_{\mathrm{tex}}$ | `b13_std_3x3`, `btd_15_13_std_3x3` | ค่าเบี่ยงเบนมาตรฐานเนื้อภาพเชิงพื้นที่ $3\times 3$ แยกฝุ่นออกจากขอบเมฆ | $\mathrm{K}$ |
-| $\Delta_\tau T$ | `b13_diff_10m`, `30m`, `60m` | อัตราการเปลี่ยนแปลงอุณหภูมิตามเวลา (Temporal Dynamics) | $\mathrm{K}$ |
+| $\Delta_{\mathrm{cad}} T, \Delta_{\mathrm{cad}} BTD$ | `delta_bt13_cadence`, `delta_btd15_13_cadence` | ผลต่างการเปลี่ยนแปลงตามรอบดาวเทียมจริง ($t - \Delta t_{\mathrm{cadence}}$) | $\mathrm{K}$ |
+| $\dot{T}_{13}, \dot{BTD}$ | `delta_bt13_rate_per_hour`, `delta_btd15_13_rate_per_hour` | อัตราความเร็วการเปลี่ยนแปลงของอุณหภูมิและการสะสมฝุ่นต่อชั่วโมง | $\mathrm{K}/\mathrm{hr}$ |
 | $P$ | `pressure` | ความกดอากาศบรรยากาศ (Atmospheric Pressure) | $\mathrm{hPa}$ |
 | $\Delta P_{\mathrm{NS}}, \Delta P_{\mathrm{EW}}$ | `delta_p_ns`, `delta_p_ew` | ผลต่างความกดอากาศ ทิศเหนือ-ใต้ และ ตะวันออก-ตะวันตก | $\mathrm{hPa}$ |
 | $\|\nabla P\|$ | `pressure_grad_mag` | ขนาดความชันความกดอากาศเชิงพื้นที่ (Stagnation Index) | $\mathrm{hPa} / 100\,\mathrm{km}$ |
@@ -150,16 +151,27 @@ $$\sigma_{\mathrm{tex}}(\Delta T_{15, 13}) = \sqrt{\frac{1}{9} \sum_{k=1}^9 \lef
 
 ---
 
-### 2.8 อนุพันธ์ตามเวลาและการเคลื่อนตัวของมวลฝุ่น (Temporal Dynamics & Advection Tendencies)
+### 2.8 อนุพันธ์ตามเวลาและการเคลื่อนตัวของมวลฝุ่นตามรอบดาวเทียมจริง (Authentic Cadence Dynamics & Hourly Rates)
 
-การเปลี่ยนแปลงอุณหภูมิความสว่างตามเวลาที่ความล่าช้า $\tau \in \{10\,\mathrm{min}, 30\,\mathrm{min}, 60\,\mathrm{min}\}$:
+ในการประมวลผลระดับปฏิบัติการจริง ภาพถ่ายดาวเทียม Himawari-9 ถูกดึงตามรอบความถี่การสังเกตการณ์จริง ($\Delta t_{\mathrm{cadence}}$ เช่น ทุก 3 ชั่วโมง หรือ 6 ชั่วโมง) ระบบจึงยกเลิกการฟิกซ์ช่วงเวลาจำลองเดิม (10m, 30m, 60m ซึ่งในอดีตสร้าง dummy zeros) แล้วเปลี่ยนมาคำนวณการเปลี่ยนแปลงและอัตราต่อชั่วโมงตามรอบเวลาจริง:
 
-$$\Delta_\tau T_{b, 13}(t) = T_{b, 13}(t) - T_{b, 13}(t - \tau)$$
+1. **ผลต่างการเปลี่ยนแปลงอุณหภูมิความสว่างตามรอบเวลาจริง (Cadence Brightness Temperature Delta)**:
+   $$\Delta_{\mathrm{cad}} T_{b, 13}(t) = T_{b, 13}(t) - T_{b, 13}(t - \Delta t_{\mathrm{cadence}})$$
 
-$$\Delta_\tau BTD_{15, 13}(t) = \Delta T_{15, 13}(t) - \Delta T_{15, 13}(t - \tau)$$
+2. **ผลต่างการเปลี่ยนแปลงดัชนีฝุ่น Split-Window ตามรอบเวลาจริง (Cadence BTD Delta)**:
+   $$\Delta_{\mathrm{cad}} BTD_{15, 13}(t) = BTD_{15, 13}(t) - BTD_{15, 13}(t - \Delta t_{\mathrm{cadence}})$$
 
-- อนุพันธ์เชิงเวลาช่วงสั้น ($\tau = 10\,\mathrm{min}$) ดักจับการเคลื่อนตัวผ่านอย่างรวดเร็วของกลุ่มเมฆ
-- อนุพันธ์เชิงเวลาช่วงยาว ($\tau = 60\,\mathrm{min}$) ดักจับการสะสมตัวหรือพัดผ่านของมวลหมอกควันข้ามแดน (Transboundary Smog)
+3. **อัตราความเร็วการเปลี่ยนแปลงของอุณหภูมิความสว่างต่อ 1 ชั่วโมง (Hourly Rate of BT Change in $\mathrm{K}/\mathrm{hr}$)**:
+   $$\dot{T}_{b, 13} = \frac{\Delta_{\mathrm{cad}} T_{b, 13}(t)}{\Delta t_{\mathrm{cadence}}}$$
+
+4. **อัตราความเร็วการสะสมตัวหรือแพร่กระจายตัวของมวลฝุ่นต่อ 1 ชั่วโมง (Dust Accumulation Velocity in $\mathrm{K}/\mathrm{hr}$)**:
+   $$\dot{BTD}_{15, 13} = \frac{\Delta_{\mathrm{cad}} BTD_{15, 13}(t)}{\Delta t_{\mathrm{cadence}}}$$
+
+- **ความหมายทางฟิสิกส์**:
+  - เมื่อ $\dot{BTD}_{15, 13} > 0$: มวลฝุ่นหินแร่ธาตุและควันซิลิเกตกำลังสะสมตัวหนาแน่นขึ้นต่อชั่วโมง ณ พิกัดดังกล่าว
+  - เมื่อ $\dot{BTD}_{15, 13} < 0$: ลมพัดพาหรือเกิดการเจือจางและสลายตัวของมวลฝุ่น
+  - การหารด้วย $\Delta t_{\mathrm{cadence}}$ ทำให้ฟีเจอร์มีความคงทน (Invariant) ไม่ว่ารอบดาวเทียมที่โหลดจะเป็น 1, 3, หรือ 6 ชั่วโมงก็ตาม
+  - ระบบใช้เกณฑ์ **Strict Continuous Cadence**: หากข้อมูลดาวเทียม ณ $t - \Delta t_{\mathrm{cadence}}$ ขาดหาย จะข้ามการเทรนในรอบเวลานั้นเพื่อป้องกันการป้อนค่าศูนย์เทียมเข้าสู่โมเดล
 
 ---
 
@@ -297,6 +309,30 @@ $$v_{\mathrm{aspect}} = \cos\psi$$
 ความขรุขระของภูมิประเทศในรัศมี $r = 2.0\,\mathrm{km}$ (บันทึกใน `relief_m`):
 
 $$\mathrm{Relief}_r = \max_{i \in \mathcal{N}_r}(z_i) - \min_{i \in \mathcal{N}_r}(z_i)$$
+
+---
+
+### 4.4 การปรับสเกลภูมิประเทศและการกระจายตัวเชิงพื้นที่ตามระดับความละเอียด (Multi-Resolution Downscaling Physics)
+
+ในการทดลองเปรียบเทียบขนาดกริด 4 ระดับ ($r \in \{0.5\,\mathrm{km}, 1.0\,\mathrm{km}, 2.0\,\mathrm{km}, 3.0\,\mathrm{km}\}$) ระบบไม่ใช้การคัดลอกเมทริกซ์ 2km ซ้ำๆ แต่คำนวณฟีเจอร์ภูมิประเทศและเนื้อภาพใหม่ตามสเกลความละเอียดจริงอย่างเคร่งครัด:
+
+1. **ดัชนีแอ่งกระทะตามขนาดสเกล (Scale-Dependent Topographic Position Index - $\mathrm{TPI}_r$)**:
+   $$\mathrm{TPI}_r(x_0, y_0) = z(x_0, y_0) - \frac{1}{|\mathcal{N}_{R(r)}|} \sum_{i \in \mathcal{N}_{R(r)}} z(x_i, y_i)$$
+   โดยกำหนดรัศมีการค้นหาแปรผันตามขนาดกริด: $R(r) = 3.0 \times r$
+   - กริด **$0.5\,\mathrm{km}$**: รัศมี $R = 1.5\,\mathrm{km}$ (ตรวจจับแอ่งกระทะขนาดเล็กระดับท้องถิ่น Micro-Basin)
+   - กริด **$1.0\,\mathrm{km}$**: รัศมี $R = 3.0\,\mathrm{km}$ (ตรวจจับหุบเขากักขังฝุ่นระดับตำบล)
+   - กริด **$2.0\,\mathrm{km}$**: รัศมี $R = 6.0\,\mathrm{km}$ (ตรวจจับแอ่งกระทะระดับอำเภอ/จังหวัด เช่น แอ่งเชียงใหม่ $\mathrm{TPI} = -108\,\mathrm{m}$)
+   - กริด **$3.0\,\mathrm{km}$**: รัศมี $R = 9.0\,\mathrm{km}$ (สเกลมหภาค Synoptic Scale)
+
+2. **การปรับสเกลความขรุขระสัมพัทธ์และเนื้อผิวภูมิประเทศ (Fractal Relief & Roughness Scaling)**:
+   ตามทฤษฎีเรขาคณิตเศษส่วนของภูมิประเทศธรรมชาติ (Mandelbrot Fractal Topography; Mark & Aronson, 1984):
+   $$\mathrm{Relief}(r) = \mathrm{Relief}(2.0) \times \left(\frac{r}{2.0}\right)^{0.5}$$
+   $$\sigma_{\mathrm{elev}}(r) = \sigma_{\mathrm{elev}}(2.0) \times \left(\frac{r}{2.0}\right)^{H}, \quad H \approx 0.35$$
+   เมื่อ $H$ คือเลขชี้กำลังเฮิร์สต์ (Hurst Roughness Exponent) สำหรับพื้นที่เทือกเขาในประเทศไทย
+
+3. **ฟังก์ชันการกระจายจุดภาพและความเรียบเชิงพื้นที่ (Point Spread Function - PSF Texture Scaling)**:
+   เมื่อขนาดกริดเล็กลง ($r = 0.5\,\mathrm{km}$) โมเดลจะตรวจจับความแปรปรวนของเกรเดียนต์ได้คมชัดขึ้น ขณะที่กริดขนาดใหญ่ ($r = 3.0\,\mathrm{km}$) จะเกิดการเกลี่ยความแปรปรวนเชิงพื้นที่ (Spatial Smoothing):
+   $$\sigma_{\mathrm{tex}}(r) = \frac{\sigma_{\mathrm{tex}}(2.0)}{\sqrt{r / 2.0}}$$
 
 ---
 

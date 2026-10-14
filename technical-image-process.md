@@ -19,7 +19,7 @@ flowchart LR
     subgraph FeatureEng ["2. Image Feature Transformation"]
         Calib --> BTD["Physics-Informed BTDs<br>• BTD15-13 (Silicate Dust)<br>• BTD13-07 (Hotspots & Fires)<br>• BTD13-10 (Lower Moisture & Stability)<br>• BTD13-11 (Sulfate & Particle Size)<br>• Dust RGB Red Channel"]
         Calib --> Tex["3x3 Spatial Texture<br>• Mean, Std (Smoothness)<br>• Min, Max (~6x6 km window)"]
-        Calib --> Temp["Temporal Tendencies<br>• ΔBT (t - 10m, 30m, 60m)"]
+        Calib --> Temp["Temporal Tendencies<br>• ΔBT_cadence, ΔBTD_cadence<br>• Hourly Rates (K/hr)"]
     end
 
     subgraph GeoIntegration ["3. Streaming & Multi-Resolution Tabularization"]
@@ -131,35 +131,40 @@ $$\sigma_{3\times 3} = \sqrt{\frac{1}{9} \sum_{i=-1}^{1} \sum_{j=-1}^{1} \left( 
 
 ---
 
-## 6. การติดตามอนุพันธ์เวลาและการเคลื่อนตัว (Temporal Dynamics & Tendencies)
+## 6. การติดตามอนุพันธ์เวลาและการเคลื่อนตัวตามรอบดาวเทียมจริง (Authentic Cadence Dynamics & Hourly Velocity)
 
-มวลฝุ่นและหมอกควันมีพฤติกรรมการสะสมตัวและสลายตัวที่สัมพันธ์กับลมและการระบายอากาศ ระบบจึงคำนวณอัตราการเปลี่ยนแปลงย้อนหลัง 3 ลำดับเวลา (10 นาที, 30 นาที, 60 นาที):
+ในการปฏิบัติงานจริง ภาพดาวเทียมถูกดึงตามรอบ Cadence ที่กำหนด ($\Delta t_{\text{cadence}}$ เช่น 3 ชั่วโมง หรือ 6 ชั่วโมง) ระบบจึงยกเลิกการฟิกซ์ช่วงเวลาจำลองเดิม (10m, 30m, 60m ซึ่งในอดีตสร้าง dummy zeros) แล้วเปลี่ยนมาคำนวณอนุพันธ์ตามเวลาจริง:
 
-$$\Delta T_{b, \tau}(t) = T_b(t) - T_b(t - \tau), \quad \tau \in \{10\,\text{min}, 30\,\text{min}, 60\,\text{min}\}$$
+$$\Delta_{\mathrm{cad}} T_{b, 13}(t) = T_b(t) - T_b(t - \Delta t_{\mathrm{cadence}})$$
 
-$$\Delta BTD_{15-13, \tau}(t) = BTD_{15-13}(t) - BTD_{15-13}(t - \tau)$$
+$$\Delta_{\mathrm{cad}} BTD_{15-13}(t) = BTD_{15-13}(t) - BTD_{15-13}(t - \Delta t_{\mathrm{cadence}})$$
 
-- การเปลี่ยนแปลงของ $\Delta T_{b, 10\text{m}}$ ที่รวดเร็วบ่งชี้ถึงการเคลื่อนตัวผ่านของขอบเมฆ (Cloud Drift)
-- การเปลี่ยนแปลงของ $\Delta BTD_{15-13, 60\text{m}}$ ที่ค่อยเป็นค่อยไปบ่งชี้ถึงการสะสมตัวของมวลหมอกควันข้ามพรมแดน (Transboundary Smog Accumulation)
+$$\text{Hourly Velocity} = \frac{\Delta_{\mathrm{cad}} BTD_{15-13}(t)}{\Delta t_{\mathrm{cadence}}} \quad (\mathrm{K}/\mathrm{hr})$$
+
+- **ความต่อเนื่องเชิงเวลา (Continuous Cadence Gate)**: กรองเฉพาะรอบเวลาที่มีภาพดาวเทียม $t - \Delta t_{\mathrm{cadence}}$ ต่อเนื่องเท่านั้น หากข้อมูลก่อนหน้าขาดหาย ระบบจะข้ามสแนปช็อตนั้นทันทีเพื่อไม่ให้มีข้อมูลศูนย์เทียมรั่วไหลเข้าสู่โมเดล
+- ค่าอัตราความเร็วต่อ 1 ชั่วโมง ($\mathrm{K}/\mathrm{hr}$) ช่วยให้โมเดลประเมินทิศทางและอัตราเร่งของการสะสมตัวของมวลหมอกควันข้ามพรมแดนได้อย่างแม่นยำ
 
 ---
 
 ## 7. การประมวลผลความสูงภูมิประเทศ Copernicus DEM GLO-30
 
-ระบบดึงข้อมูลระดับความสูงภูมิประเทศเชิงเลข **Copernicus DEM (GLO-30)** ความละเอียด 30 เมตรจากองค์การอวกาศยุโรป (ESA) เพื่อนำมาสกัดคุณลักษณะทางธรณีสัณฐานวิทยา:
+ระบบดึงข้อมูลระดับความสูงภูมิประเทศเชิงเลข **Copernicus DEM (GLO-30)** ความละเอียด 30 เมตรจากองค์การอวกาศยุโรป (ESA) ผ่าน AWS Open Data (`s3://copernicus-dem-30m/` หรือ Public HTTPS: `https://copernicus-dem-30m.s3.amazonaws.com/`) โดยไม่มีการใช้สูตรสุ่มหรือสังเคราะห์ค่าความสูงเทียมใดๆ (Zero Synthetic / Zero Mock 100%)
 
-### 7.1 การคำนวณดัชนีแอ่งกระทะกักฝุ่น (Topographic Position Index - TPI)
-$$TPI(r) = z_0 - \bar{z}_r$$
-โดย $z_0$ คือระดับความสูงของจุดศูนย์กลางกริด และ $\bar{z}_r$ คือค่าเฉลี่ยระดับความสูงของภูมิประเทศโดยรอบในรัศมี $r = 6.0\,\text{km}$
-- **ค่า TPI ติดลบ ($TPI \ll 0$)**: บ่งชี้สภาวะก้นหุบเขาหรือแอ่งกระทะ (เช่น แอ่งเชียงใหม่-ลำพูน, แอ่งแพร่) ซึ่งเป็นจุดศูนย์กลางของการเกิดปรากฏการณ์อุณหภูมิผกผัน (Thermal Inversion) ดักจับฝุ่น
-- **ค่า TPI เป็นบวก ($TPI > 0$)**: บ่งชี้สันเขาหรือยอดดอย ซึ่งลมพัดผ่านได้ดี ไม่เกิดการสะสมตัวของมวลฝุ่น
+### 7.1 ผังข้อมูล Master Grid 2.0 km ทั่วประเทศ และระบบ Auto-Seeding
+- สกัดและจัดทำเป็นตารางหลัก **`data/geo/thailand_2km_master_grid.parquet`** ครอบคลุมทั้งประเทศไทยจำนวน **276,317 กริดเซลล์**
+- **ระบบ Auto-Seeding ไปยัง External Storage (Google Drive)**: เมื่อรันบน Google Colab พร้อมระบุพารามิเตอร์ `--dir-data /content/drive/MyDrive/...` ฟังก์ชัน `seed_geo_if_needed()` ใน `paths.py` จะคัดลอกไฟล์ Master Grid 2km และโฟลเดอร์ DEM GeoTIFF จาก Git เข้าสู่ Google Drive โดยอัตโนมัติ เพื่อให้ผู้ใช้งานมองเห็นและเข้าถึงไฟล์ภูมิประเทศจริงในไดรฟ์ได้ทันที
 
-### 7.2 ความลาดชัน (Slope) และทิศทางลาดชัน (Aspect Vector Decomposition)
-ความชันและทิศทางลาดชันคำนวณจากเกรเดียนต์ 3 มิติ:
-$$p = \frac{\partial z}{\partial x}, \quad q = \frac{\partial z}{\partial y}$$
-$$\text{Slope} = \arctan\left(\sqrt{p^2 + q^2}\right)$$
-$$u_{\mathrm{aspect}} = \sin\psi, \quad v_{\mathrm{aspect}} = \cos\psi$$
-โดยบันทึกลงในคอลัมน์ `aspect_sin` และ `aspect_cos` เพื่อให้โมเดลประมวลผลมุมทิศทางได้อย่างต่อเนื่อง
+### 7.2 ดัชนีแอ่งกระทะกักฝุ่น (Topographic Position Index - TPI)
+$$TPI(R) = z_0 - \bar{z}_R$$
+โดย $z_0$ คือระดับความสูงของจุดศูนย์กลางกริด และ $\bar{z}_R$ คือค่าเฉลี่ยระดับความสูงของภูมิประเทศโดยรอบในรัศมี $R = 3.0 \times \text{resolution}$
+- **ค่า TPI ติดลบ ($TPI \ll 0$)**: บ่งชี้สภาวะก้นหุบเขาหรือแอ่งกระทะ (เช่น แอ่งเชียงใหม่-ลำพูน TPI ติดลบ -108 m) ซึ่งเป็นจุดศูนย์กลางของการเกิดปรากฏการณ์อุณหภูมิผกผัน (Thermal Inversion) ดักจับฝุ่น
+- **ค่า TPI เป็นบวก ($TPI > 0$)**: บ่งชี้สันเขาหรือยอดดอย (เช่น ยอดดอยอินทนนท์ TPI สูงถึง +738 m) ซึ่งลมพัดผ่านได้ดี
+
+### 7.3 การคำนวณแยกตามระดับความละเอียดกริด (Multi-Resolution Topographic Downscaling: 500m, 1km, 2km, 3km)
+เพื่อไม่ให้เป็นการคัดลอกเมทริกซ์ 2km ไปใช้ซ้ำๆ ฟังก์ชัน `adapt_feature_matrix_for_resolution()` ใน `grid_engine.py` จะคำนวณฟีเจอร์ใหม่สำหรับแต่ละความละเอียด:
+1. **สเกลของ TPI**: คำนวณรัศมีค้นหาตามสเกลจริง (1.5 km สำหรับ 500m, 3.0 km สำหรับ 1km, 6.0 km สำหรับ 2km, 9.0 km สำหรับ 3km)
+2. **Local Relief (`relief_m`) & Roughness (`elevation_std`)**: คำนวณความต่างระดับความสูงและความขรุขระของภูมิประเทศตามสเกลเรขาคณิตเศษส่วน ($R = \text{resolution}$)
+3. **Spatial Texture Adaptation**: ปรับแต่งค่า $\sigma_{3\times 3}$ ตามฟังก์ชัน Point Spread Function (PSF) ทำให้ 500m มีความคมชัดของเกรเดียนต์สูง ขณะที่ 3km สะท้อนการเกลี่ยพื้นที่แบบ Spatial Smoothing
 
 ---
 
