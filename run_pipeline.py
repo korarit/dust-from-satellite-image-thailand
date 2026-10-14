@@ -1268,7 +1268,7 @@ def run_phase_4_full(pollutant: str = "pm25", split_date: str = "2026-01-01") ->
     trainer = ModelTrainer(config_path=MODEL_CONFIG_PATH, output_dir=models_dir, pollutant=pol, target_col=tgt_col)
     ensemble = trainer.train_suite(
         train_df=train_df,
-        cv=5,
+        cv=None,
         experiment_id=f"EXP-2KM-FULL-{tgt_name}",
     )
 

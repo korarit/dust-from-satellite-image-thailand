@@ -7,7 +7,7 @@ general:
   target_column: "observed_pm25"
   target_column_pm10: "observed_pm10"
   random_state: 42
-  cv_splits: 5
+  cv_splits: 1
   eval_metric: "mae"
   train_split_cutoff: "2026-01-01"
 
@@ -61,7 +61,7 @@ models:
   random_forest:
     n_estimators: 300
     max_depth: 16
-    max_features: 1.0
+    max_features: "sqrt"
     min_samples_split: 5
     min_samples_leaf: 2
     random_state: 42

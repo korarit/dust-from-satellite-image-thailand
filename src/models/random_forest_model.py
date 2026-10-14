@@ -36,7 +36,7 @@ class RandomForestDustModel(BaseDustModel):
         self.params: Dict[str, Any] = {
             "n_estimators": 300,
             "max_depth": 16,
-            "max_features": 1.0,
+            "max_features": "sqrt",
             "min_samples_split": 5,
             "min_samples_leaf": 2,
             "random_state": 42,

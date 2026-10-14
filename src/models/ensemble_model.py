@@ -11,6 +11,7 @@ Integrates:
 """
 
 import json
+import time
 import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union, Any
@@ -103,9 +104,78 @@ class DustStackingEnsemble(BaseDustModel):
         n_samples = len(y_arr)
         effective_cv = min(cv, n_samples)
         if effective_cv < 2:
-            logger.warning("Sample size (%d) too small for K-Fold. Using uniform blending.", n_samples)
-            for m_key, m in self.base_models.items():
-                m.fit(X_arr, y_arr, feature_names=self.feature_names_)
+            logger.info("Fast Direct Training Mode (No K-Fold): Training Quartet on %d samples...", n_samples)
+            val_size = min(int(n_samples * 0.15), 50000)
+            train_size = n_samples - val_size
+            indices = np.arange(n_samples)
+            np.random.RandomState(random_state).shuffle(indices)
+            tr_idx, val_idx = indices[:train_size], indices[train_size:]
+
+            X_tr, y_tr = X_arr[tr_idx], y_arr[tr_idx]
+            X_vl, y_vl = X_arr[val_idx], y_arr[val_idx]
+
+            logger.info("  • Training partition  : %d samples", len(X_tr))
+            logger.info("  • Validation partition: %d samples", len(X_vl))
+
+            val_preds_matrix = np.zeros((len(X_vl), len(MODEL_KEYS)), dtype=np.float32)
+
+            for m_idx, m_key in enumerate(MODEL_KEYS, 1):
+                model = self.base_models[m_key]
+                logger.info("  [%d/%d] Training %s on %d samples...", m_idx, len(MODEL_KEYS), model.name, len(X_tr))
+                t_start = time.perf_counter()
+                model.fit(X_tr, y_tr, eval_set=(X_vl, y_vl), feature_names=self.feature_names_)
+                t_elapsed = time.perf_counter() - t_start
+
+                preds = model.predict(X_vl)
+                val_preds_matrix[:, m_idx - 1] = preds
+                m_metrics = compute_dust_metrics(y_vl, preds, pollutant=self.pollutant)
+                self.oof_metrics_[m_key] = m_metrics
+                logger.info("  ✓ [%d/%d] %-14s completed in %6.1fs | Val MAE: %6.3f | RMSE: %6.3f | R²: %6.4f",
+                            m_idx, len(MODEL_KEYS), model.name, t_elapsed,
+                            m_metrics["mae"], m_metrics["rmse"], m_metrics["r2"])
+
+            loss_metric = self.config.get("general", {}).get("eval_metric", "mae").lower()
+
+            def objective(w: np.ndarray) -> float:
+                pred = val_preds_matrix @ w
+                diff = pred - y_vl
+                if loss_metric == "mae":
+                    return float(np.mean(np.sqrt(diff ** 2 + 1e-6)))
+                return float(np.mean(diff ** 2))
+
+            init_w = np.ones(len(MODEL_KEYS), dtype=np.float64) / len(MODEL_KEYS)
+            bounds = [(0.0, 1.0) for _ in range(len(MODEL_KEYS))]
+            constraints = {"type": "eq", "fun": lambda w: float(np.sum(w) - 1.0)}
+
+            opt_res = minimize(objective, init_w, method="SLSQP", bounds=bounds, constraints=constraints)
+            if opt_res.success and np.sum(opt_res.x) > 0:
+                normalized_weights = np.clip(opt_res.x, 0.0, 1.0)
+                normalized_weights = normalized_weights / np.sum(normalized_weights)
+            else:
+                raw_weights, _ = nnls(val_preds_matrix, y_vl)
+                sum_w = np.sum(raw_weights)
+                normalized_weights = raw_weights / sum_w if sum_w > 1e-7 else init_w
+
+            self.weights = {m_key: float(normalized_weights[i]) for i, m_key in enumerate(MODEL_KEYS)}
+            logger.info("Optimal Non-Negative Meta-Weights: %s",
+                        {k: round(v, 4) for k, v in self.weights.items()})
+
+            ens_val_preds = np.sum(val_preds_matrix * normalized_weights, axis=1)
+            self.oof_metrics_["ensemble"] = compute_dust_metrics(y_vl, ens_val_preds, pollutant=self.pollutant)
+            logger.info("  ⭐ VAL ENSEMBLE  MAE: %.3f µg/m³, RMSE: %.3f, R2: %.4f",
+                        self.oof_metrics_["ensemble"]["mae"],
+                        self.oof_metrics_["ensemble"]["rmse"],
+                        self.oof_metrics_["ensemble"]["r2"])
+
+            self.oof_predictions_ = pd.DataFrame(
+                val_preds_matrix,
+                columns=[f"oof_{k}" for k in MODEL_KEYS]
+            )
+            self.oof_predictions_["oof_ensemble"] = ens_val_preds
+            self.oof_predictions_[self.target_col] = y_vl
+            if self.target_col != "observed_pm25":
+                self.oof_predictions_["observed_pm25"] = y_vl
+
             self.is_fitted_ = True
             return self
 
@@ -120,11 +190,17 @@ class DustStackingEnsemble(BaseDustModel):
             X_tr, y_tr = X_arr[train_idx], y_arr[train_idx]
             X_vl, y_vl = X_arr[val_idx], y_arr[val_idx]
 
-            for m_idx, m_key in enumerate(MODEL_KEYS):
-                # Temporary fold model
+            logger.info(">>> [Fold %d/%d] Training base models on %d samples (validation: %d samples)...",
+                        fold_idx + 1, effective_cv, len(X_tr), len(X_vl))
+            for m_idx, m_key in enumerate(MODEL_KEYS, 1):
                 fold_model = self._create_base_model_instance(m_key)
+                logger.info("  [Fold %d/%d] [%d/4] Training %s...", fold_idx + 1, effective_cv, m_idx, fold_model.name)
+                t_fstart = time.perf_counter()
                 fold_model.fit(X_tr, y_tr, eval_set=(X_vl, y_vl), feature_names=self.feature_names_)
-                oof_matrix[val_idx, m_idx] = fold_model.predict(X_vl)
+                t_felapsed = time.perf_counter() - t_fstart
+                oof_matrix[val_idx, m_idx - 1] = fold_model.predict(X_vl)
+                logger.info("  ✓ [Fold %d/%d] [%d/4] %s completed in %.1fs",
+                            fold_idx + 1, effective_cv, m_idx, fold_model.name, t_felapsed)
 
         # Store OOF DataFrame
         self.oof_predictions_ = pd.DataFrame(
@@ -191,8 +267,11 @@ class DustStackingEnsemble(BaseDustModel):
         # Step 3: Full Base Model Training on 100% of Data
         # ----------------------------------------------------------------------
         logger.info("Training Quartet Base Learners on 100%% of training dataset...")
-        for m_key, m in self.base_models.items():
+        for m_idx, (m_key, m) in enumerate(self.base_models.items(), 1):
+            logger.info("  [100%% Fit %d/4] Training %s on %d samples...", m_idx, m.name, len(X_arr))
+            t_mstart = time.perf_counter()
             m.fit(X_arr, y_arr, eval_set=eval_set, feature_names=self.feature_names_)
+            logger.info("  ✓ [100%% Fit %d/4] %s completed in %.1fs", m_idx, m.name, time.perf_counter() - t_mstart)
 
         self.is_fitted_ = True
         return self
