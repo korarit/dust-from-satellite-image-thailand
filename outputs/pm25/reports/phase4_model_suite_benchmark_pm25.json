@@ -3,10 +3,10 @@
     "resolution_km": 2.0,
     "metrics": {
       "ensemble": {
-        "mae": 0.246,
-        "rmse": 0.383,
-        "mape": 0.76,
-        "r2": 0.9965,
+        "mae": 0.238,
+        "rmse": 0.379,
+        "mape": 0.73,
+        "r2": 0.9966,
         "pearson_r": 0.9996,
         "aqi_acc": 100.0,
         "count": 6
@@ -48,59 +48,59 @@
         "count": 6
       },
       "weights": {
-        "lightgbm": 7.919394537105869e-16,
-        "catboost": 0.0,
-        "xgboost": 0.0,
-        "random_forest": 2.0534561214435724e-15,
-        "extra_trees": 0.9999999999999972,
-        "figs": 0.0,
-        "nystroem": 0.0
+        "lightgbm": 2.400702369825646e-16,
+        "catboost": 2.209849958988036e-16,
+        "xgboost": 8.842349964248871e-18,
+        "extra_trees": 0.9565784509660029,
+        "figs": 0.04342154903399648,
+        "nystroem": 4.966999798074265e-17,
+        "random_forest": 2.594367306215277e-16
       }
     },
     "weights": {
-      "lightgbm": 7.919394537105869e-16,
-      "catboost": 0.0,
-      "xgboost": 0.0,
-      "random_forest": 2.0534561214435724e-15,
-      "extra_trees": 0.9999999999999972,
-      "figs": 0.0,
-      "nystroem": 0.0
+      "lightgbm": 2.400702369825646e-16,
+      "catboost": 2.209849958988036e-16,
+      "xgboost": 8.842349964248871e-18,
+      "extra_trees": 0.9565784509660029,
+      "figs": 0.04342154903399648,
+      "nystroem": 4.966999798074265e-17,
+      "random_forest": 2.594367306215277e-16
     },
     "feature_attribution": [
+      {
+        "feature": "btd_15_13",
+        "lightgbm_importance": 0.30735072569274774,
+        "catboost_importance": 0.2595315237002999,
+        "xgboost_importance": 0.6437564704563338,
+        "extra_trees_importance": 0.16821002378958155,
+        "figs_importance": 0.9270091375762891,
+        "nystroem_importance": 0.13675644993782043,
+        "random_forest_importance": 0.059278372141044464,
+        "ensemble_importance": 0.20115825671582413,
+        "rank": 1
+      },
       {
         "feature": "elevation_m",
         "lightgbm_importance": 0.0,
         "catboost_importance": 0.02787529568043591,
         "xgboost_importance": 0.0,
-        "random_forest_importance": 0.18779831464471894,
         "extra_trees_importance": 0.20578287293640418,
-        "figs_importance": 0.02378331551947748,
+        "figs_importance": 0.023875331773603507,
         "nystroem_importance": 0.13675644993782043,
-        "ensemble_importance": 0.205782872936404,
-        "rank": 1
+        "random_forest_importance": 0.18779831464471894,
+        "ensemble_importance": 0.19788416571814976,
+        "rank": 2
       },
       {
         "feature": "bt_b13",
         "lightgbm_importance": 0.09495514537846522,
         "catboost_importance": 0.015410037922482758,
         "xgboost_importance": 0.0,
-        "random_forest_importance": 0.2533360949590281,
         "extra_trees_importance": 0.1802254139752945,
-        "figs_importance": 0.000412662699387963,
+        "figs_importance": 0.0,
         "nystroem_importance": 0.13675644993782043,
-        "ensemble_importance": 0.1802254139752946,
-        "rank": 2
-      },
-      {
-        "feature": "btd_15_13",
-        "lightgbm_importance": 0.30735072569274774,
-        "catboost_importance": 0.2595315237002999,
-        "xgboost_importance": 0.6437564704563338,
-        "random_forest_importance": 0.059278372141044464,
-        "extra_trees_importance": 0.16821002378958155,
-        "figs_importance": 0.9269780068753846,
-        "nystroem_importance": 0.13675644993782043,
-        "ensemble_importance": 0.16821002378958144,
+        "random_forest_importance": 0.2533360949590281,
+        "ensemble_importance": 0.17239974732519392,
         "rank": 3
       },
       {
@@ -108,11 +108,11 @@
         "lightgbm_importance": 0.0,
         "catboost_importance": 0.6002594286551972,
         "xgboost_importance": 0.0,
-        "random_forest_importance": 0.18282351382949727,
         "extra_trees_importance": 0.15344404067247047,
-        "figs_importance": 0.0,
+        "figs_importance": 0.0004126626993879655,
         "nystroem_importance": 0.13675644993782043,
-        "ensemble_importance": 0.15344404067247044,
+        "random_forest_importance": 0.18282351382949727,
+        "ensemble_importance": 0.1467991811900723,
         "rank": 4
       },
       {
@@ -120,11 +120,11 @@
         "lightgbm_importance": 0.5960099368612196,
         "catboost_importance": 0.06558928804413451,
         "xgboost_importance": 0.3562435295436663,
-        "random_forest_importance": 0.16822408558340085,
         "extra_trees_importance": 0.14492791917164644,
         "figs_importance": 0.0,
         "nystroem_importance": 0.13675644993782043,
-        "ensemble_importance": 0.14492791917164685,
+        "random_forest_importance": 0.16822408558340085,
+        "ensemble_importance": 0.13863492442293981,
         "rank": 5
       },
       {
@@ -132,11 +132,11 @@
         "lightgbm_importance": 0.0,
         "catboost_importance": 0.011597467721918036,
         "xgboost_importance": 0.0,
-        "random_forest_importance": 0.09243089634492918,
         "extra_trees_importance": 0.11414672819690443,
         "figs_importance": 0.0,
         "nystroem_importance": 0.1134553775191307,
-        "ensemble_importance": 0.1141467281969043,
+        "random_forest_importance": 0.09243089634492918,
+        "ensemble_importance": 0.1091903004414322,
         "rank": 6
       },
       {
@@ -144,11 +144,11 @@
         "lightgbm_importance": 0.0,
         "catboost_importance": 0.014514082818379204,
         "xgboost_importance": 0.0,
-        "random_forest_importance": 0.04491126179614322,
         "extra_trees_importance": 0.02147291726287487,
-        "figs_importance": 0.03937047136751898,
+        "figs_importance": 0.04028403655007434,
         "nystroem_importance": 0.11300255358219147,
-        "ensemble_importance": 0.021472917262874903,
+        "random_forest_importance": 0.04491126179614322,
+        "ensemble_importance": 0.02228972520138836,
         "rank": 7
       },
       {
@@ -156,183 +156,17 @@
         "lightgbm_importance": 0.0016841920675673967,
         "catboost_importance": 0.005222875457152557,
         "xgboost_importance": 0.0,
-        "random_forest_importance": 0.01119746070123796,
         "extra_trees_importance": 0.011790083994823569,
-        "figs_importance": 0.009455543538231068,
+        "figs_importance": 0.008418831400645081,
         "nystroem_importance": 0.08975990861654282,
-        "ensemble_importance": 0.01179008399482356,
+        "random_forest_importance": 0.01119746070123796,
+        "ensemble_importance": 0.011643698984999461,
         "rank": 8
       }
     ]
   },
   "EXP-3KM": {
     "resolution_km": 3.0,
-    "metrics": {
-      "ensemble": {
-        "mae": 0.246,
-        "rmse": 0.383,
-        "mape": 0.76,
-        "r2": 0.9965,
-        "pearson_r": 0.9996,
-        "aqi_acc": 100.0,
-        "count": 6
-      },
-      "lightgbm": {
-        "mae": 4.459,
-        "rmse": 5.866,
-        "mape": 12.83,
-        "r2": 0.1723,
-        "pearson_r": 0.8971,
-        "aqi_acc": 66.67,
-        "count": 6
-      },
-      "catboost": {
-        "mae": 5.118,
-        "rmse": 6.207,
-        "mape": 14.03,
-        "r2": 0.0735,
-        "pearson_r": 0.8968,
-        "aqi_acc": 66.67,
-        "count": 6
-      },
-      "xgboost": {
-        "mae": 2.327,
-        "rmse": 3.217,
-        "mape": 6.94,
-        "r2": 0.7511,
-        "pearson_r": 0.9911,
-        "aqi_acc": 100.0,
-        "count": 6
-      },
-      "random_forest": {
-        "mae": 0.822,
-        "rmse": 1.055,
-        "mape": 2.17,
-        "r2": 0.9732,
-        "pearson_r": 0.9872,
-        "aqi_acc": 100.0,
-        "count": 6
-      },
-      "weights": {
-        "lightgbm": 7.919394537105869e-16,
-        "catboost": 0.0,
-        "xgboost": 0.0,
-        "random_forest": 2.0534561214435724e-15,
-        "extra_trees": 0.9999999999999972,
-        "figs": 0.0,
-        "nystroem": 0.0
-      }
-    },
-    "weights": {
-      "lightgbm": 7.919394537105869e-16,
-      "catboost": 0.0,
-      "xgboost": 0.0,
-      "random_forest": 2.0534561214435724e-15,
-      "extra_trees": 0.9999999999999972,
-      "figs": 0.0,
-      "nystroem": 0.0
-    },
-    "feature_attribution": [
-      {
-        "feature": "elevation_m",
-        "lightgbm_importance": 0.0,
-        "catboost_importance": 0.02787529568043591,
-        "xgboost_importance": 0.0,
-        "random_forest_importance": 0.18779831464471894,
-        "extra_trees_importance": 0.20578287293640418,
-        "figs_importance": 0.0002380113105361386,
-        "nystroem_importance": 0.13675644993782043,
-        "ensemble_importance": 0.205782872936404,
-        "rank": 1
-      },
-      {
-        "feature": "bt_b13",
-        "lightgbm_importance": 0.09495514537846522,
-        "catboost_importance": 0.015410037922482758,
-        "xgboost_importance": 0.0,
-        "random_forest_importance": 0.2533360949590281,
-        "extra_trees_importance": 0.1802254139752945,
-        "figs_importance": 0.9267399955648483,
-        "nystroem_importance": 0.13675644993782043,
-        "ensemble_importance": 0.1802254139752946,
-        "rank": 2
-      },
-      {
-        "feature": "btd_15_13",
-        "lightgbm_importance": 0.30735072569274774,
-        "catboost_importance": 0.2595315237002999,
-        "xgboost_importance": 0.6437564704563338,
-        "random_forest_importance": 0.059278372141044464,
-        "extra_trees_importance": 0.16821002378958155,
-        "figs_importance": 0.023783315519477478,
-        "nystroem_importance": 0.13675644993782043,
-        "ensemble_importance": 0.16821002378958144,
-        "rank": 3
-      },
-      {
-        "feature": "bt_b15",
-        "lightgbm_importance": 0.0,
-        "catboost_importance": 0.6002594286551972,
-        "xgboost_importance": 0.0,
-        "random_forest_importance": 0.18282351382949727,
-        "extra_trees_importance": 0.15344404067247047,
-        "figs_importance": 0.00041266269938796616,
-        "nystroem_importance": 0.13675644993782043,
-        "ensemble_importance": 0.15344404067247044,
-        "rank": 4
-      },
-      {
-        "feature": "pressure_grad_mag",
-        "lightgbm_importance": 0.5960099368612196,
-        "catboost_importance": 0.06558928804413451,
-        "xgboost_importance": 0.3562435295436663,
-        "random_forest_importance": 0.16822408558340085,
-        "extra_trees_importance": 0.14492791917164644,
-        "figs_importance": 0.0,
-        "nystroem_importance": 0.13675644993782043,
-        "ensemble_importance": 0.14492791917164685,
-        "rank": 5
-      },
-      {
-        "feature": "humidity_mean_surround",
-        "lightgbm_importance": 0.0,
-        "catboost_importance": 0.011597467721918036,
-        "xgboost_importance": 0.0,
-        "random_forest_importance": 0.09243089634492918,
-        "extra_trees_importance": 0.11414672819690443,
-        "figs_importance": 0.0005504475253525056,
-        "nystroem_importance": 0.1134553775191307,
-        "ensemble_importance": 0.1141467281969043,
-        "rank": 6
-      },
-      {
-        "feature": "p_south",
-        "lightgbm_importance": 0.0,
-        "catboost_importance": 0.014514082818379204,
-        "xgboost_importance": 0.0,
-        "random_forest_importance": 0.04491126179614322,
-        "extra_trees_importance": 0.02147291726287487,
-        "figs_importance": 0.03948541484181117,
-        "nystroem_importance": 0.11300255358219147,
-        "ensemble_importance": 0.021472917262874903,
-        "rank": 7
-      },
-      {
-        "feature": "p_north",
-        "lightgbm_importance": 0.0016841920675673967,
-        "catboost_importance": 0.005222875457152557,
-        "xgboost_importance": 0.0,
-        "random_forest_importance": 0.01119746070123796,
-        "extra_trees_importance": 0.011790083994823569,
-        "figs_importance": 0.00879015253858636,
-        "nystroem_importance": 0.08975990861654282,
-        "ensemble_importance": 0.01179008399482356,
-        "rank": 8
-      }
-    ]
-  },
-  "EXP-1KM": {
-    "resolution_km": 1.0,
     "metrics": {
       "ensemble": {
         "mae": 0.239,
@@ -380,23 +214,23 @@
         "count": 6
       },
       "weights": {
-        "lightgbm": 5.229988889650794e-16,
-        "catboost": 5.107096812435764e-16,
-        "xgboost": 1.7557449855554073e-17,
-        "random_forest": 8.148180915941244e-17,
-        "extra_trees": 0.9128715712392746,
-        "figs": 0.08712842876072414,
-        "nystroem": 1.0037852838594002e-18
+        "lightgbm": 7.232933304593052e-17,
+        "catboost": 1.8078262600530286e-16,
+        "xgboost": 1.4269392418918437e-16,
+        "extra_trees": 0.9128715674988529,
+        "figs": 0.08712843250114642,
+        "nystroem": 3.0553922593640143e-16,
+        "random_forest": 7.320139556042712e-19
       }
     },
     "weights": {
-      "lightgbm": 5.229988889650794e-16,
-      "catboost": 5.107096812435764e-16,
-      "xgboost": 1.7557449855554073e-17,
-      "random_forest": 8.148180915941244e-17,
-      "extra_trees": 0.9128715712392746,
-      "figs": 0.08712842876072414,
-      "nystroem": 1.0037852838594002e-18
+      "lightgbm": 7.232933304593052e-17,
+      "catboost": 1.8078262600530286e-16,
+      "xgboost": 1.4269392418918437e-16,
+      "extra_trees": 0.9128715674988529,
+      "figs": 0.08712843250114642,
+      "nystroem": 3.0553922593640143e-16,
+      "random_forest": 7.320139556042712e-19
     },
     "feature_attribution": [
       {
@@ -404,11 +238,11 @@
         "lightgbm_importance": 0.30735072569274774,
         "catboost_importance": 0.2595315237002999,
         "xgboost_importance": 0.6437564704563338,
-        "random_forest_importance": 0.059278372141044464,
         "extra_trees_importance": 0.16821002378958155,
         "figs_importance": 0.9267399955648484,
         "nystroem_importance": 0.13675644993782043,
-        "ensemble_importance": 0.23429954839827713,
+        "random_forest_importance": 0.059278372141044464,
+        "ensemble_importance": 0.2342995512354995,
         "rank": 1
       },
       {
@@ -416,11 +250,11 @@
         "lightgbm_importance": 0.0,
         "catboost_importance": 0.02787529568043591,
         "xgboost_importance": 0.0,
-        "random_forest_importance": 0.18779831464471894,
         "extra_trees_importance": 0.20578287293640418,
-        "figs_importance": 0.02378331551947748,
+        "figs_importance": 9.201625412602935e-05,
         "nystroem_importance": 0.13675644993782043,
-        "ensemble_importance": 0.18992553746351998,
+        "random_forest_importance": 0.18779831464471894,
+        "ensemble_importance": 0.18786135101385923,
         "rank": 2
       },
       {
@@ -428,11 +262,11 @@
         "lightgbm_importance": 0.09495514537846522,
         "catboost_importance": 0.015410037922482758,
         "xgboost_importance": 0.0,
-        "random_forest_importance": 0.2533360949590281,
         "extra_trees_importance": 0.1802254139752945,
-        "figs_importance": 9.201625412602935e-05,
+        "figs_importance": 0.0,
         "nystroem_importance": 0.13675644993782043,
-        "ensemble_importance": 0.1645306740645184,
+        "random_forest_importance": 0.2533360949590281,
+        "ensemble_importance": 0.16452265615875683,
         "rank": 3
       },
       {
@@ -440,11 +274,11 @@
         "lightgbm_importance": 0.0,
         "catboost_importance": 0.6002594286551972,
         "xgboost_importance": 0.0,
-        "random_forest_importance": 0.18282351382949727,
         "extra_trees_importance": 0.15344404067247047,
-        "figs_importance": 0.00041266269938796307,
+        "figs_importance": 0.0004126626993879662,
         "nystroem_importance": 0.13675644993782043,
-        "ensemble_importance": 0.14011065715858745,
+        "random_forest_importance": 0.18282351382949727,
+        "ensemble_importance": 0.14011065658618538,
         "rank": 4
       },
       {
@@ -452,11 +286,11 @@
         "lightgbm_importance": 0.5960099368612196,
         "catboost_importance": 0.06558928804413451,
         "xgboost_importance": 0.3562435295436663,
-        "random_forest_importance": 0.16822408558340085,
         "extra_trees_importance": 0.14492791917164644,
-        "figs_importance": 0.00023801131053613863,
+        "figs_importance": 0.02402132683001362,
         "nystroem_importance": 0.13675644993782043,
-        "ensemble_importance": 0.13232131484217416,
+        "random_forest_importance": 0.16822408558340085,
+        "ensemble_importance": 0.1343935173018649,
         "rank": 5
       },
       {
@@ -464,11 +298,11 @@
         "lightgbm_importance": 0.0,
         "catboost_importance": 0.011597467721918036,
         "xgboost_importance": 0.0,
-        "random_forest_importance": 0.09243089634492918,
         "extra_trees_importance": 0.11414672819690443,
-        "figs_importance": 0.0005504475253525057,
+        "figs_importance": 0.0,
         "nystroem_importance": 0.1134553775191307,
-        "ensemble_importance": 0.10424926274892979,
+        "random_forest_importance": 0.09243089634492918,
+        "ensemble_importance": 0.1042013026939737,
         "rank": 6
       },
       {
@@ -476,11 +310,11 @@
         "lightgbm_importance": 0.0,
         "catboost_importance": 0.014514082818379204,
         "xgboost_importance": 0.0,
-        "random_forest_importance": 0.04491126179614322,
         "extra_trees_importance": 0.02147291726287487,
-        "figs_importance": 0.03998525016923001,
+        "figs_importance": 0.040934550258832796,
         "nystroem_importance": 0.11300255358219147,
-        "ensemble_importance": 0.02308586774170103,
+        "random_forest_importance": 0.04491126179614322,
+        "ensemble_importance": 0.023168578839725295,
         "rank": 7
       },
       {
@@ -488,11 +322,177 @@
         "lightgbm_importance": 0.0016841920675673967,
         "catboost_importance": 0.005222875457152557,
         "xgboost_importance": 0.0,
-        "random_forest_importance": 0.01119746070123796,
         "extra_trees_importance": 0.011790083994823569,
-        "figs_importance": 0.0081983009570415,
+        "figs_importance": 0.007799448392791221,
         "nystroem_importance": 0.08975990861654282,
-        "ensemble_importance": 0.011477137582292189,
+        "random_forest_importance": 0.01119746070123796,
+        "ensemble_importance": 0.011442386170135243,
+        "rank": 8
+      }
+    ]
+  },
+  "EXP-1KM": {
+    "resolution_km": 1.0,
+    "metrics": {
+      "ensemble": {
+        "mae": 0.23,
+        "rmse": 0.373,
+        "mape": 0.72,
+        "r2": 0.9967,
+        "pearson_r": 0.9995,
+        "aqi_acc": 100.0,
+        "count": 6
+      },
+      "lightgbm": {
+        "mae": 4.459,
+        "rmse": 5.866,
+        "mape": 12.83,
+        "r2": 0.1723,
+        "pearson_r": 0.8971,
+        "aqi_acc": 66.67,
+        "count": 6
+      },
+      "catboost": {
+        "mae": 5.118,
+        "rmse": 6.207,
+        "mape": 14.03,
+        "r2": 0.0735,
+        "pearson_r": 0.8968,
+        "aqi_acc": 66.67,
+        "count": 6
+      },
+      "xgboost": {
+        "mae": 2.327,
+        "rmse": 3.217,
+        "mape": 6.94,
+        "r2": 0.7511,
+        "pearson_r": 0.9911,
+        "aqi_acc": 100.0,
+        "count": 6
+      },
+      "random_forest": {
+        "mae": 0.822,
+        "rmse": 1.055,
+        "mape": 2.17,
+        "r2": 0.9732,
+        "pearson_r": 0.9872,
+        "aqi_acc": 100.0,
+        "count": 6
+      },
+      "weights": {
+        "lightgbm": 1.2194475410870997e-16,
+        "catboost": 1.113744396032025e-16,
+        "xgboost": 1.8568263934145377e-16,
+        "extra_trees": 0.9129719814795736,
+        "figs": 0.08702801852042602,
+        "nystroem": 0.0,
+        "random_forest": 0.0
+      }
+    },
+    "weights": {
+      "lightgbm": 1.2194475410870997e-16,
+      "catboost": 1.113744396032025e-16,
+      "xgboost": 1.8568263934145377e-16,
+      "extra_trees": 0.9129719814795736,
+      "figs": 0.08702801852042602,
+      "nystroem": 0.0,
+      "random_forest": 0.0
+    },
+    "feature_attribution": [
+      {
+        "feature": "bt_b15",
+        "lightgbm_importance": 0.0,
+        "catboost_importance": 0.6002594286551972,
+        "xgboost_importance": 0.0,
+        "extra_trees_importance": 0.15344404067247047,
+        "figs_importance": 0.9271526582642364,
+        "nystroem_importance": 0.13675644993782043,
+        "random_forest_importance": 0.18282351382949727,
+        "ensemble_importance": 0.2207783685736599,
+        "rank": 1
+      },
+      {
+        "feature": "elevation_m",
+        "lightgbm_importance": 0.0,
+        "catboost_importance": 0.02787529568043591,
+        "xgboost_importance": 0.0,
+        "extra_trees_importance": 0.20578287293640418,
+        "figs_importance": 0.00026914201144072927,
+        "nystroem_importance": 0.13675644993782043,
+        "random_forest_importance": 0.18779831464471894,
+        "ensemble_importance": 0.18789742015526456,
+        "rank": 2
+      },
+      {
+        "feature": "bt_b13",
+        "lightgbm_importance": 0.09495514537846522,
+        "catboost_importance": 0.015410037922482758,
+        "xgboost_importance": 0.0,
+        "extra_trees_importance": 0.1802254139752945,
+        "figs_importance": 0.0,
+        "nystroem_importance": 0.13675644993782043,
+        "random_forest_importance": 0.2533360949590281,
+        "ensemble_importance": 0.16454075331000106,
+        "rank": 3
+      },
+      {
+        "feature": "btd_15_13",
+        "lightgbm_importance": 0.30735072569274774,
+        "catboost_importance": 0.2595315237002999,
+        "xgboost_importance": 0.6437564704563338,
+        "extra_trees_importance": 0.16821002378958155,
+        "figs_importance": 0.0,
+        "nystroem_importance": 0.13675644993782043,
+        "random_forest_importance": 0.059278372141044464,
+        "ensemble_importance": 0.15357103872390068,
+        "rank": 4
+      },
+      {
+        "feature": "pressure_grad_mag",
+        "lightgbm_importance": 0.5960099368612196,
+        "catboost_importance": 0.06558928804413451,
+        "xgboost_importance": 0.3562435295436663,
+        "extra_trees_importance": 0.14492791917164644,
+        "figs_importance": 0.023783315519477478,
+        "nystroem_importance": 0.13675644993782043,
+        "random_forest_importance": 0.16822408558340085,
+        "ensemble_importance": 0.1343849443613559,
+        "rank": 5
+      },
+      {
+        "feature": "humidity_mean_surround",
+        "lightgbm_importance": 0.0,
+        "catboost_importance": 0.011597467721918036,
+        "xgboost_importance": 0.0,
+        "extra_trees_importance": 0.11414672819690443,
+        "figs_importance": 0.0,
+        "nystroem_importance": 0.1134553775191307,
+        "random_forest_importance": 0.09243089634492918,
+        "ensemble_importance": 0.10421276462133815,
+        "rank": 6
+      },
+      {
+        "feature": "p_south",
+        "lightgbm_importance": 0.0,
+        "catboost_importance": 0.014514082818379204,
+        "xgboost_importance": 0.0,
+        "extra_trees_importance": 0.02147291726287487,
+        "figs_importance": 0.040541812746745,
+        "nystroem_importance": 0.11300255358219147,
+        "random_forest_importance": 0.04491126179614322,
+        "ensemble_importance": 0.023132445452209178,
+        "rank": 7
+      },
+      {
+        "feature": "p_north",
+        "lightgbm_importance": 0.0016841920675673967,
+        "catboost_importance": 0.005222875457152557,
+        "xgboost_importance": 0.0,
+        "extra_trees_importance": 0.011790083994823569,
+        "figs_importance": 0.008253071458100444,
+        "nystroem_importance": 0.08975990861654282,
+        "random_forest_importance": 0.01119746070123796,
+        "ensemble_importance": 0.011482264802270646,
         "rank": 8
       }
     ]
@@ -501,10 +501,10 @@
     "resolution_km": 0.5,
     "metrics": {
       "ensemble": {
-        "mae": 0.246,
-        "rmse": 0.383,
-        "mape": 0.76,
-        "r2": 0.9965,
+        "mae": 0.238,
+        "rmse": 0.379,
+        "mape": 0.73,
+        "r2": 0.9966,
         "pearson_r": 0.9996,
         "aqi_acc": 100.0,
         "count": 6
@@ -546,23 +546,23 @@
         "count": 6
       },
       "weights": {
-        "lightgbm": 6.229951016274204e-16,
-        "catboost": 0.0,
-        "xgboost": 2.397495193832415e-16,
-        "random_forest": 1.22124532708767e-15,
-        "extra_trees": 0.9999999999999979,
-        "figs": 0.0,
-        "nystroem": 0.0
+        "lightgbm": 2.400702369825646e-16,
+        "catboost": 2.209849958988036e-16,
+        "xgboost": 8.842349964248871e-18,
+        "extra_trees": 0.9565784509660029,
+        "figs": 0.04342154903399648,
+        "nystroem": 4.966999798074265e-17,
+        "random_forest": 2.594367306215277e-16
       }
     },
     "weights": {
-      "lightgbm": 6.229951016274204e-16,
-      "catboost": 0.0,
-      "xgboost": 2.397495193832415e-16,
-      "random_forest": 1.22124532708767e-15,
-      "extra_trees": 0.9999999999999979,
-      "figs": 0.0,
-      "nystroem": 0.0
+      "lightgbm": 2.400702369825646e-16,
+      "catboost": 2.209849958988036e-16,
+      "xgboost": 8.842349964248871e-18,
+      "extra_trees": 0.9565784509660029,
+      "figs": 0.04342154903399648,
+      "nystroem": 4.966999798074265e-17,
+      "random_forest": 2.594367306215277e-16
     },
     "feature_attribution": [
       {
@@ -570,59 +570,59 @@
         "lightgbm_importance": 0.0,
         "catboost_importance": 0.02787529568043591,
         "xgboost_importance": 0.0,
-        "random_forest_importance": 0.18779831464471894,
         "extra_trees_importance": 0.20578287293640418,
-        "figs_importance": 3.1130700904590554e-05,
+        "figs_importance": 0.023783315519477478,
         "nystroem_importance": 0.13675644993782043,
-        "ensemble_importance": 0.20578287293640396,
+        "random_forest_importance": 0.18779831464471894,
+        "ensemble_importance": 0.19788017022985932,
         "rank": 1
-      },
-      {
-        "feature": "bt_b13",
-        "lightgbm_importance": 0.09495514537846522,
-        "catboost_importance": 0.015410037922482758,
-        "xgboost_importance": 0.0,
-        "random_forest_importance": 0.2533360949590281,
-        "extra_trees_importance": 0.1802254139752945,
-        "figs_importance": 0.00041266269938796426,
-        "nystroem_importance": 0.13675644993782043,
-        "ensemble_importance": 0.18022541397529449,
-        "rank": 2
-      },
-      {
-        "feature": "btd_15_13",
-        "lightgbm_importance": 0.30735072569274774,
-        "catboost_importance": 0.2595315237002999,
-        "xgboost_importance": 0.6437564704563338,
-        "random_forest_importance": 0.059278372141044464,
-        "extra_trees_importance": 0.16821002378958155,
-        "figs_importance": 0.0,
-        "nystroem_importance": 0.13675644993782043,
-        "ensemble_importance": 0.1682100237895816,
-        "rank": 3
-      },
-      {
-        "feature": "bt_b15",
-        "lightgbm_importance": 0.0,
-        "catboost_importance": 0.6002594286551972,
-        "xgboost_importance": 0.0,
-        "random_forest_importance": 0.18282351382949727,
-        "extra_trees_importance": 0.15344404067247047,
-        "figs_importance": 0.0,
-        "nystroem_importance": 0.13675644993782043,
-        "ensemble_importance": 0.15344404067247036,
-        "rank": 4
       },
       {
         "feature": "pressure_grad_mag",
         "lightgbm_importance": 0.5960099368612196,
         "catboost_importance": 0.06558928804413451,
         "xgboost_importance": 0.3562435295436663,
-        "random_forest_importance": 0.16822408558340085,
         "extra_trees_importance": 0.14492791917164644,
-        "figs_importance": 0.9507613223948621,
+        "figs_importance": 0.9268320118189745,
         "nystroem_importance": 0.13675644993782043,
-        "ensemble_importance": 0.1449279191716468,
+        "random_forest_importance": 0.16822408558340085,
+        "ensemble_importance": 0.178879406070415,
+        "rank": 2
+      },
+      {
+        "feature": "bt_b13",
+        "lightgbm_importance": 0.09495514537846522,
+        "catboost_importance": 0.015410037922482758,
+        "xgboost_importance": 0.0,
+        "extra_trees_importance": 0.1802254139752945,
+        "figs_importance": 0.0004437934002925529,
+        "nystroem_importance": 0.13675644993782043,
+        "random_forest_importance": 0.2533360949590281,
+        "ensemble_importance": 0.1724190175220857,
+        "rank": 3
+      },
+      {
+        "feature": "btd_15_13",
+        "lightgbm_importance": 0.30735072569274774,
+        "catboost_importance": 0.2595315237002999,
+        "xgboost_importance": 0.6437564704563338,
+        "extra_trees_importance": 0.16821002378958155,
+        "figs_importance": 0.0002380113105361394,
+        "nystroem_importance": 0.13675644993782043,
+        "random_forest_importance": 0.059278372141044464,
+        "ensemble_importance": 0.16091641881338364,
+        "rank": 4
+      },
+      {
+        "feature": "bt_b15",
+        "lightgbm_importance": 0.0,
+        "catboost_importance": 0.6002594286551972,
+        "xgboost_importance": 0.0,
+        "extra_trees_importance": 0.15344404067247047,
+        "figs_importance": 0.0,
+        "nystroem_importance": 0.13675644993782043,
+        "random_forest_importance": 0.18282351382949727,
+        "ensemble_importance": 0.14678126273643632,
         "rank": 5
       },
       {
@@ -630,11 +630,11 @@
         "lightgbm_importance": 0.0,
         "catboost_importance": 0.011597467721918036,
         "xgboost_importance": 0.0,
-        "random_forest_importance": 0.09243089634492918,
         "extra_trees_importance": 0.11414672819690443,
         "figs_importance": 0.0,
         "nystroem_importance": 0.1134553775191307,
-        "ensemble_importance": 0.1141467281969043,
+        "random_forest_importance": 0.09243089634492918,
+        "ensemble_importance": 0.1091903004414322,
         "rank": 6
       },
       {
@@ -642,11 +642,11 @@
         "lightgbm_importance": 0.0,
         "catboost_importance": 0.014514082818379204,
         "xgboost_importance": 0.0,
-        "random_forest_importance": 0.04491126179614322,
         "extra_trees_importance": 0.02147291726287487,
-        "figs_importance": 0.03981220102463012,
+        "figs_importance": 0.040504566993677917,
         "nystroem_importance": 0.11300255358219147,
-        "ensemble_importance": 0.02147291726287488,
+        "random_forest_importance": 0.04491126179614322,
+        "ensemble_importance": 0.022299300974858785,
         "rank": 7
       },
       {
@@ -654,11 +654,11 @@
         "lightgbm_importance": 0.0016841920675673967,
         "catboost_importance": 0.005222875457152557,
         "xgboost_importance": 0.0,
-        "random_forest_importance": 0.01119746070123796,
         "extra_trees_importance": 0.011790083994823569,
-        "figs_importance": 0.008982683180215332,
+        "figs_importance": 0.008198300957041499,
         "nystroem_importance": 0.08975990861654282,
-        "ensemble_importance": 0.011790083994823558,
+        "random_forest_importance": 0.01119746070123796,
+        "ensemble_importance": 0.011634123211529039,
         "rank": 8
       }
     ]
@@ -671,9 +671,9 @@
       "catboost_mae": 5.118,
       "xgboost_mae": 2.327,
       "rf_mae": 0.822,
-      "ensemble_mae": 0.246,
-      "ensemble_rmse": 0.383,
-      "ensemble_r2": 0.9965,
+      "ensemble_mae": 0.238,
+      "ensemble_rmse": 0.379,
+      "ensemble_r2": 0.9966,
       "weight_lgbm": 0.0,
       "weight_catboost": 0.0,
       "weight_xgboost": 0.0,
@@ -682,21 +682,6 @@
     {
       "experiment": "EXP-3KM",
       "resolution_km": 3.0,
-      "lgbm_mae": 4.459,
-      "catboost_mae": 5.118,
-      "xgboost_mae": 2.327,
-      "rf_mae": 0.822,
-      "ensemble_mae": 0.246,
-      "ensemble_rmse": 0.383,
-      "ensemble_r2": 0.9965,
-      "weight_lgbm": 0.0,
-      "weight_catboost": 0.0,
-      "weight_xgboost": 0.0,
-      "weight_rf": 0.0
-    },
-    {
-      "experiment": "EXP-1KM",
-      "resolution_km": 1.0,
       "lgbm_mae": 4.459,
       "catboost_mae": 5.118,
       "xgboost_mae": 2.327,
@@ -710,15 +695,30 @@
       "weight_rf": 0.0
     },
     {
+      "experiment": "EXP-1KM",
+      "resolution_km": 1.0,
+      "lgbm_mae": 4.459,
+      "catboost_mae": 5.118,
+      "xgboost_mae": 2.327,
+      "rf_mae": 0.822,
+      "ensemble_mae": 0.23,
+      "ensemble_rmse": 0.373,
+      "ensemble_r2": 0.9967,
+      "weight_lgbm": 0.0,
+      "weight_catboost": 0.0,
+      "weight_xgboost": 0.0,
+      "weight_rf": 0.0
+    },
+    {
       "experiment": "EXP-500M",
       "resolution_km": 0.5,
       "lgbm_mae": 4.459,
       "catboost_mae": 5.118,
       "xgboost_mae": 2.327,
       "rf_mae": 0.822,
-      "ensemble_mae": 0.246,
-      "ensemble_rmse": 0.383,
-      "ensemble_r2": 0.9965,
+      "ensemble_mae": 0.238,
+      "ensemble_rmse": 0.379,
+      "ensemble_r2": 0.9966,
       "weight_lgbm": 0.0,
       "weight_catboost": 0.0,
       "weight_xgboost": 0.0,

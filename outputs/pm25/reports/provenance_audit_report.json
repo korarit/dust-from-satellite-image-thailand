@@ -1,5 +1,5 @@
 {
-  "audit_timestamp_utc": "2026-10-14T20:08:24.032995+00:00",
+  "audit_timestamp_utc": "2026-10-14T20:39:49.249592+00:00",
   "overall_decision": "CERTIFIED_REAL_OBSERVATIONS_PASS",
   "is_synthetic": false,
   "gate_version": "1.0-strict-zero-mock",

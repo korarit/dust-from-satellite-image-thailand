@@ -260,10 +260,10 @@ def test_dust_stacking_ensemble(deterministic_training_data, tmp_path):
             "lightgbm": {"n_estimators": 20, "learning_rate": 0.1, "min_child_samples": 2},
             "catboost": {"iterations": 20, "learning_rate": 0.1, "depth": 4},
             "xgboost": {"n_estimators": 20, "learning_rate": 0.1, "max_depth": 3},
-            "random_forest": {"n_estimators": 20, "max_depth": 5, "min_samples_split": 2},
             "extra_trees": {"n_estimators": 20, "max_depth": 5, "min_samples_split": 2},
             "figs": {"max_rules": 10, "max_trees": 3, "random_state": 42},
             "nystroem": {"n_components": 20, "alpha": 1.0, "random_state": 42},
+            "random_forest": {"n_estimators": 20, "max_depth": 5, "min_samples_split": 2},
         },
         "features": {
             "monotonic_constraints": {"pressure_grad_mag": -1, "btd_15_13": -1}

@@ -25,17 +25,17 @@ flowchart TD
         LGB["1. LightGBM<br>• Leaf-wise Tree Growth<br>• Tweedie Loss (p=1.5)<br>• Fast Streaming Inference"]
         CAT["2. CatBoost<br>• Oblivious Symmetric Trees<br>• Tweedie Deviance Loss<br>• Directional Feature Interactions"]
         XGB["3. XGBoost<br>• Depth-wise Tree Growth<br>• reg:tweedie Loss<br>• Monotonic Physics Ready"]
-        RF["4. Random Forest<br>• Bagging (300 Trees, sqrt features)<br>• Random Subspace Sampling<br>• Variance & Noise Reduction"]
-        ET["5. Extra Trees<br>• Extreme Random Cut-points<br>• Outlier Noise Resilience<br>• Ultra-Fast Parallel Training"]
-        FIGS["6. FIGS (UC Berkeley)<br>• Greedy Tree Sums<br>• Explicit Split Rules<br>• Ultra-Lightweight (<50KB)"]
-        NYS["7. Nystroem Ridge<br>• RBF Kernel Approximation<br>• Continuous Non-linear Curve<br>• Ultra-Fast Closed-Form (<1s)"]
+        ET["4. Extra Trees<br>• Extreme Random Cut-points<br>• Outlier Noise Resilience<br>• Ultra-Fast Parallel Training"]
+        FIGS["5. FIGS (UC Berkeley)<br>• Greedy Tree Sums<br>• Explicit Split Rules<br>• Ultra-Lightweight (<50KB)"]
+        NYS["6. Nystroem Ridge<br>• RBF Kernel Approximation<br>• Continuous Non-linear Curve<br>• Ultra-Fast Closed-Form (<1s)"]
+        RF["7. Random Forest<br>• Bagging (300 Trees, sqrt features)<br>• Random Subspace Sampling<br>• Variance & Noise Reduction"]
     end
 
     subgraph DualArchitectures ["3. Dual Model Suites & Stacking Optimization"]
         M1["Model 1: Pure Satellite Suite<br>(Maritime / Sea Grid Ready, No Ground Stations)"]
         M2["Model 2: Full Multimodal Suite<br>(Satellite + Topography + Weather Telemetry)"]
         NNLS["Non-Negative Least Squares (NNLS)<br>min ||y - S w||^2, s.t. w_i >= 0, Σ w_i = 1"]
-        Weights["Optimal Physical Weights:<br>w_lgb, w_cat, w_xgb, w_rf, w_et, w_figs, w_nys"]
+        Weights["Optimal Physical Weights:<br>w_lgb, w_cat, w_xgb, w_et, w_figs, w_nys, w_rf"]
     end
 
     subgraph Evaluation ["4. Spatial-Temporal Generalization & Nowcasting"]
@@ -43,8 +43,8 @@ flowchart TD
         Nowcast["Multi-Resolution Engine (500m, 1km, 2km, 3km with distinct scale features)"]
     end
 
-    InputMatrix --> LGB & CAT & XGB & RF & ET & FIGS & NYS
-    LGB & CAT & XGB & RF & ET & FIGS & NYS --> M1 & M2
+    InputMatrix --> LGB & CAT & XGB & ET & FIGS & NYS & RF
+    LGB & CAT & XGB & ET & FIGS & NYS & RF --> M1 & M2
     M1 & M2 --> NNLS --> Weights
     Weights --> OOT --> Nowcast
 ```
@@ -89,17 +89,7 @@ flowchart TD
 
 ---
 
-### 2.4 ขุนพลที่ 4: Random Forest (Bootstrap Aggregation / Bagging)
-พัฒนาโดย Leo Breiman (2001) ทำหน้าที่เป็นแกนนำด้าน **การลดความแปรปรวนและการต้านทานสัญญาณรบกวน (Variance Reduction & Noise Damping)**:
-- **หลักการ Bagging**: สุ่มสร้างต้นไม้ตัดสินใจอิสระจำนวน 300 ต้น (`n_estimators = 300`) โดยจำกัดการสุ่มกลุ่มฟีเจอร์ย่อยด้วย `max_features = 'sqrt'` (ประมาณ 7 ฟีเจอร์ต่อการแตกกิ่ง) จากตัวอย่างข้อมูลที่สุ่มแบบคืนที่ (Bootstrap Samples)
-- **การลดค่าความแปรปรวน (Variance Reduction)**:
-  $$\text{Var}(\bar{f}) = \rho \sigma^2 + \frac{1 - \rho}{B} \sigma^2$$
-  เมื่อจำนวนต้นไม้ $B = 300$ ค่าความแปรปรวนของส่วนสุ่มจะลดลงเหลือเพียง $\rho \sigma^2$
-- **บทบาทในระบบ**: ทำหน้าที่เป็นตัวหน่วง (Damper) ถ่วงดุลไม่ให้โมเดลกลุ่ม Boosting ตอบสนองต่อสัญญาณรบกวนที่ผิดพลาดของเซนเซอร์ภาคพื้นดินรุนแรงเกินไป
-
----
-
-### 2.5 ขุนพลที่ 5: Extra Trees (Extremely Randomized Trees)
+### 2.4 ขุนพลที่ 4: Extra Trees (Extremely Randomized Trees)
 พัฒนาโดย Geurts, Ernst, & Wehenkel (2006) ทำหน้าที่เป็นแกนนำด้าน **การลดความแปรปรวนขั้นสุดยอดและการต้านทานสัญญาณรบกวนดาวเทียม (Extreme Variance Reduction & High Noise Tolerance)**:
 - **การสุ่มเกณฑ์ตัดโหนดแบบสุ่มสมบูรณ์ (Extreme Randomization of Cut-Points)**: ต่างจาก Random Forest ที่ค้นหาจุดตัดที่ดีที่สุด (Optimal Cut-point) ในแต่ละฟีเจอร์ย่อย อัลกอริทึม Extra Trees จะสุ่มจุดตัด $a \in [\min(x), \max(x)]$ อย่างอิสระสำหรับแต่ละฟีเจอร์ แล้วเลือกจุดตัดที่ดีที่สุดจากการสุ่มนั้น
 - **ประโยชน์ในงานพยากรณ์ฝุ่น**:
@@ -109,7 +99,7 @@ flowchart TD
 
 ---
 
-### 2.6 ขุนพลที่ 6: FIGS (Fast Interpretable Greedy-Tree Sums)
+### 2.5 ขุนพลที่ 5: FIGS (Fast Interpretable Greedy-Tree Sums)
 พัฒนาโดย Tan, Singh, & Yu จาก UC Berkeley (2022) ทำหน้าที่เป็นแกนนำด้าน **โครงสร้างกฎการตัดสินใจขนาดจิ๋วและความโปร่งใสสูงสุด (Micro-Rules Structure & Extreme Transparency)**:
 - **หลักการผลรวมต้นไม้แบบละโมบ (Greedy Tree Sums)**: แทนที่จะปลูกต้นไม้ลึกนับร้อยต้น FIGS ปลูกต้นไม้ขนาดเล็กพร้อมกันเพียง 3–5 ต้น โดยจำกัดกฎการตัดแบ่ง (Splits) ทั้งระบบไว้เพียง 15–20 กฎ
 - **การแยกส่วนประกอบแบบบวก (Disentangling Additive Components)**: แต่ละต้นไม้เล็กจะรับหน้าที่อธิบาย Residual เฉพาะมิติ (เช่น ต้นที่ 1 ดูเฉพาะผลต่างหน้าต่างคู่ $BTD_{15-13}$, ต้นที่ 2 ดูความชันความกดอากาศ)
@@ -117,11 +107,21 @@ flowchart TD
 
 ---
 
-### 2.7 ขุนพลที่ 7: Nyström Fast Kernel Ridge Regression
+### 2.6 ขุนพลที่ 6: Nyström Fast Kernel Ridge Regression
 ประยุกต์ทฤษฎี Nyström Sampling สู่การประมาณค่าเคอร์เนลไม่เป็นเส้นตรง (Scikit-Learn Native):
 - **การแก้ปัญหาข้อจำกัด $O(N^2)$ ของ Kernel SVM**: ในชุดข้อมูล 600,000 แถว Kernel Matrix จะมีขนาดใหญ่จนเกิด Out-Of-Memory อัลกอริทึม Nyström จึงสุ่มตัวอย่าง Landmark เพียง 120 จุด แล้วฉายฟังก์ชันเข้าสู่ Infinite-dimensional Hilbert Space
 - **สมการปิด Regularized Ridge**: แก้สมการแบบ Closed-form ลู่เข้าสู่คำตอบในเวลาไม่ถึง 1 วินาทีบน CPU
 - **การจับความสัมพันธ์แบบเส้นโค้งต่อเนื่อง (Continuous Non-linear Curves)**: แตกต่างจาก Tree-based models ที่ตัดแบ่งระนาบเป็นขั้นบันได (Step functions) โมเดลเคอร์เนลจะให้ฟังก์ชันที่ต่อเนื่องและเรียบเนียน ช่วยถ่วงดุลความชันในการทำ Stacking Ensemble
+
+---
+
+### 2.7 ขุนพลที่ 7: Random Forest (Bootstrap Aggregation / Bagging)
+พัฒนาโดย Leo Breiman (2001) ทำหน้าที่เป็นแกนนำด้าน **การลดความแปรปรวนและการต้านทานสัญญาณรบกวน (Variance Reduction & Noise Damping)**:
+- **หลักการ Bagging**: สุ่มสร้างต้นไม้ตัดสินใจอิสระจำนวน 300 ต้น (`n_estimators = 300`) โดยจำกัดการสุ่มกลุ่มฟีเจอร์ย่อยด้วย `max_features = 'sqrt'` (ประมาณ 7 ฟีเจอร์ต่อการแตกกิ่ง) จากตัวอย่างข้อมูลที่สุ่มแบบคืนที่ (Bootstrap Samples)
+- **การลดค่าความแปรปรวน (Variance Reduction)**:
+  $$\text{Var}(\bar{f}) = \rho \sigma^2 + \frac{1 - \rho}{B} \sigma^2$$
+  เมื่อจำนวนต้นไม้ $B = 300$ ค่าความแปรปรวนของส่วนสุ่มจะลดลงเหลือเพียง $\rho \sigma^2$
+- **บทบาทในระบบ**: ทำหน้าที่เป็นตัวหน่วง (Damper) ประจำชุดท้ายสุด ถ่วงดุลไม่ให้โมเดลกลุ่ม Boosting และ Kernel ตอบสนองต่อสัญญาณรบกวนที่ผิดพลาดของเซนเซอร์ภาคพื้นดินรุนแรงเกินไป
 
 ---
 
