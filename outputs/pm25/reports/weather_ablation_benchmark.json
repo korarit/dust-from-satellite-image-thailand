@@ -4,11 +4,11 @@
   "no_weather_features_count": 4,
   "eval_full": {
     "ensemble": {
-      "mae": 0.563,
-      "rmse": 0.797,
-      "mape": 1.46,
-      "r2": 0.9887,
-      "pearson_r": 0.9948,
+      "mae": 0.548,
+      "rmse": 0.787,
+      "mape": 1.43,
+      "r2": 0.989,
+      "pearson_r": 0.9949,
       "aqi_acc": 100.0,
       "count": 40
     },
@@ -58,12 +58,12 @@
       "count": 40
     },
     "figs": {
-      "mae": 1.766,
-      "rmse": 3.273,
-      "mape": 4.45,
-      "r2": 0.809,
-      "pearson_r": 0.9109,
-      "aqi_acc": 80.0,
+      "mae": 1.521,
+      "rmse": 2.614,
+      "mape": 3.87,
+      "r2": 0.8781,
+      "pearson_r": 0.9415,
+      "aqi_acc": 82.5,
       "count": 40
     },
     "nystroem": {
@@ -76,22 +76,22 @@
       "count": 40
     },
     "weights": {
-      "lightgbm": 3.828552351804253e-17,
-      "catboost": 0.003133756992667077,
-      "xgboost": 0.0,
-      "random_forest": 0.0,
-      "extra_trees": 0.8867728857129136,
-      "figs": 0.11009335729441937,
+      "lightgbm": 6.964445190065286e-17,
+      "catboost": 0.0033770599545762214,
+      "xgboost": 8.520348980064851e-17,
+      "random_forest": 2.5558022781298994e-16,
+      "extra_trees": 0.8860647049643737,
+      "figs": 0.11055823508104969,
       "nystroem": 0.0
     }
   },
   "eval_no_weather": {
     "ensemble": {
-      "mae": 0.408,
-      "rmse": 0.559,
-      "mape": 1.08,
-      "r2": 0.9944,
-      "pearson_r": 0.9975,
+      "mae": 0.439,
+      "rmse": 0.587,
+      "mape": 1.13,
+      "r2": 0.9938,
+      "pearson_r": 0.9972,
       "aqi_acc": 100.0,
       "count": 40
     },
@@ -159,27 +159,27 @@
       "count": 40
     },
     "weights": {
-      "lightgbm": 2.716984608689018e-16,
-      "catboost": 3.2685101142062873e-16,
-      "xgboost": 4.80454579330887e-18,
-      "random_forest": 0.0,
-      "extra_trees": 0.635509576234235,
-      "figs": 0.3644904237657644,
-      "nystroem": 0.0
+      "lightgbm": 0.0,
+      "catboost": 1.5784392006846802e-16,
+      "xgboost": 2.3662166694398728e-18,
+      "random_forest": 5.1982299154886707e-17,
+      "extra_trees": 0.6296027763684694,
+      "figs": 0.3703972236315305,
+      "nystroem": 1.2399410780822206e-17
     }
   },
   "comparison_table": [
     {
       "model": "ENSEMBLE",
-      "mae_full": 0.563,
-      "mae_no_weather": 0.408,
-      "delta_mae": -0.155,
-      "pct_mae_diff": -27.53,
-      "rmse_full": 0.797,
-      "rmse_no_weather": 0.559,
-      "delta_rmse": -0.238,
-      "r2_full": 0.9887,
-      "r2_no_weather": 0.9944,
+      "mae_full": 0.548,
+      "mae_no_weather": 0.439,
+      "delta_mae": -0.109,
+      "pct_mae_diff": -19.89,
+      "rmse_full": 0.787,
+      "rmse_no_weather": 0.587,
+      "delta_rmse": -0.2,
+      "r2_full": 0.989,
+      "r2_no_weather": 0.9938,
       "aqi_acc_full": 100.0,
       "aqi_acc_no_weather": 100.0
     },
@@ -255,16 +255,16 @@
     },
     {
       "model": "FIGS",
-      "mae_full": 1.766,
+      "mae_full": 1.521,
       "mae_no_weather": 0.762,
-      "delta_mae": -1.004,
-      "pct_mae_diff": -56.85,
-      "rmse_full": 3.273,
+      "delta_mae": -0.759,
+      "pct_mae_diff": -49.9,
+      "rmse_full": 2.614,
       "rmse_no_weather": 0.801,
-      "delta_rmse": -2.472,
-      "r2_full": 0.809,
+      "delta_rmse": -1.813,
+      "r2_full": 0.8781,
       "r2_no_weather": 0.9886,
-      "aqi_acc_full": 80.0,
+      "aqi_acc_full": 82.5,
       "aqi_acc_no_weather": 90.0
     },
     {
@@ -283,21 +283,21 @@
     }
   ],
   "ensemble_weights_full": {
-    "lightgbm": 3.828552351804253e-17,
-    "catboost": 0.003133756992667077,
-    "xgboost": 0.0,
-    "random_forest": 0.0,
-    "extra_trees": 0.8867728857129136,
-    "figs": 0.11009335729441937,
+    "lightgbm": 6.964445190065286e-17,
+    "catboost": 0.0033770599545762214,
+    "xgboost": 8.520348980064851e-17,
+    "random_forest": 2.5558022781298994e-16,
+    "extra_trees": 0.8860647049643737,
+    "figs": 0.11055823508104969,
     "nystroem": 0.0
   },
   "ensemble_weights_no_weather": {
-    "lightgbm": 2.716984608689018e-16,
-    "catboost": 3.2685101142062873e-16,
-    "xgboost": 4.80454579330887e-18,
-    "random_forest": 0.0,
-    "extra_trees": 0.635509576234235,
-    "figs": 0.3644904237657644,
-    "nystroem": 0.0
+    "lightgbm": 0.0,
+    "catboost": 1.5784392006846802e-16,
+    "xgboost": 2.3662166694398728e-18,
+    "random_forest": 5.1982299154886707e-17,
+    "extra_trees": 0.6296027763684694,
+    "figs": 0.3703972236315305,
+    "nystroem": 1.2399410780822206e-17
   }
 }
