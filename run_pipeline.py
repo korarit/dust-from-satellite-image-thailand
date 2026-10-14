@@ -43,6 +43,7 @@ for _i, _arg in enumerate(sys.argv):
     elif _arg.startswith(("--dir-output=", "--output-dir=", "--dir-outputs=", "--outputs-dir=")):
         os.environ["DUST_OUTPUTS_DIR"] = str(Path(_arg.split("=", 1)[1]).resolve())
 
+import numpy as np
 import pandas as pd
 
 # Ensure project root is in sys.path
@@ -118,6 +119,8 @@ from src.features import (
     SpatialAntiLeakageValidator,
     PhysicsFallbackImputer,
     TargetMatcher,
+    compute_solar_angles_vectorized,
+    compute_cyclical_time_features,
     ALL_FEATURE_COLUMNS,
     KEY_COLUMNS,
     TARGET_COLUMN,
