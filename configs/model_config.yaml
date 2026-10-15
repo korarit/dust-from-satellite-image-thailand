@@ -75,8 +75,8 @@ models:
     n_jobs: -1
 
   figs:
-    max_rules: 20
-    max_trees: 5
+    max_rules: 400
+    max_trees: 8
     random_state: 42
 
   nystroem:

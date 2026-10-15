@@ -162,6 +162,34 @@ logging.basicConfig(
 logger = logging.getLogger("DustPipeline")
 
 
+def _fetch_past_cadence_scene(
+    sat_loader: HimawariIRLoader,
+    target_dt: pd.Timestamp,
+    bands: List[str],
+    lag_hours: float = 3.0,
+) -> Optional[Any]:
+    """
+    Loads the previous Himawari frame (t - lag_hours) for authentic cadence
+    dynamic features (delta_bt13_cadence, delta_btd15_13_cadence + rate_per_hour).
+    Returns None on download/load failure — the tabularizer then keeps NaN and
+    temporal_delta_valid=0 (never a synthetic zero-tendency frame).
+    """
+    prev_dt = target_dt - pd.Timedelta(hours=lag_hours)
+    try:
+        files_prev = sat_loader.fetch_snapshot_files(prev_dt, bands=bands)
+        missing = [b for b in bands if b not in files_prev]
+        if missing:
+            logger.warning(
+                "No previous-frame files for bands %s at %s; cadence deltas will be NaN.",
+                missing, prev_dt,
+            )
+            return None
+        return sat_loader.load_scene(files_prev, bands_to_load=bands)
+    except Exception as exc:
+        logger.warning("Could not load previous Himawari frame at %s: %s", prev_dt, exc)
+        return None
+
+
 def run_phase_1b_verification() -> bool:
     """Executes Phase 1B Zero-Mock Verification Gate."""
     logger.info("=" * 70)
@@ -285,7 +313,7 @@ def run_phase_1_smoke_test(target_dt: pd.Timestamp, pollutant: str = "pm25") -> 
         sys.exit(1)
 
 
-def run_phase_2_smoke_test(target_dt: pd.Timestamp) -> pd.DataFrame:
+def run_phase_2_smoke_test(target_dt: pd.Timestamp, cadence_hours: float = 3.0) -> pd.DataFrame:
     """
     Executes Phase 2 Feature Engineering Smoke-Test using 100% genuine physical observations:
     1. Multi-Resolution Grid Initialization (Testing 2km baseline with 4-resolution support)
@@ -349,7 +377,11 @@ def run_phase_2_smoke_test(target_dt: pd.Timestamp) -> pd.DataFrame:
     sat_scene = sat_loader.load_scene(files_by_band, bands_to_load=test_bands)
 
     tabularizer = SatelliteTabularizer(bands=test_bands)
-    sat_features = tabularizer.tabularize_from_scene(sat_scene, weather_grid)
+    past_scene = _fetch_past_cadence_scene(sat_loader, target_dt, test_bands, lag_hours=cadence_hours)
+    past_scenes = {"cadence": past_scene} if past_scene is not None else None
+    sat_features = tabularizer.tabularize_from_scene(
+        sat_scene, weather_grid, past_scenes=past_scenes, cadence_hours=cadence_hours
+    )
     logger.info("Satellite features extracted: Mean BT13 = %.2f K, Mean BTD15-13 = %.2f K",
                 float(sat_features["bt_b13"].mean()), float(sat_features["btd_15_13"].mean()))
 
@@ -377,7 +409,7 @@ def run_phase_2_smoke_test(target_dt: pd.Timestamp) -> pd.DataFrame:
         sys.exit(1)
 
 
-def run_phase_3_smoke_test(target_dt: pd.Timestamp, pollutant: str = "pm25") -> pd.DataFrame:
+def run_phase_3_smoke_test(target_dt: pd.Timestamp, pollutant: str = "pm25", cadence_hours: float = 3.0) -> pd.DataFrame:
     """
     Executes Phase 3 Unified Feature Pipeline Smoke-Test using 100% genuine physical observations:
     1. Extracts spatial grid (2.0 km baseline)
@@ -436,7 +468,11 @@ def run_phase_3_smoke_test(target_dt: pd.Timestamp, pollutant: str = "pm25") -> 
     sat_scene = sat_loader.load_scene(files_by_band, bands_to_load=test_bands)
 
     tabularizer = SatelliteTabularizer(bands=test_bands)
-    sat_features = tabularizer.tabularize_from_scene(sat_scene, weather_grid)
+    past_scene = _fetch_past_cadence_scene(sat_loader, target_dt, test_bands, lag_hours=cadence_hours)
+    past_scenes = {"cadence": past_scene} if past_scene is not None else None
+    sat_features = tabularizer.tabularize_from_scene(
+        sat_scene, weather_grid, past_scenes=past_scenes, cadence_hours=cadence_hours
+    )
 
     # 4. Fetch Real Target
     logger.info("\n--- Step 4: Ingesting Real Ground Truth %s Observations ---", tgt_name)
@@ -514,7 +550,7 @@ def run_phase_3_smoke_test(target_dt: pd.Timestamp, pollutant: str = "pm25") -> 
         sys.exit(1)
 
 
-def run_phase_4_smoke_test(target_dt: pd.Timestamp, pollutant: str = "pm25") -> Dict[str, Any]:
+def run_phase_4_smoke_test(target_dt: pd.Timestamp, pollutant: str = "pm25", cadence_hours: float = 3.0) -> Dict[str, Any]:
     """
     Executes Phase 4: The 4-Model Suite & Ensemble Stacking (Smoke Test).
     1. Loads master spatial grid and matches genuine PCD Air4Thai ground PM2.5 / PM10 measurements
@@ -582,7 +618,11 @@ def run_phase_4_smoke_test(target_dt: pd.Timestamp, pollutant: str = "pm25") -> 
     sat_scene = sat_loader.load_scene(files_by_band, bands_to_load=test_bands)
 
     tabularizer = SatelliteTabularizer(bands=test_bands)
-    sat_features = tabularizer.tabularize_from_scene(sat_scene, weather_grid)
+    past_scene = _fetch_past_cadence_scene(sat_loader, target_dt, test_bands, lag_hours=cadence_hours)
+    past_scenes = {"cadence": past_scene} if past_scene is not None else None
+    sat_features = tabularizer.tabularize_from_scene(
+        sat_scene, weather_grid, past_scenes=past_scenes, cadence_hours=cadence_hours
+    )
 
     # 4. Build Unified Feature Matrix
     logger.info("\n--- Step 4: Building Unified Feature Matrix with Strict Anti-Leakage ---")
@@ -694,7 +734,7 @@ def run_phase_4_smoke_test(target_dt: pd.Timestamp, pollutant: str = "pm25") -> 
         sys.exit(1)
 
 
-def run_phase_5_smoke_test(target_dt: pd.Timestamp, pollutant: str = "pm25") -> Dict[str, Any]:
+def run_phase_5_smoke_test(target_dt: pd.Timestamp, pollutant: str = "pm25", cadence_hours: float = 3.0) -> Dict[str, Any]:
     """
     Executes Phase 5: Evaluation, Multi-Resolution Benchmarking & Nationwide Nowcasting (Smoke Test).
     1. Loads master spatial grid and matches genuine PCD ground PM2.5 / PM10 measurements
@@ -767,7 +807,11 @@ def run_phase_5_smoke_test(target_dt: pd.Timestamp, pollutant: str = "pm25") -> 
     sat_scene = sat_loader.load_scene(files_by_band, bands_to_load=test_bands)
 
     tabularizer = SatelliteTabularizer(bands=test_bands)
-    sat_features = tabularizer.tabularize_from_scene(sat_scene, weather_grid)
+    past_scene = _fetch_past_cadence_scene(sat_loader, target_dt, test_bands, lag_hours=cadence_hours)
+    past_scenes = {"cadence": past_scene} if past_scene is not None else None
+    sat_features = tabularizer.tabularize_from_scene(
+        sat_scene, weather_grid, past_scenes=past_scenes, cadence_hours=cadence_hours
+    )
 
     # 4. Build Unified Feature Matrix
     max_target_time = pd.to_datetime(pm_df["timestamp_utc"].dropna().max(), utc=True) if "timestamp_utc" in pm_df.columns else target_dt
@@ -1843,13 +1887,13 @@ def main():
 
     if args.phase == "2":
         sample_dt = pd.Timestamp(args.start_date or "2023-01-01 00:00:00", tz="UTC")
-        run_phase_2_smoke_test(sample_dt)
+        run_phase_2_smoke_test(sample_dt, cadence_hours=args.cadence_hours)
         sys.exit(0)
 
     if args.phase == "3":
         sample_dt = pd.Timestamp(args.start_date or "2023-01-01 00:00:00", tz="UTC")
         for p in pollutants:
-            run_phase_3_smoke_test(sample_dt, pollutant=p)
+            run_phase_3_smoke_test(sample_dt, pollutant=p, cadence_hours=args.cadence_hours)
         sys.exit(0)
 
     if args.phase == "4":
@@ -1863,21 +1907,21 @@ def main():
         else:
             sample_dt = pd.Timestamp(args.start_date or "2026-10-12 14:00:00", tz="UTC")
             for p in pollutants:
-                run_phase_4_smoke_test(sample_dt, pollutant=p)
+                run_phase_4_smoke_test(sample_dt, pollutant=p, cadence_hours=args.cadence_hours)
         sys.exit(0)
 
     if args.phase == "5":
         sample_dt = pd.Timestamp(args.start_date or "2026-10-12 14:00:00", tz="UTC")
         for p in pollutants:
-            run_phase_5_smoke_test(sample_dt, pollutant=p)
+            run_phase_5_smoke_test(sample_dt, pollutant=p, cadence_hours=args.cadence_hours)
         sys.exit(0)
 
     if args.phase == "all":
         sample_dt = pd.Timestamp(args.start_date or "2026-10-12 14:00:00", tz="UTC")
         for p in pollutants:
             run_phase_1_smoke_test(sample_dt, pollutant=p)
-            run_phase_2_smoke_test(sample_dt)
-            run_phase_3_smoke_test(sample_dt, pollutant=p)
+            run_phase_2_smoke_test(sample_dt, cadence_hours=args.cadence_hours)
+            run_phase_3_smoke_test(sample_dt, pollutant=p, cadence_hours=args.cadence_hours)
             if args.full:
                 run_phase_4_full(
                     pollutant=p, split_date=args.split_date,
@@ -1885,8 +1929,8 @@ def main():
                     tune_subsample_frac=args.tune_subsample_frac,
                 )
             else:
-                run_phase_4_smoke_test(sample_dt, pollutant=p)
-            run_phase_5_smoke_test(sample_dt, pollutant=p)
+                run_phase_4_smoke_test(sample_dt, pollutant=p, cadence_hours=args.cadence_hours)
+            run_phase_5_smoke_test(sample_dt, pollutant=p, cadence_hours=args.cadence_hours)
         sys.exit(0)
 
     # Parse custom location IDs if provided

@@ -11,7 +11,7 @@ Implements:
      * Group 1: 10 IR Bands BT (bt_b07 .. bt_b16 in Kelvin)
      * Group 2: Physics BTDs (btd_15_13, btd_14_11, btd_13_07, btd_10_08, dust_rgb_red)
      * Group 3: Spatial 3x3 Texture (b13_mean_3x3, b13_std_3x3, b13_min/max, b15_*, btd_*)
-     * Group 4: Temporal Dynamics (delta_bt13_10m, 30m, 60m, delta_btd15_13_10m, 30m, 60m)
+     * Group 4: Temporal Dynamics (delta_bt13_cadence, delta_btd15_13_cadence + rate_per_hour, temporal_delta_valid)
      * Group 5: 4-Directional Pressure (p_north, p_south, p_east, p_west, delta_p_ns/ew, ||nabla P||, mean)
      * Group 6: Surrounding Humidity (humidity_mean_surround, humidity_std_surround, ||nabla RH||)
      * Group 7: Topography & Solar (elevation, tpi_index, slope, aspect, relief, coast, coriolis, sza, cycles)

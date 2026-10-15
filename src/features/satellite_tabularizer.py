@@ -13,8 +13,7 @@ Implements:
     * b15_mean_3x3, b15_std_3x3
     * btd_15_13_mean_3x3, btd_15_13_std_3x3
 - Group 4: Temporal Dynamics (Tendencies):
-    * delta_bt13_10m, delta_bt13_30m, delta_bt13_60m
-    * delta_btd15_13_10m, delta_btd15_13_30m, delta_btd15_13_60m
+    * delta_bt13_cadence, delta_btd15_13_cadence (+ rate_per_hour), from the previous cadence frame
 - Zero-Mock Rule: 100% authentic physical measurements; NaN is preserved for bad pixels.
 """
 
@@ -301,9 +300,6 @@ class SatelliteTabularizer:
     @staticmethod
     def compute_temporal_tendencies(
         current_df: pd.DataFrame,
-        past_10m_df: Optional[pd.DataFrame] = None,
-        past_30m_df: Optional[pd.DataFrame] = None,
-        past_60m_df: Optional[pd.DataFrame] = None,
         past_cadence_df: Optional[pd.DataFrame] = None,
         cadence_hours: float = 3.0,
         key_col: str = "grid_id",
@@ -312,7 +308,6 @@ class SatelliteTabularizer:
         Computes Group 4 temporal dynamic tendencies:
         - delta_bt13_cadence, delta_btd15_13_cadence
         - delta_bt13_rate_per_hour, delta_btd15_13_rate_per_hour
-        - (Optional legacy) delta_bt13_10m/30m/60m if explicit past frames are provided.
         Ensures strict temporal order: past observation time < current run time.
         """
         out_df = current_df.copy()
@@ -336,9 +331,8 @@ class SatelliteTabularizer:
             return d_bt13, d_btd
 
         # 1. Authentic Cadence Tendency & Hourly Rates
-        ref_past = past_cadence_df if past_cadence_df is not None else (past_60m_df if past_60m_df is not None else past_30m_df)
-        d_c_bt13, d_c_btd = _calc_delta(ref_past)
-        eff_hours = max(cadence_hours, 0.1) if past_cadence_df is not None else (1.0 if past_60m_df is not None else 0.5)
+        d_c_bt13, d_c_btd = _calc_delta(past_cadence_df)
+        eff_hours = max(cadence_hours, 0.1) if past_cadence_df is not None else 1.0
 
         # No previous frame -> NaN (missing), NOT 0.0 (which would falsely mean
         # "stationary atmosphere"). The downstream imputer fills NaN with 0.0 but
@@ -347,20 +341,6 @@ class SatelliteTabularizer:
         out_df["delta_btd15_13_cadence"] = d_c_btd if d_c_btd is not None else np.full(n, np.nan, dtype=np.float32)
         out_df["delta_bt13_rate_per_hour"] = (out_df["delta_bt13_cadence"] / eff_hours).astype(np.float32)
         out_df["delta_btd15_13_rate_per_hour"] = (out_df["delta_btd15_13_cadence"] / eff_hours).astype(np.float32)
-
-        # 2. Legacy sub-intervals (populated when explicit sub-frames are provided in tests)
-        if past_10m_df is not None:
-            d_bt, d_btd = _calc_delta(past_10m_df)
-            out_df["delta_bt13_10m"] = d_bt
-            out_df["delta_btd15_13_10m"] = d_btd
-        if past_30m_df is not None:
-            d_bt, d_btd = _calc_delta(past_30m_df)
-            out_df["delta_bt13_30m"] = d_bt
-            out_df["delta_btd15_13_30m"] = d_btd
-        if past_60m_df is not None:
-            d_bt, d_btd = _calc_delta(past_60m_df)
-            out_df["delta_bt13_60m"] = d_bt
-            out_df["delta_btd15_13_60m"] = d_btd
 
         return out_df
 
@@ -371,13 +351,14 @@ class SatelliteTabularizer:
         lat_col: str = "centroid_lat",
         lon_col: str = "centroid_lon",
         past_scenes: Optional[Dict[str, Any]] = None,
+        cadence_hours: float = 3.0,
     ) -> pd.DataFrame:
         """
         Performs end-to-end extraction from a Satpy Scene onto a grid DataFrame:
         1. Samples 10 IR Bands at centroid coordinates
         2. Computes 3x3 texture for B13 & B15
         3. Computes Physics BTDs
-        4. Computes Temporal tendencies if past_scenes dict provided ({'10m': scn, '30m': scn, '60m': scn})
+        4. Computes Temporal tendencies if past_cadence scene provided ({'cadence': scn} or {'past': scn})
         """
         res_df = grid_df.copy()
         query_lats = grid_df[lat_col].to_numpy(dtype=float)
@@ -442,7 +423,7 @@ class SatelliteTabularizer:
                 _cur_shape = scene[self.bands[0]].values.shape if self.bands[0] in scene else None
             except Exception:
                 _cur_shape = None
-            for t_key in ["10m", "30m", "60m", "cadence", "past"]:
+            for t_key in ["cadence", "past"]:
                 if t_key in past_scenes and past_scenes[t_key] is not None:
                     past_scn = past_scenes[t_key]
                     past_sub = grid_df.copy()
@@ -471,10 +452,8 @@ class SatelliteTabularizer:
 
         res_df = self.compute_temporal_tendencies(
             res_df,
-            past_10m_df=past_dfs.get("10m"),
-            past_30m_df=past_dfs.get("30m"),
-            past_60m_df=past_dfs.get("60m"),
             past_cadence_df=past_dfs.get("cadence") or past_dfs.get("past"),
+            cadence_hours=cadence_hours,
         )
 
         return res_df

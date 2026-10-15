@@ -36,8 +36,8 @@ class FIGSDustModel(BaseDustModel):
 
         # Default parameters
         self.params: Dict[str, Any] = {
-            "max_rules": 20,
-            "max_trees": 5,
+            "max_rules": 400,
+            "max_trees": 8,
             "random_state": 42,
         }
         if model_params:

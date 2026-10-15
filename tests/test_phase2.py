@@ -222,28 +222,37 @@ def test_satellite_tabularizer_3x3_texture():
 
 def test_satellite_tabularizer_temporal_tendencies():
     """
-    Verifies temporal tendencies (differences between t and t-10m, t-30m, t-60m).
+    Verifies cadence-based temporal tendencies (differences between t and the
+    previous cadence frame) plus the NaN + temporal_delta_valid protocol when
+    no previous frame exists.
     """
     curr = pd.DataFrame({"grid_id": ["G1"], "bt_b13": [290.0], "btd_15_13": [-2.0]})
-    past10 = pd.DataFrame({"grid_id": ["G1"], "bt_b13": [288.0], "btd_15_13": [-1.0]})
-    past30 = pd.DataFrame({"grid_id": ["G1"], "bt_b13": [285.0], "btd_15_13": [0.0]})
-    past60 = pd.DataFrame({"grid_id": ["G1"], "bt_b13": [280.0], "btd_15_13": [1.0]})
+    past = pd.DataFrame({"grid_id": ["G1"], "bt_b13": [280.0], "btd_15_13": [1.0]})
 
     res = SatelliteTabularizer.compute_temporal_tendencies(
-        curr, past_10m_df=past10, past_30m_df=past30, past_60m_df=past60
+        curr, past_cadence_df=past, cadence_hours=1.0
     )
 
-    # delta_bt13: 290 - 288 = +2.0 K
-    assert np.isclose(res["delta_bt13_10m"].iloc[0], 2.0)
-    # delta_bt13_30m: 290 - 285 = +5.0 K
-    assert np.isclose(res["delta_bt13_30m"].iloc[0], 5.0)
-    # delta_bt13_60m: 290 - 280 = +10.0 K
-    assert np.isclose(res["delta_bt13_60m"].iloc[0], 10.0)
+    # delta_bt13_cadence: 290 - 280 = +10.0 K
+    assert np.isclose(res["delta_bt13_cadence"].iloc[0], 10.0)
+    # delta_bt13_rate_per_hour: 10.0 K / 1.0 h
+    assert np.isclose(res["delta_bt13_rate_per_hour"].iloc[0], 10.0)
 
-    # delta_btd15_13: -2 - (-1) = -1.0 K (increasing dust)
-    assert np.isclose(res["delta_btd15_13_10m"].iloc[0], -1.0)
-    assert np.isclose(res["delta_btd15_13_30m"].iloc[0], -2.0)
-    assert np.isclose(res["delta_btd15_13_60m"].iloc[0], -3.0)
+    # delta_btd15_13_cadence: -2 - 1 = -3.0 K (increasing dust)
+    assert np.isclose(res["delta_btd15_13_cadence"].iloc[0], -3.0)
+    assert np.isclose(res["delta_btd15_13_rate_per_hour"].iloc[0], -3.0)
+
+    # No previous frame -> NaN rate, NOT 0.0
+    res_no_past = SatelliteTabularizer.compute_temporal_tendencies(curr)
+    assert np.isnan(res_no_past["delta_bt13_cadence"].iloc[0])
+    assert np.isnan(res_no_past["delta_bt13_rate_per_hour"].iloc[0])
+    assert np.isnan(res_no_past["delta_btd15_13_rate_per_hour"].iloc[0])
+
+    # Rate at non-unit cadence: 10.0 K / 3.0 h
+    res_3h = SatelliteTabularizer.compute_temporal_tendencies(
+        curr, past_cadence_df=past, cadence_hours=3.0
+    )
+    assert np.isclose(res_3h["delta_bt13_rate_per_hour"].iloc[0], 10.0 / 3.0)
 
 
 def test_multi_resolution_grid_engine():
