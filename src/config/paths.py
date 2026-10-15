@@ -68,6 +68,11 @@ DATA_CONFIG_PATH = CONFIGS_DIR / "data_config.yaml"
 MODEL_CONFIG_PATH = CONFIGS_DIR / "model_config.yaml"
 
 
+def get_tuned_params_path(pollutant: str = "pm25") -> Path:
+    """Returns the Optuna-tuned hyper-parameter YAML path for a pollutant."""
+    return CONFIGS_DIR / f"tuned_params_{pollutant.lower()}.yaml"
+
+
 def load_yaml_config(config_path: Path) -> dict:
     """Safely loads a YAML configuration file."""
     if not config_path.exists():

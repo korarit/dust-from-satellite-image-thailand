@@ -18,6 +18,10 @@ scikit-learn>=1.3.0
 lightgbm>=4.0.0
 xgboost>=2.0.0
 catboost>=1.2.0
+imodels>=1.3.0
+
+# Hyperparameter Optimization (Optuna tuning)
+optuna>=3.0.0
 
 # Development, Quality Audit & Testing
 tqdm>=4.65.0

@@ -314,6 +314,55 @@ def test_dust_stacking_ensemble(deterministic_training_data, tmp_path):
     assert np.allclose(orig_preds, loaded_preds, atol=1e-5)
 
 
+def test_tuned_param_override(deterministic_training_data, tmp_path):
+    """Verifies train_suite deep-merges Optuna-tuned model params via model_params_override."""
+    df, f_cols, target = deterministic_training_data
+    half = len(df) // 2
+    df = df.copy()
+    df["provider"] = ["Air4Thai"] * half + ["AirGradient"] * (len(df) - half)
+
+    trainer = ModelTrainer(output_dir=tmp_path / "models")
+    trainer.config = {
+        "general": {"target_column": target, "random_state": 42, "cv_splits": 1},
+        "models": {"lightgbm": {"n_estimators": 5, "learning_rate": 0.1, "min_child_samples": 2}},
+        "features": {"monotonic_constraints": {}},
+    }
+    trainer.tuned_params = {"full__combined": {"lightgbm": {"num_leaves": 17}}}
+    assert trainer._tuned_override("missing", "combined") is None
+
+    ens = trainer.train_suite(
+        train_df=df,
+        feature_cols=f_cols,
+        cv=1,
+        experiment_id="EXP-2KM-TEST-COMBINED",
+        model_params_override=trainer._tuned_override("full", "combined"),
+    )
+    assert ens.base_models["lightgbm"].params["num_leaves"] == 17
+
+
+def test_hyperparameter_search_space_and_native_conversion():
+    """Verifies Optuna search-space builders and numpy->native conversion used by the tuner."""
+    from src.models.hyperparameter_tuner import suggest_params, _to_native, DEFAULT_FEATURE_SETS
+
+    class DummyTrial:
+        def suggest_int(self, name, low, high, **kwargs):
+            return low
+
+        def suggest_float(self, name, low, high, **kwargs):
+            return low
+
+        def suggest_categorical(self, name, choices):
+            return choices[0]
+
+    for mk in MODEL_KEYS:
+        params = suggest_params(DummyTrial(), mk, {"existing": 1})
+        assert isinstance(params, dict)
+        assert params.get("existing") == 1
+
+    assert set(DEFAULT_FEATURE_SETS.keys()) == {"full", "pure_satellite"}
+    assert _to_native({"a": np.int64(3), "b": [np.float32(1.5)]}) == {"a": 3, "b": [1.5]}
+
+
 def test_per_model_benchmark_callback(deterministic_training_data):
     """Verifies each base learner is benchmarked (callback invoked) immediately after it trains."""
     df, f_cols, target = deterministic_training_data

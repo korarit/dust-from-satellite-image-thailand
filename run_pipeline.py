@@ -71,6 +71,7 @@ from src.config.paths import (
     get_maps_dir,
     get_reports_dir,
     get_evaluation_dir,
+    load_yaml_config,
 )
 
 def update_pipeline_runtime_paths() -> None:
@@ -1354,11 +1355,21 @@ def _enrich_multi_year_matrix(
     return out_df
 
 
-def run_phase_4_full(pollutant: str = "pm25", split_date: str = "2026-01-01") -> Dict[str, Any]:
+def run_phase_4_full(
+    pollutant: str = "pm25",
+    split_date: str = "2026-01-01",
+    tune: bool = False,
+    tune_trials: int = 25,
+    tune_subsample_frac: float = 0.3,
+    tune_models: Optional[List[str]] = None,
+    tune_providers: Optional[List[str]] = None,
+    tune_feature_sets: Optional[List[str]] = None,
+) -> Dict[str, Any]:
     """
     Executes Phase 4 Full Multi-Year Model Suite & Ensemble Training:
     - Loads historical training ground truth (2024-2025) and test ground truth (2026)
     - Prepares enriched feature matrices with real temporal rates, Copernicus DEM, and weather
+    - [Optional] Optuna hyperparameter tuning on the 2 km reference grid (reused everywhere)
     - Trains provider-partitioned production ensembles FIRST (Air4Thai, AirGradient,
       then Combined): persists every checkpoint and runs a cross-provider generalization
       benchmark (train on one provider, predict the other, swapped)
@@ -1508,6 +1519,35 @@ def run_phase_4_full(pollutant: str = "pm25", split_date: str = "2026-01-01") ->
 
     if train_df.empty or (tgt_col in train_df.columns and train_df[tgt_col].isna().all()):
         train_df = unified_df.dropna(subset=[tgt_col]).copy() if tgt_col in unified_df.columns else unified_df.copy()
+
+    # --------------------------------------------------------------------------
+    # 0. [Optional] Optuna hyperparameter tuning on the 2 km reference grid.
+    #    Best params are written to configs/tuned_params_<pol>.yaml and reused by
+    #    every resolution / provider below (the trainer loads them on construction).
+    # --------------------------------------------------------------------------
+    if tune:
+        from src.models.hyperparameter_tuner import run_optuna_tuning, DEFAULT_FEATURE_SETS
+
+        logger.info("\n" + "=" * 75)
+        logger.info("🎛️ PHASE 4 HYPERPARAMETER TUNING (2 km reference) — %s", tgt_name)
+        logger.info("=" * 75)
+        _fs = {
+            k: v for k, v in DEFAULT_FEATURE_SETS.items()
+            if not tune_feature_sets or k in tune_feature_sets
+        }
+        _base_cfg = load_yaml_config(MODEL_CONFIG_PATH) if MODEL_CONFIG_PATH.exists() else {}
+        run_optuna_tuning(
+            train_df=train_df,
+            pollutant=pol,
+            base_config=_base_cfg,
+            feature_sets=_fs,
+            providers=tune_providers or ["Air4Thai", "AirGradient", "Combined"],
+            models=tune_models or list(MODEL_KEYS),
+            trials=tune_trials,
+            subsample_frac=tune_subsample_frac,
+            seed=42,
+            resolution_km=2.0,
+        )
 
     trainer = ModelTrainer(config_path=MODEL_CONFIG_PATH, output_dir=models_dir, pollutant=pol, target_col=tgt_col)
 
@@ -1672,6 +1712,23 @@ def main():
         help="Train/Test cutoff date (default: '2026-01-01' -> Train: 2024-2025, Test: 2026)"
     )
     parser.add_argument(
+        "--tune",
+        action="store_true",
+        help="Run Optuna hyperparameter tuning on the 2 km reference grid before Phase 4 training (reused for all resolutions/providers)"
+    )
+    parser.add_argument(
+        "--tune-trials",
+        type=int,
+        default=25,
+        help="Optuna trials per model during tuning (default: 25)"
+    )
+    parser.add_argument(
+        "--tune-subsample-frac",
+        type=float,
+        default=0.3,
+        help="Fraction of training rows used per tuning trial (default: 0.3)"
+    )
+    parser.add_argument(
         "--cadence-hours",
         type=int,
         default=3,
@@ -1789,7 +1846,11 @@ def main():
     if args.phase == "4":
         if args.full:
             for p in pollutants:
-                run_phase_4_full(pollutant=p, split_date=args.split_date)
+                run_phase_4_full(
+                    pollutant=p, split_date=args.split_date,
+                    tune=args.tune, tune_trials=args.tune_trials,
+                    tune_subsample_frac=args.tune_subsample_frac,
+                )
         else:
             sample_dt = pd.Timestamp(args.start_date or "2026-10-12 14:00:00", tz="UTC")
             for p in pollutants:
@@ -1809,7 +1870,11 @@ def main():
             run_phase_2_smoke_test(sample_dt)
             run_phase_3_smoke_test(sample_dt, pollutant=p)
             if args.full:
-                run_phase_4_full(pollutant=p, split_date=args.split_date)
+                run_phase_4_full(
+                    pollutant=p, split_date=args.split_date,
+                    tune=args.tune, tune_trials=args.tune_trials,
+                    tune_subsample_frac=args.tune_subsample_frac,
+                )
             else:
                 run_phase_4_smoke_test(sample_dt, pollutant=p)
             run_phase_5_smoke_test(sample_dt, pollutant=p)
@@ -1836,7 +1901,11 @@ def main():
                 train_segments=train_segs,
                 test_segments=test_segs,
             )
-            run_phase_4_full(pollutant=p, split_date=args.split_date)
+            run_phase_4_full(
+                pollutant=p, split_date=args.split_date,
+                tune=args.tune, tune_trials=args.tune_trials,
+                tune_subsample_frac=args.tune_subsample_frac,
+            )
     elif args.start_date and args.end_date:
         start_dt = pd.Timestamp(args.start_date, tz="UTC")
         end_dt = pd.Timestamp(args.end_date, tz="UTC")

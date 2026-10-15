@@ -10,6 +10,7 @@ Orchestrates:
 5. Comprehensive Reporting & Serialization
 """
 
+import copy
 import json
 import logging
 from pathlib import Path
@@ -24,6 +25,7 @@ from src.config.paths import (
     get_models_dir,
     get_reports_dir,
     get_evaluation_csv_dir,
+    get_tuned_params_path,
     load_yaml_config,
 )
 from src.features.feature_matrix_builder import (
@@ -76,6 +78,29 @@ class ModelTrainer:
         # Accumulates per-base-learner benchmark records across resolutions/experiments
         self.per_model_benchmark_records: List[Dict[str, Any]] = []
 
+        # Optuna-tuned params (2 km reference) reused across resolutions/providers
+        self.tuned_params: Dict[str, Any] = self._load_tuned_params()
+
+    def _load_tuned_params(self) -> Dict[str, Any]:
+        """Loads Optuna-tuned hyper-parameters for this pollutant, if available."""
+        path = get_tuned_params_path(self.pollutant)
+        if not path.exists():
+            return {}
+        try:
+            data = load_yaml_config(path)
+            logger.info("Loaded tuned hyper-parameters from %s", path)
+            return data.get("tuned", {}) or {}
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("Failed to load tuned params from %s: %s", path, exc)
+            return {}
+
+    def _tuned_override(self, feature_set: str, provider: str) -> Optional[Dict[str, Dict[str, Any]]]:
+        """Returns the tuned model-params dict for a (feature set, provider) key, if present."""
+        if not self.tuned_params:
+            return None
+        key = f"{feature_set}__{str(provider).lower()}"
+        return self.tuned_params.get(key)
+
     def prepare_data(
         self,
         df: pd.DataFrame,
@@ -122,9 +147,13 @@ class ModelTrainer:
         feature_cols: Optional[List[str]] = None,
         cv: Optional[int] = None,
         experiment_id: str = "EXP-2KM",
+        model_params_override: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> DustStackingEnsemble:
         """
         Trains the full 4-Model Suite and Stacking Ensemble on training data.
+
+        ``model_params_override`` (optional) deep-merges Optuna-tuned parameters
+        (mapping model_key -> params) on top of the base ``config['models']``.
         """
         logger.info("=" * 70)
         logger.info("🏋️ TRAINING MODEL SUITE (%s): %s", self.pollutant.upper(), experiment_id)
@@ -135,8 +164,17 @@ class ModelTrainer:
 
         splits = cv or self.cv_splits
         ensemble_name = f"Ensemble_{experiment_id}_{self.pollutant.upper()}" if self.pollutant == "pm10" else f"Ensemble_{experiment_id}"
+
+        ensemble_config = self.config
+        if model_params_override:
+            ensemble_config = copy.deepcopy(self.config)
+            models_cfg = ensemble_config.setdefault("models", {})
+            for mk, mp in model_params_override.items():
+                models_cfg.setdefault(mk, {}).update(mp)
+            logger.info("Applying tuned hyper-parameters for %d models.", len(model_params_override))
+
         ensemble = DustStackingEnsemble(
-            config=self.config,
+            config=ensemble_config,
             name=ensemble_name,
             pollutant=self.pollutant,
             target_col=self.target_col,
@@ -296,6 +334,7 @@ class ModelTrainer:
                 train_df=train_df,
                 feature_cols=feature_cols,
                 experiment_id=exp_id,
+                model_params_override=self._tuned_override("full", "Combined"),
             )
 
             test_df = test_matrices_by_res.get(res_km)
@@ -440,6 +479,7 @@ class ModelTrainer:
             feature_cols=full_cols,
             cv=cv,
             experiment_id=f"{experiment_id}-FULL-WEATHER",
+            model_params_override=self._tuned_override("full", "Combined"),
         )
 
         # 3. Train Suite B: Satellite-Only (No Ground Weather - Sea / Maritime Mode)
@@ -449,6 +489,7 @@ class ModelTrainer:
             feature_cols=no_weather_cols,
             cv=cv,
             experiment_id=f"{experiment_id}-NO-WEATHER",
+            model_params_override=self._tuned_override("pure_satellite", "Combined"),
         )
 
         # 4. Evaluate both suites
@@ -871,12 +912,16 @@ class ModelTrainer:
                                        prov_name, res_label, fs_label, len(sub_train), min_samples_per_provider)
                         continue
 
+                    # Reuse 2 km-tuned hyper-parameters for this (feature set, provider)
+                    override = self._tuned_override(fs_label, prov_key)
+
                     # Fast direct training (no K-Fold): single 85/15 holdout split
                     ensemble = self.train_suite(
                         train_df=sub_train,
                         cv=1,
                         feature_cols=active_cols,
                         experiment_id=exp_id,
+                        model_params_override=override,
                     )
                     benchmark_results["trained_ensembles"][exp_id] = ensemble
 
