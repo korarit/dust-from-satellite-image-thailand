@@ -28,6 +28,8 @@ from src.models.random_forest_model import RandomForestDustModel
 from src.models.extra_trees_model import ExtraTreesDustModel
 from src.models.figs_model import FIGSDustModel
 from src.models.nystroem_model import NystroemRidgeDustModel
+from src.models.hist_gbr_model import HistGBRDustModel
+from src.models.ebm_model import EBMDustModel, INTERPRET_AVAILABLE
 from src.models.ensemble_model import DustStackingEnsemble, MODEL_KEYS
 from src.models.trainer import ModelTrainer
 
@@ -44,6 +46,9 @@ __all__ = [
     "ExtraTreesDustModel",
     "FIGSDustModel",
     "NystroemRidgeDustModel",
+    "HistGBRDustModel",
+    "EBMDustModel",
+    "INTERPRET_AVAILABLE",
     "DustStackingEnsemble",
     "MODEL_KEYS",
     "ModelTrainer",

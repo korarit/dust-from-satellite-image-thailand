@@ -29,6 +29,8 @@ from src.models.random_forest_model import RandomForestDustModel
 from src.models.extra_trees_model import ExtraTreesDustModel
 from src.models.figs_model import FIGSDustModel
 from src.models.nystroem_model import NystroemRidgeDustModel
+from src.models.hist_gbr_model import HistGBRDustModel
+from src.models.ebm_model import EBMDustModel
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +42,8 @@ MODEL_KEYS = [
     "figs",
     "nystroem",
     "random_forest",
+    "hist_gbr",
+    "ebm",
 ]
 
 
@@ -97,6 +101,13 @@ class DustStackingEnsemble(BaseDustModel):
             ),
             "random_forest": RandomForestDustModel(
                 model_params=models_cfg.get("random_forest", {}),
+            ),
+            "hist_gbr": HistGBRDustModel(
+                model_params=models_cfg.get("hist_gbr", {}),
+                monotonic_constraints=self.mono_constraints,
+            ),
+            "ebm": EBMDustModel(
+                model_params=models_cfg.get("ebm", {}),
             ),
         }
 
@@ -541,6 +552,8 @@ class DustStackingEnsemble(BaseDustModel):
             "figs": FIGSDustModel,
             "nystroem": NystroemRidgeDustModel,
             "random_forest": RandomForestDustModel,
+            "hist_gbr": HistGBRDustModel,
+            "ebm": EBMDustModel,
         }
         for m_key, cls_type in model_classes.items():
             m_path_pol = load_dir / f"{m_key}_model_{pol}.joblib"
@@ -595,6 +608,15 @@ class DustStackingEnsemble(BaseDustModel):
         elif model_key == "random_forest":
             return RandomForestDustModel(
                 model_params=models_cfg.get("random_forest", {}),
+            )
+        elif model_key == "hist_gbr":
+            return HistGBRDustModel(
+                model_params=models_cfg.get("hist_gbr", {}),
+                monotonic_constraints=self.mono_constraints,
+            )
+        elif model_key == "ebm":
+            return EBMDustModel(
+                model_params=models_cfg.get("ebm", {}),
             )
         else:
             raise ValueError(f"Unknown model key: {model_key}")

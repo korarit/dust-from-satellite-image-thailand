@@ -39,6 +39,8 @@ from src.models.random_forest_model import RandomForestDustModel
 from src.models.extra_trees_model import ExtraTreesDustModel
 from src.models.figs_model import FIGSDustModel
 from src.models.nystroem_model import NystroemRidgeDustModel
+from src.models.hist_gbr_model import HistGBRDustModel
+from src.models.ebm_model import EBMDustModel
 from src.models.base_model import compute_dust_metrics
 from src.models.ensemble_model import MODEL_KEYS
 
@@ -68,6 +70,10 @@ def build_model(model_key: str, params: Dict[str, Any], monotonic_constraints: D
         return NystroemRidgeDustModel(model_params=params)
     if model_key == "random_forest":
         return RandomForestDustModel(model_params=params)
+    if model_key == "hist_gbr":
+        return HistGBRDustModel(model_params=params, monotonic_constraints=monotonic_constraints)
+    if model_key == "ebm":
+        return EBMDustModel(model_params=params)
     raise ValueError(f"Unknown model_key: {model_key}")
 
 
@@ -126,6 +132,21 @@ def suggest_params(trial: Any, model_key: str, base_params: Dict[str, Any]) -> D
         params.update({
             "n_components": trial.suggest_int("n_components", 50, 300, step=10),
             "alpha": trial.suggest_float("alpha", 1e-3, 100.0, log=True),
+        })
+    elif model_key == "hist_gbr":
+        params.update({
+            "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.1, log=True),
+            "max_leaf_nodes": trial.suggest_int("max_leaf_nodes", 15, 127, step=2),
+            "min_samples_leaf": trial.suggest_int("min_samples_leaf", 5, 60),
+            "l2_regularization": trial.suggest_float("l2_regularization", 1e-3, 10.0, log=True),
+            "loss": trial.suggest_categorical("loss", ["poisson", "absolute_error", "squared_error"]),
+        })
+    elif model_key == "ebm":
+        params.update({
+            "interactions": trial.suggest_int("interactions", 0, 30),
+            "learning_rate": trial.suggest_float("learning_rate", 0.005, 0.1, log=True),
+            "max_rounds": trial.suggest_int("max_rounds", 500, 8000, step=250),
+            "outer_bags": trial.suggest_int("outer_bags", 4, 14, step=2),
         })
 
     return params

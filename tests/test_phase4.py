@@ -33,6 +33,9 @@ from src.models import (
     ExtraTreesDustModel,
     FIGSDustModel,
     NystroemRidgeDustModel,
+    HistGBRDustModel,
+    EBMDustModel,
+    INTERPRET_AVAILABLE,
     DustStackingEnsemble,
     ModelTrainer,
     compute_dust_metrics,
@@ -231,6 +234,53 @@ def test_nystroem_model_wrapper(deterministic_training_data):
 
     model = NystroemRidgeDustModel(
         model_params={"n_components": 20, "alpha": 1.0, "random_state": 42},
+    )
+    model.fit(X, y)
+    assert model.is_fitted_
+
+    preds = model.predict(X)
+    assert len(preds) == len(X)
+    assert np.all(preds >= 0.0)
+
+    imp_df = model.get_feature_importance()
+    assert len(imp_df) == len(f_cols)
+    assert np.isclose(imp_df["normalized_importance"].sum(), 1.0)
+
+
+def test_hist_gbr_model_wrapper(deterministic_training_data):
+    """Verifies HistGradientBoostingRegressor wrapper, monotonic constraints, and Poisson loss."""
+    df, f_cols, target = deterministic_training_data
+    X = df[f_cols]
+    y = df[target]
+
+    model = HistGBRDustModel(
+        model_params={"max_iter": 20, "learning_rate": 0.1, "max_leaf_nodes": 15, "early_stopping": False},
+        monotonic_constraints={"pressure_grad_mag": -1},
+    )
+    model.fit(X, y, eval_set=(X, y))
+    assert model.is_fitted_
+
+    preds = model.predict(X)
+    assert len(preds) == len(X)
+    assert np.all(preds >= 0.0)
+
+    imp_df = model.get_feature_importance()
+    assert len(imp_df) == len(f_cols)
+    assert set(imp_df.columns) == {"feature", "importance", "normalized_importance"}
+
+
+@pytest.mark.skipif(
+    not INTERPRET_AVAILABLE,
+    reason="interpret (EBM) is not installed in this environment",
+)
+def test_ebm_model_wrapper(deterministic_training_data):
+    """Verifies EBM (Explainable Boosting Machine) wrapper and global attribution."""
+    df, f_cols, target = deterministic_training_data
+    X = df[f_cols]
+    y = df[target]
+
+    model = EBMDustModel(
+        model_params={"interactions": 3, "outer_bags": 4, "max_rounds": 200, "random_state": 42},
     )
     model.fit(X, y)
     assert model.is_fitted_

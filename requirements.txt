@@ -20,6 +20,9 @@ xgboost>=2.0.0
 catboost>=1.2.0
 imodels>=1.3.0
 
+# Explainable Boosting Machine (EBM / InterpretML) suite member
+interpret>=0.6.0
+
 # Hyperparameter Optimization (Optuna tuning)
 optuna>=3.0.0
 
