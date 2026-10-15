@@ -117,7 +117,7 @@ class ModelTrainer:
 
         # Identify feature columns
         if feature_cols is None:
-            available_features = [c for c in ALL_FEATURE_COLUMNS if c in valid_df.columns]
+            available_features = [c for c in FULL_MULTIMODAL_COLUMNS if c in valid_df.columns]
             if not available_features:
                 # Fallback to all numeric columns except keys and target
                 exclude_cols = {"grid_id", "timestamp", "lat", "lon", "utm_x", "utm_y", self.target_col, "split"}

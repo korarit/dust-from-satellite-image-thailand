@@ -77,16 +77,21 @@ KEY_COLUMNS = ["grid_id", "timestamp", "lat", "lon", "utm_x", "utm_y"]
 
 SAT_BT_COLUMNS = [f"bt_{b.lower()}" for b in ALL_IR_BANDS]
 
+# Physics BTD engineers actually fed to the models.
+# Removed duplicates:
+#   - btd_14_11 / btd_10_08 -> aliases of btd_13_11 / btd_13_10 (B14/B08 are never ingested)
+#   - dust_rgb_red         -> deterministic monotonic transform of btd_15_13
 SAT_BTD_COLUMNS = [
     "btd_15_13",
-    "btd_14_11",
     "btd_13_07",
-    "btd_10_08",
-    "dust_rgb_red",
     "btd_13_10",
     "btd_13_11",
 ]
 
+# Spatial texture statistics fed to the models.
+# The four "*_diff_mean_*" defects are exact linear combinations of the
+# center BT and the corresponding window mean (center - mean), so they are
+# not emitted as features to avoid perfect collinearity.
 SAT_TEXTURE_COLUMNS = [
     "b13_mean_3x3",
     "b13_std_3x3",
@@ -96,19 +101,18 @@ SAT_TEXTURE_COLUMNS = [
     "b15_std_3x3",
     "btd_15_13_mean_3x3",
     "btd_15_13_std_3x3",
-    "b13_diff_mean_3x3",
-    "btd_15_13_diff_mean_3x3",
     "b13_mean_rad3",
     "b13_std_rad3",
-    "b13_diff_mean_rad3",
     "btd_15_13_mean_rad3",
     "btd_15_13_std_rad3",
-    "btd_15_13_diff_mean_rad3",
 ]
 
+# Temporal tendencies fed to the models.
+# Only the per-hour rate is kept: "*_cadence" is the same delta divided by a
+# station-specific dt, i.e. perfectly collinear with the rate for valid rows.
+# A companion "temporal_delta_valid" mask (see AUXILIARY_FEATURE_COLUMNS)
+# disambiguates "no previous observation" from "genuinely unchanged".
 SAT_TEMPORAL_COLUMNS = [
-    "delta_bt13_cadence",
-    "delta_btd15_13_cadence",
     "delta_bt13_rate_per_hour",
     "delta_btd15_13_rate_per_hour",
 ]
@@ -150,6 +154,17 @@ TOPO_SOLAR_COLUMNS = [
 
 WEATHER_FEATURE_COLUMNS = WEATHER_PRESSURE_COLUMNS + WEATHER_HUMIDITY_COLUMNS
 
+# Data-quality / provenance masks exposed to the models so that an imputed or
+# cloud-occluded value is never mistaken for a genuine measurement:
+#   - temporal_delta_valid : 1 when a valid previous satellite observation exists
+#   - imputed_flag         : 1 when any physical feature was physics-imputed
+#   - cloud_occluded_flag  : 1 when deep cloud prevented an authentic retrieval
+AUXILIARY_FEATURE_COLUMNS = [
+    "temporal_delta_valid",
+    "imputed_flag",
+    "cloud_occluded_flag",
+]
+
 # Satellite & Topographic/Solar Features (Maritime & Offshore Capable, No Ground Stations Needed)
 NO_WEATHER_FEATURE_COLUMNS = (
     SAT_BT_COLUMNS
@@ -157,8 +172,10 @@ NO_WEATHER_FEATURE_COLUMNS = (
     + SAT_TEXTURE_COLUMNS
     + SAT_TEMPORAL_COLUMNS
     + TOPO_SOLAR_COLUMNS
+    + AUXILIARY_FEATURE_COLUMNS
 )
 
+# Physical feature schema (no quality masks) - used for dtype/audit checks.
 ALL_FEATURE_COLUMNS = (
     SAT_BT_COLUMNS
     + SAT_BTD_COLUMNS
@@ -169,7 +186,8 @@ ALL_FEATURE_COLUMNS = (
     + TOPO_SOLAR_COLUMNS
 )
 
-FULL_MULTIMODAL_COLUMNS = ALL_FEATURE_COLUMNS
+# Full model input set = physical features + quality masks.
+FULL_MULTIMODAL_COLUMNS = ALL_FEATURE_COLUMNS + AUXILIARY_FEATURE_COLUMNS
 TARGET_COLUMN = "observed_pm25"
 TARGET_COLUMN_PM25 = "observed_pm25"
 TARGET_COLUMN_PM10 = "observed_pm10"
@@ -453,15 +471,21 @@ class PhysicsFallbackImputer:
                 else:
                     out_df[col] = np.float32(CLIMATOLOGY_SURFACE_BT_K)
 
-        # 5. Impute Temporal Tendencies (Stationary Atmosphere assumption: delta = 0.0)
+        # 5. Impute Temporal Tendencies (Stationary Atmosphere assumption: delta = 0.0).
+        #    A missing tendency is NOT the same as a genuinely flat one, so we first
+        #    record a validity mask before back-filling 0.0 for numerical continuity.
+        temporal_valid = pd.Series(1.0, index=out_df.index, dtype=np.float32)
         for col in SAT_TEMPORAL_COLUMNS:
             if col in out_df.columns:
                 nans = out_df[col].isna()
                 if nans.any():
+                    temporal_valid = temporal_valid.where(~nans, 0.0)
                     imputed_mask |= nans
                     out_df[col] = out_df[col].fillna(0.0).astype(np.float32)
             else:
                 out_df[col] = np.float32(0.0)
+                temporal_valid = pd.Series(0.0, index=out_df.index, dtype=np.float32)
+        out_df["temporal_delta_valid"] = temporal_valid.astype(np.float32)
 
         # 6. Impute Weather Pressure Columns with Barometric Elevation Scaling
         p_mean = (
@@ -475,7 +499,9 @@ class PhysicsFallbackImputer:
         )
         # Barometric elevation scale factor: P(z) = P0 * (1 - L*z/T0)^5.25588
         if "elevation_m" in out_df.columns:
-            z_s = out_df["elevation_m"].fillna(0.0).clip(lower=0.0).astype(float)
+            _elev = out_df["elevation_m"].dropna()
+            _elev_fill = float(_elev.median()) if len(_elev) > 0 else 0.0
+            z_s = out_df["elevation_m"].fillna(_elev_fill).clip(lower=0.0).astype(float)
             f_baro = (1.0 - (0.0065 * z_s) / 288.15) ** 5.25588
             p_elevation_adjusted = (p_mean * f_baro).astype(np.float32)
         else:
@@ -525,12 +551,20 @@ class PhysicsFallbackImputer:
         else:
             out_df["humidity_mean_surround"] = np.float32(h_mean)
 
+        # humidity_grad_mag uses a median default (0.0 would falsely imply a
+        # perfectly uniform humidity field); humidity_std_surround keeps 0.0
+        # (zero spatial spread is the neutral value).
         for h_col in ["humidity_std_surround", "humidity_grad_mag"]:
             if h_col in out_df.columns:
                 nans = out_df[h_col].isna()
                 if nans.any():
                     imputed_mask |= nans
-                    out_df[h_col] = out_df[h_col].fillna(0.0).astype(np.float32)
+                    if h_col == "humidity_grad_mag":
+                        valid_h = out_df[h_col].dropna()
+                        h_default = float(valid_h.median()) if len(valid_h) > 0 and valid_h.median() > 0 else 0.0
+                        out_df[h_col] = out_df[h_col].fillna(h_default).astype(np.float32)
+                    else:
+                        out_df[h_col] = out_df[h_col].fillna(0.0).astype(np.float32)
             else:
                 out_df[h_col] = np.float32(0.0)
 

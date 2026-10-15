@@ -1223,24 +1223,29 @@ def _enrich_multi_year_matrix(
     if stn_key and "timestamp_utc" in out_df.columns and "bt_b13" in out_df.columns:
         out_df = out_df.sort_values([stn_key, "timestamp_utc"]).reset_index(drop=True)
         dt_h = out_df.groupby(stn_key)["timestamp_utc"].diff().dt.total_seconds() / 3600.0
-        dt_h = dt_h.fillna(0.0)
         valid_cadence = (dt_h > 0.0) & (dt_h <= 24.0)
         dt_valid = dt_h.where(valid_cadence, np.nan)
 
-        d_bt13 = out_df.groupby(stn_key)["bt_b13"].diff().fillna(0.0)
+        # Keep NaN for "no previous observation" (do NOT collapse it to 0.0,
+        # which would falsely read as a stationary atmosphere).
+        d_bt13 = out_df.groupby(stn_key)["bt_b13"].diff()
         d_btd = (
-            out_df.groupby(stn_key)["btd_15_13"].diff().fillna(0.0)
+            out_df.groupby(stn_key)["btd_15_13"].diff()
             if "btd_15_13" in out_df.columns
-            else pd.Series(0.0, index=out_df.index)
+            else pd.Series(np.nan, index=out_df.index)
         )
 
-        rate_bt13 = (d_bt13 / dt_valid).fillna(0.0).astype(np.float32)
-        rate_btd = (d_btd / dt_valid).fillna(0.0).astype(np.float32)
+        # Provenance mask: valid only when a real previous step exists.
+        has_prev = d_bt13.notna() & d_btd.notna()
+        out_df["temporal_delta_valid"] = (valid_cadence & has_prev).astype(np.float32)
+
+        rate_bt13 = (d_bt13 / dt_valid).astype(np.float32)
+        rate_btd = (d_btd / dt_valid).astype(np.float32)
 
         out_df["delta_bt13_rate_per_hour"] = rate_bt13
         out_df["delta_btd15_13_rate_per_hour"] = rate_btd
-        out_df["delta_bt13_cadence"] = d_bt13.where(valid_cadence, 0.0).astype(np.float32)
-        out_df["delta_btd15_13_cadence"] = d_btd.where(valid_cadence, 0.0).astype(np.float32)
+        out_df["delta_bt13_cadence"] = d_bt13.where(valid_cadence, np.nan).astype(np.float32)
+        out_df["delta_btd15_13_cadence"] = d_btd.where(valid_cadence, np.nan).astype(np.float32)
 
         # Spatial Differences (Defects) relative to 3x3 window and 3-pixel surrounding neighborhood
         if "bt_b13" in out_df.columns and "b13_mean_3x3" in out_df.columns:
@@ -1461,12 +1466,13 @@ def run_phase_4_full(
             d_btd = (
                 sat_valid.groupby(join_key)["btd_15_13"].diff()
                 if "btd_15_13" in sat_valid.columns
-                else pd.Series(0.0, index=sat_valid.index)
+                else pd.Series(np.nan, index=sat_valid.index)
             )
-            sat_valid["delta_bt13_rate_per_hour"] = (d_bt13 / dt_h.where(has_prev_satellite, np.nan)).fillna(0.0).astype(np.float32)
-            sat_valid["delta_btd15_13_rate_per_hour"] = (d_btd / dt_h.where(has_prev_satellite, np.nan)).fillna(0.0).astype(np.float32)
-            sat_valid["delta_bt13_cadence"] = d_bt13.where(has_prev_satellite, 0.0).astype(np.float32)
-            sat_valid["delta_btd15_13_cadence"] = d_btd.where(has_prev_satellite, 0.0).astype(np.float32)
+            sat_valid["delta_bt13_rate_per_hour"] = (d_bt13 / dt_h.where(has_prev_satellite, np.nan)).astype(np.float32)
+            sat_valid["delta_btd15_13_rate_per_hour"] = (d_btd / dt_h.where(has_prev_satellite, np.nan)).astype(np.float32)
+            sat_valid["delta_bt13_cadence"] = d_bt13.where(has_prev_satellite, np.nan).astype(np.float32)
+            sat_valid["delta_btd15_13_cadence"] = d_btd.where(has_prev_satellite, np.nan).astype(np.float32)
+            sat_valid["temporal_delta_valid"] = has_prev_satellite.astype(np.float32)
             # Skip rows where t - cadence satellite data is missing (Strict Continuous Cadence)
             sat_continuous = sat_valid[has_prev_satellite].copy()
             logger.info("  • Satellite observations with valid t - cadence history: %d/%d (%.1f%% retained)",

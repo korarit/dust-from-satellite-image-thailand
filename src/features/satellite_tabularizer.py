@@ -261,8 +261,8 @@ class SatelliteTabularizer:
                     how="left",
                     suffixes=("", "_past")
                 )
-                d_bt13 = (merged["bt_b13"] - merged["bt_b13_past"]).fillna(0.0).to_numpy(dtype=np.float32)
-                d_btd = (merged["btd_15_13"] - merged["btd_15_13_past"]).fillna(0.0).to_numpy(dtype=np.float32)
+                d_bt13 = (merged["bt_b13"] - merged["bt_b13_past"]).to_numpy(dtype=np.float32)
+                d_btd = (merged["btd_15_13"] - merged["btd_15_13_past"]).to_numpy(dtype=np.float32)
             else:
                 d_bt13 = (out_df["bt_b13"].values - past_df["bt_b13"].values).astype(np.float32)
                 d_btd = (out_df["btd_15_13"].values - past_df["btd_15_13"].values).astype(np.float32)
@@ -273,8 +273,11 @@ class SatelliteTabularizer:
         d_c_bt13, d_c_btd = _calc_delta(ref_past)
         eff_hours = max(cadence_hours, 0.1) if past_cadence_df is not None else (1.0 if past_60m_df is not None else 0.5)
 
-        out_df["delta_bt13_cadence"] = d_c_bt13 if d_c_bt13 is not None else np.zeros(n, dtype=np.float32)
-        out_df["delta_btd15_13_cadence"] = d_c_btd if d_c_btd is not None else np.zeros(n, dtype=np.float32)
+        # No previous frame -> NaN (missing), NOT 0.0 (which would falsely mean
+        # "stationary atmosphere"). The downstream imputer fills NaN with 0.0 but
+        # records temporal_delta_valid so the model can tell the two apart.
+        out_df["delta_bt13_cadence"] = d_c_bt13 if d_c_bt13 is not None else np.full(n, np.nan, dtype=np.float32)
+        out_df["delta_btd15_13_cadence"] = d_c_btd if d_c_btd is not None else np.full(n, np.nan, dtype=np.float32)
         out_df["delta_bt13_rate_per_hour"] = (out_df["delta_bt13_cadence"] / eff_hours).astype(np.float32)
         out_df["delta_btd15_13_rate_per_hour"] = (out_df["delta_btd15_13_cadence"] / eff_hours).astype(np.float32)
 
