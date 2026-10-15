@@ -807,4 +807,143 @@ class EvaluationPlotter:
         outputs["panel"] = panel_path
         return outputs
 
+    def plot_provider_feature_resolution_benchmark(
+        self,
+        summary_table: Union[pd.DataFrame, List[Dict[str, Any]]],
+        filename: Optional[str] = None,
+        pollutant: str = "pm25",
+    ) -> Path:
+        """
+        Generates a Feature Set x Resolution x Provider benchmark figure:
+        one row per feature set (Full Multimodal, Pure Satellite), two columns
+        (Ensemble MAE and R²), grouped bars by provider within each resolution.
+        Also exports the summary CSV.
+        """
+        pol = pollutant.lower()
+        pol_name = pol.upper()
+        fname = filename or f"provider_feature_resolution_benchmark_{pol}.png"
+        df = pd.DataFrame(summary_table) if not isinstance(summary_table, pd.DataFrame) else summary_table.copy()
+
+        required = {"resolution_name", "feature_set", "provider", "ensemble_mae", "ensemble_r2"}
+        if df.empty or not required.issubset(df.columns):
+            logger.warning("Empty or invalid provider feature/resolution summary. Skipping plot.")
+            return self.output_dir / fname
+
+        res_col = "resolution_name" if "resolution_name" in df.columns else "resolution_km"
+        res_order = [r for r in ["3km", "2km", "1km", "500m"] if r in df[res_col].unique()] or list(df[res_col].unique())
+        fs_order = list(df["feature_set"].unique())
+
+        combined_names = [p for p in df["provider"].unique() if "combined" in str(p).lower()]
+        provider_order = [p for p in ["Air4Thai", "AirGradient"] if p in df["provider"].unique()] + combined_names
+        prov_palette = {"Air4Thai": "#38bdf8", "AirGradient": "#34d399"}
+        for cn in combined_names:
+            prov_palette[cn] = "#f59e0b"
+
+        n_fs = len(fs_order)
+        fig, axes = plt.subplots(n_fs, 2, figsize=(16, 4.2 * n_fs), facecolor=BG_COLOR, squeeze=False)
+        for i, fs in enumerate(fs_order):
+            sub = df[df["feature_set"] == fs]
+            for j, (metric, label) in enumerate([("ensemble_mae", "MAE (µg/m³)"), ("ensemble_r2", "R²")]):
+                ax = axes[i][j]
+                ax.set_facecolor(PANEL_COLOR)
+                sns.barplot(
+                    data=sub, x=res_col, y=metric, hue="provider",
+                    hue_order=provider_order, order=res_order, palette=prov_palette,
+                    ax=ax, edgecolor="#ffffff", linewidth=0.5
+                )
+                ax.set_title(f"[{fs}] Ensemble {pol_name} {label}", fontsize=11, fontweight="bold", color=ACCENT_BLUE)
+                ax.set_xlabel("Spatial Resolution", fontsize=10, fontweight="bold")
+                ax.set_ylabel(f"Ensemble {label}", fontsize=10, fontweight="bold")
+                ax.grid(True, alpha=0.4)
+                ax.legend(title="Provider", facecolor="#090d16", edgecolor=GRID_COLOR, fontsize=8)
+
+        plt.suptitle(
+            f"Thailand Provider-Partitioned {pol_name} Benchmark (Feature Set × Resolution × Provider)",
+            fontsize=13, fontweight="bold", color=TEXT_COLOR, y=0.995
+        )
+        plt.tight_layout()
+
+        out_path = self.output_dir / fname
+        plt.savefig(out_path, dpi=200, bbox_inches="tight")
+        plt.close(fig)
+        logger.info("Saved provider feature×resolution benchmark plot -> %s", out_path)
+
+        csv_path = self.csv_dir / f"provider_feature_resolution_summary_{pol}.csv"
+        df.to_csv(csv_path, index=False)
+        logger.info("Saved provider feature×resolution summary CSV -> %s", csv_path)
+        return out_path
+
+    def plot_cross_provider_matrix(
+        self,
+        cross_table: Union[pd.DataFrame, List[Dict[str, Any]]],
+        metric: str = "mae",
+        filename: Optional[str] = None,
+        pollutant: str = "pm25",
+    ) -> Path:
+        """
+        Generates a Cross-Provider Generalization heatmap grid (train provider → test
+        provider swap benchmark): one panel per feature set x resolution, rows are the
+        training provider, columns the evaluated provider, coloured by the chosen metric.
+        """
+        pol = pollutant.lower()
+        pol_name = pol.upper()
+        fname = filename or f"cross_provider_matrix_{metric}_{pol}.png"
+        df = pd.DataFrame(cross_table) if not isinstance(cross_table, pd.DataFrame) else cross_table.copy()
+
+        required = {"feature_set", "resolution_name", "train_provider", "test_provider", metric}
+        if df.empty or not required.issubset(df.columns):
+            logger.warning("Empty or invalid cross-provider table for metric '%s'. Skipping plot.", metric)
+            return self.output_dir / fname
+
+        def _short(p: Any) -> str:
+            return "Combined" if "combined" in str(p).lower() else str(p)
+
+        df["train_short"] = df["train_provider"].map(_short)
+        df["test_short"] = df["test_provider"].map(_short)
+
+        res_order = [r for r in ["3km", "2km", "1km", "500m"] if r in df["resolution_name"].unique()] or list(df["resolution_name"].unique())
+        fs_order = list(df["feature_set"].unique())
+        row_order = [r for r in ["Air4Thai", "AirGradient", "Combined"] if r in set(df["train_short"])] or sorted(df["train_short"].unique())
+        col_order = [c for c in ["Air4Thai", "AirGradient"] if c in set(df["test_short"])] or sorted(df["test_short"].unique())
+
+        cmap = "viridis_r" if metric.lower() == "mae" else "viridis"
+        all_vals = df[metric].dropna()
+        vmin = float(all_vals.min()) if len(all_vals) else 0.0
+        vmax = float(all_vals.max()) if len(all_vals) else 1.0
+
+        n_fs, n_res = len(fs_order), len(res_order)
+        fig, axes = plt.subplots(n_fs, n_res, figsize=(4.6 * n_res, 3.8 * n_fs), facecolor=BG_COLOR, squeeze=False)
+        for i, fs in enumerate(fs_order):
+            for j, res in enumerate(res_order):
+                ax = axes[i][j]
+                ax.set_facecolor(PANEL_COLOR)
+                sub = df[(df["feature_set"] == fs) & (df["resolution_name"] == res)]
+                if sub.empty:
+                    ax.set_title(f"[{fs} | {res}] (no data)", fontsize=9, color=MUTED_TEXT)
+                    ax.axis("off")
+                    continue
+                piv = sub.pivot_table(index="train_short", columns="test_short", values=metric, aggfunc="mean")
+                piv = piv.reindex(index=row_order, columns=col_order)
+                sns.heatmap(
+                    piv, annot=True, fmt=".2f", cmap=cmap, vmin=vmin, vmax=vmax,
+                    ax=ax, cbar=(j == n_res - 1), linewidths=0.5, linecolor=GRID_COLOR,
+                    annot_kws={"fontsize": 9}
+                )
+                ax.set_title(f"[{fs} | {res}] train→test {metric.upper()}", fontsize=9, fontweight="bold", color=ACCENT_BLUE)
+                ax.set_xlabel("Test Provider", fontsize=9, fontweight="bold")
+                ax.set_ylabel("Train Provider", fontsize=9, fontweight="bold")
+
+        plt.suptitle(
+            f"Cross-Provider Generalization ({pol_name}) — {metric.upper()} "
+            f"(train on provider → predict across providers)",
+            fontsize=13, fontweight="bold", color=TEXT_COLOR, y=0.995
+        )
+        plt.tight_layout()
+
+        out_path = self.output_dir / fname
+        plt.savefig(out_path, dpi=200, bbox_inches="tight")
+        plt.close(fig)
+        logger.info("Saved cross-provider %s matrix plot -> %s", metric.upper(), out_path)
+        return out_path
+
 

@@ -559,12 +559,14 @@ def test_multi_resolution_provider_benchmark_execution(deterministic_training_da
 
 
 def test_provider_partitioned_training_and_cross_provider(deterministic_training_data, tmp_path):
-    """Verifies provider-partitioned production training persists checkpoints, trains Combined,
-    and produces cross-provider (train -> predict swap) generalization rows."""
+    """Verifies provider-partitioned production training runs every feature set x provider,
+    persists checkpoints, trains Combined, and produces cross-provider (train -> predict swap) rows."""
     df, f_cols, target = deterministic_training_data
     half = len(df) // 2
     df_prov = df.copy()
     df_prov["provider"] = ["Air4Thai"] * half + ["AirGradient"] * (len(df) - half)
+
+    pure_cols = [c for c in f_cols if c not in ("p_north", "p_south", "humidity_mean_surround", "pressure_grad_mag")]
 
     trainer = ModelTrainer(output_dir=tmp_path / "models")
     trainer.config = {
@@ -581,25 +583,27 @@ def test_provider_partitioned_training_and_cross_provider(deterministic_training
     results = trainer.run_provider_partitioned_training(
         train_matrices_by_res={2.0: df_prov.copy()},
         test_matrices_by_res={},
-        feature_cols=f_cols,
         providers=["Air4Thai", "AirGradient"],
+        feature_sets={"full": f_cols, "pure": pure_cols},
         include_combined=True,
         cross_provider_eval=True,
         save_checkpoints=True,
     )
 
-    # Per-provider + Combined training summary
+    # Per-provider + Combined, across both feature sets
     summary_df = pd.DataFrame(results["summary_table"])
     prov_set = set(summary_df["provider"].unique())
     assert "Air4Thai" in prov_set
     assert "AirGradient" in prov_set
     assert any("Combined" in p for p in prov_set)
+    assert set(summary_df["feature_set"].unique()) == {"full", "pure"}
 
-    # Every checkpoint persisted (isolated providers + Combined)
+    # Every checkpoint persisted (feature set x provider x Combined)
     chk_names = {Path(c).name for c in results["checkpoints"]}
-    assert "exp_2km_air4thai_pm25" in chk_names
-    assert "exp_2km_airgradient_pm25" in chk_names
-    assert "exp_2km_combined_pm25" in chk_names
+    assert "exp_2km_full_air4thai_pm25" in chk_names
+    assert "exp_2km_pure_air4thai_pm25" in chk_names
+    assert "exp_2km_full_airgradient_pm25" in chk_names
+    assert "exp_2km_pure_combined_pm25" in chk_names
 
     # Cross-provider swap rows exist in both directions
     cross_df = pd.DataFrame(results["cross_provider_table"])
@@ -639,5 +643,37 @@ def test_evaluation_plotter_provider_graphics(tmp_path):
     assert p_dict["Air4Thai"].exists()
     assert p_dict["AirGradient"].exists()
     assert p_dict["panel"].exists()
+
+    # 3. Feature Set x Resolution x Provider benchmark + CSV
+    summary = [
+        {"resolution_name": r, "feature_set": fs, "provider": p,
+         "ensemble_mae": 2.0 + 0.1 * i, "ensemble_r2": 0.80 + 0.01 * i}
+        for i, (r, fs, p) in enumerate(
+            (r, fs, p)
+            for r in ["3km", "2km"]
+            for fs in ["full", "pure_satellite"]
+            for p in ["Air4Thai", "AirGradient", "Combined (Air4Thai + AirGradient)"]
+        )
+    ]
+    p_fs = plotter.plot_provider_feature_resolution_benchmark(summary, pollutant="pm25")
+    assert p_fs.exists()
+    assert (tmp_path / "plots" / "csv" / "provider_feature_resolution_summary_pm25.csv").exists()
+
+    # 4. Cross-provider generalization heatmap (train A -> test B swap)
+    cross = [
+        {"resolution_name": r, "feature_set": fs, "train_provider": tp, "test_provider": vp,
+         "mae": 2.0 + 0.2 * i, "r2": 0.8 - 0.01 * i, "eval_split": "test"}
+        for i, (r, fs, tp, vp) in enumerate(
+            (r, fs, tp, vp)
+            for r in ["3km", "2km"]
+            for fs in ["full", "pure_satellite"]
+            for tp in ["Air4Thai", "AirGradient", "Combined (Air4Thai + AirGradient)"]
+            for vp in ["Air4Thai", "AirGradient"]
+        )
+    ]
+    p_cross_mae = plotter.plot_cross_provider_matrix(cross, metric="mae", pollutant="pm25")
+    p_cross_r2 = plotter.plot_cross_provider_matrix(cross, metric="r2", pollutant="pm25")
+    assert p_cross_mae.exists()
+    assert p_cross_r2.exists()
 
 

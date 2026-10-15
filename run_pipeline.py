@@ -122,6 +122,8 @@ from src.features import (
     compute_solar_angles_vectorized,
     compute_cyclical_time_features,
     ALL_FEATURE_COLUMNS,
+    NO_WEATHER_FEATURE_COLUMNS,
+    FULL_MULTIMODAL_COLUMNS,
     KEY_COLUMNS,
     TARGET_COLUMN,
 )
@@ -1357,12 +1359,13 @@ def run_phase_4_full(pollutant: str = "pm25", split_date: str = "2026-01-01") ->
     Executes Phase 4 Full Multi-Year Model Suite & Ensemble Training:
     - Loads historical training ground truth (2024-2025) and test ground truth (2026)
     - Prepares enriched feature matrices with real temporal rates, Copernicus DEM, and weather
+    - Trains provider-partitioned production ensembles FIRST (Air4Thai, AirGradient,
+      then Combined): persists every checkpoint and runs a cross-provider generalization
+      benchmark (train on one provider, predict the other, swapped)
     - Trains DUAL MODEL ARCHITECTURES:
         1. Pure Satellite Suite (Maritime / Sea Grid Capable, Zero Ground Stations Needed)
         2. Full Multimodal Suite (Satellite + Topography + Ground Weather Telemetry)
     - Generates multi-resolution benchmark (EXP-3KM, EXP-2KM, EXP-1KM, EXP-500M)
-    - Trains provider-partitioned production ensembles (Air4Thai, AirGradient, Combined):
-      persists every checkpoint and runs a cross-provider generalization benchmark
     - Evaluates Out-of-Time generalization on 2026 Test split and saves all production checkpoints
     """
     pol = pollutant.lower()
@@ -1508,8 +1511,63 @@ def run_phase_4_full(pollutant: str = "pm25", split_date: str = "2026-01-01") ->
 
     trainer = ModelTrainer(config_path=MODEL_CONFIG_PATH, output_dir=models_dir, pollutant=pol, target_col=tgt_col)
 
+    # Resolution-adapted matrices shared by the provider, ablation, and benchmark steps
+    res_engine = MultiResolutionGridEngine()
+    train_matrices_by_res = {
+        res: res_engine.adapt_feature_matrix_for_resolution(train_df, res)
+        for res in [3.0, 2.0, 1.0, 0.5]
+    }
+    test_matrices_by_res = {
+        res: res_engine.adapt_feature_matrix_for_resolution(test_df, res)
+        for res in [3.0, 2.0, 1.0, 0.5]
+    } if not test_df.empty else {}
+
     # --------------------------------------------------------------------------
-    # 1. Scientific Weather Ablation: Model 1 (Pure Satellite) vs Model 2 (Multimodal)
+    # 1. Provider-Partitioned Production Training (FIRST):
+    #    Air4Thai -> AirGradient -> Combined (persists every checkpoint; Combined
+    #    is the production inference model) plus cross-provider generalization
+    #    benchmark (train on one provider, predict the other, swapped).
+    # --------------------------------------------------------------------------
+    logger.info("\n" + "=" * 75)
+    logger.info("🧩 PHASE 4 PROVIDER-PARTITIONED PRODUCTION TRAINING (%s)", tgt_name)
+    logger.info("  • Feature sets: Full Multimodal + Pure Satellite, at every resolution")
+    logger.info("  • Providers: Air4Thai, AirGradient, Combined (per feature set × resolution)")
+    logger.info("  • [Combined] Air4Thai + AirGradient production ensemble")
+    logger.info("  • Cross-provider generalization (train → predict swap)")
+    logger.info("=" * 75)
+
+    provider_res = trainer.run_provider_partitioned_training(
+        train_matrices_by_res=train_matrices_by_res,
+        test_matrices_by_res=test_matrices_by_res,
+        providers=["Air4Thai", "AirGradient"],
+        feature_sets={
+            "full": list(FULL_MULTIMODAL_COLUMNS),
+            "pure_satellite": list(NO_WEATHER_FEATURE_COLUMNS),
+        },
+        include_combined=True,
+        cross_provider_eval=True,
+        save_checkpoints=True,
+    )
+
+    # Provider matrix visual diagnostics:
+    #   • Feature Set × Resolution × Provider benchmark (grouped bars) + CSV
+    #   • Cross-provider generalization heatmaps (train on provider → predict across) + CSV
+    eval_dir = get_evaluation_dir(pol)
+    provider_plotter = EvaluationPlotter(output_dir=eval_dir, pollutant=pol)
+    if provider_res.get("summary_table"):
+        provider_plotter.plot_provider_feature_resolution_benchmark(
+            provider_res["summary_table"], pollutant=pol
+        )
+    if provider_res.get("cross_provider_table"):
+        provider_plotter.plot_cross_provider_matrix(
+            provider_res["cross_provider_table"], metric="mae", pollutant=pol
+        )
+        provider_plotter.plot_cross_provider_matrix(
+            provider_res["cross_provider_table"], metric="r2", pollutant=pol
+        )
+
+    # --------------------------------------------------------------------------
+    # 2. Scientific Weather Ablation: Model 1 (Pure Satellite) vs Model 2 (Multimodal)
     # --------------------------------------------------------------------------
     logger.info("\n" + "=" * 75)
     logger.info("🔬 PHASE 4 DUAL MODEL ARCHITECTURES (%s)", tgt_name)
@@ -1525,49 +1583,16 @@ def run_phase_4_full(pollutant: str = "pm25", split_date: str = "2026-01-01") ->
     )
 
     # --------------------------------------------------------------------------
-    # 2. Multi-Resolution Benchmark: 3.0km, 2.0km, 1.0km, 0.5km
+    # 3. Multi-Resolution Benchmark: 3.0km, 2.0km, 1.0km, 0.5km
     # --------------------------------------------------------------------------
     logger.info("\n" + "=" * 75)
     logger.info("🗺️ PHASE 4 MULTI-RESOLUTION BENCHMARK MATRIX (%s)", tgt_name)
     logger.info("  • Resolutions: 3.0 km (EXP-3KM), 2.0 km (EXP-2KM), 1.0 km (EXP-1KM), 0.5 km (EXP-500M)")
     logger.info("=" * 75)
 
-    res_engine = MultiResolutionGridEngine()
-    train_matrices_by_res = {
-        res: res_engine.adapt_feature_matrix_for_resolution(train_df, res)
-        for res in [3.0, 2.0, 1.0, 0.5]
-    }
-    test_matrices_by_res = {
-        res: res_engine.adapt_feature_matrix_for_resolution(test_df, res)
-        for res in [3.0, 2.0, 1.0, 0.5]
-    } if not test_df.empty else {}
-
     benchmark_res = trainer.run_multi_resolution_benchmark(
         train_matrices_by_res=train_matrices_by_res,
         test_matrices_by_res=test_matrices_by_res,
-    )
-
-    # --------------------------------------------------------------------------
-    # 3. Provider-Partitioned Production Training: Air4Thai -> AirGradient -> Combined
-    #    (persists every checkpoint; Combined is the production inference model)
-    #    plus cross-provider generalization benchmark (train on one provider,
-    #    predict the other, swapped).
-    # --------------------------------------------------------------------------
-    logger.info("\n" + "=" * 75)
-    logger.info("🧩 PHASE 4 PROVIDER-PARTITIONED PRODUCTION TRAINING (%s)", tgt_name)
-    logger.info("  • [Air4Thai] isolated ensemble checkpoint")
-    logger.info("  • [AirGradient] isolated ensemble checkpoint")
-    logger.info("  • [Combined] Air4Thai + AirGradient production ensemble")
-    logger.info("  • Cross-provider generalization (train → predict swap)")
-    logger.info("=" * 75)
-
-    provider_res = trainer.run_provider_partitioned_training(
-        train_matrices_by_res=train_matrices_by_res,
-        test_matrices_by_res=test_matrices_by_res,
-        providers=["Air4Thai", "AirGradient"],
-        include_combined=True,
-        cross_provider_eval=True,
-        save_checkpoints=True,
     )
     benchmark_res["provider_partitioned_training"] = provider_res
 

@@ -23,6 +23,7 @@ from src.config.paths import (
     REPORTS_DIR,
     get_models_dir,
     get_reports_dir,
+    get_evaluation_csv_dir,
     load_yaml_config,
 )
 from src.features.feature_matrix_builder import (
@@ -705,18 +706,20 @@ class ModelTrainer:
         self,
         train_matrices_by_res: Dict[float, pd.DataFrame],
         test_matrices_by_res: Optional[Dict[float, pd.DataFrame]] = None,
-        feature_cols: Optional[List[str]] = None,
         providers: Optional[List[str]] = None,
+        feature_sets: Optional[Dict[str, List[str]]] = None,
         include_combined: bool = True,
         min_samples_per_provider: int = 4,
         cross_provider_eval: bool = True,
         save_checkpoints: bool = True,
     ) -> Dict[str, Any]:
         """
-        Production training partitioned by ground-truth provider:
-        1. Trains an isolated ensemble per authorized provider (Air4Thai, AirGradient),
-           persisting each checkpoint, then trains the Combined ensemble (used for
-           production inference). Logging mirrors run_multi_resolution_provider_benchmark.
+        Production training partitioned by ground-truth provider, run for every
+        feature set (Full Multimodal and Pure Satellite) at every grid resolution:
+        1. For each resolution x feature set x provider (Air4Thai, AirGradient,
+           Combined) trains an isolated ensemble, persisting every checkpoint
+           (Combined is the production inference model). Logging mirrors
+           run_multi_resolution_provider_benchmark.
         2. Runs a cross-provider generalization benchmark: every trained ensemble is
            applied to each provider's hold-out, so a model trained on Air4Thai is also
            scored on AirGradient data and vice versa (train -> predict swap).
@@ -728,11 +731,18 @@ class ModelTrainer:
             if p.strip().lower() not in ("clarity", "airnow", "habitatmap")
         ]
 
+        if feature_sets is None:
+            feature_sets = {
+                "full": list(FULL_MULTIMODAL_COLUMNS),
+                "pure_satellite": list(NO_WEATHER_FEATURE_COLUMNS),
+            }
+
         res_names = {3.0: "3km", 2.0: "2km", 1.0: "1km", 0.5: "500m"}
 
         benchmark_results: Dict[str, Any] = {
             "pollutant": self.pollutant,
             "target_providers": norm_providers,
+            "feature_sets": list(feature_sets.keys()),
             "include_combined": include_combined,
             "by_resolution": {},
             "trained_ensembles": {},
@@ -744,6 +754,7 @@ class ModelTrainer:
         logger.info("=" * 80)
         logger.info("🧩 PROVIDER-PARTITIONED PRODUCTION TRAINING (%s)", self.pollutant.upper())
         logger.info("Providers: %s | Combined: %s", ", ".join(norm_providers), include_combined)
+        logger.info("Feature sets: %s", ", ".join(feature_sets.keys()))
         logger.info("Excluding sparse networks: Clarity, AirNow, HabitatMap")
         logger.info("=" * 80)
 
@@ -761,102 +772,113 @@ class ModelTrainer:
             if include_combined and len(norm_providers) > 1:
                 runs_to_execute.append(("Combined", True))
 
-            for prov_name, is_comb in runs_to_execute:
-                if is_comb:
-                    sub_train = train_df[train_df["provider"].isin(norm_providers)].copy()
-                    exp_id = f"EXP-{res_label.upper()}-COMBINED"
-                    prov_display = f"Combined ({' + '.join(norm_providers)})"
-                    log_icon = "🌐"
-                else:
-                    sub_train = train_df[train_df["provider"] == prov_name].copy()
-                    exp_id = f"EXP-{res_label.upper()}-{prov_name.upper()}"
-                    prov_display = prov_name
-                    log_icon = "🏢" if "air4thai" in prov_name.lower() else "📡"
-
-                logger.info("\n" + "-" * 75)
-                logger.info("%s [TRAIN] Resolution: %s | Provider: %s | Samples: N=%d",
-                            log_icon, res_label, prov_display, len(sub_train))
-                logger.info("-" * 75)
-
-                if len(sub_train) < min_samples_per_provider:
-                    logger.warning("⚠️ Insufficient samples for provider '%s' at %s (N=%d < min=%d). Skipping.",
-                                   prov_name, res_label, len(sub_train), min_samples_per_provider)
+            for fs_label, fs_cols in feature_sets.items():
+                active_cols = [c for c in fs_cols if c in train_df.columns]
+                if not active_cols:
+                    logger.warning("⚠️ Feature set '%s' has no matching columns at %s. Skipping.",
+                                   fs_label, res_label)
                     continue
 
-                cv_splits = min(5, max(2, len(sub_train) // 2))
-                ensemble = self.train_suite(
-                    train_df=sub_train,
-                    cv=cv_splits,
-                    feature_cols=feature_cols,
-                    experiment_id=exp_id,
-                )
-                benchmark_results["trained_ensembles"][exp_id] = ensemble
+                for prov_name, is_comb in runs_to_execute:
+                    if is_comb:
+                        sub_train = train_df[train_df["provider"].isin(norm_providers)].copy()
+                        prov_key = "COMBINED"
+                        prov_display = f"Combined ({' + '.join(norm_providers)})"
+                        log_icon = "🌐"
+                    else:
+                        sub_train = train_df[train_df["provider"] == prov_name].copy()
+                        prov_key = prov_name.upper()
+                        prov_display = prov_name
+                        log_icon = "🏢" if "air4thai" in prov_name.lower() else "📡"
 
-                exp_clean = exp_id.lower().replace("-", "_")
-                chk_path = self.output_dir / f"{exp_clean}_{self.pollutant}"
-                if save_checkpoints and chk_path.exists():
-                    benchmark_results["checkpoints"].append(str(chk_path))
-                    logger.info("  💾 Checkpoint persisted: %s", chk_path.name)
+                    exp_id = f"EXP-{res_label.upper()}-{fs_label.upper()}-{prov_key}"
 
-                ens_m = ensemble.oof_metrics_.get("ensemble", {})
-                logger.info("  • %-26s OOF | MAE: %6.3f | RMSE: %6.3f | R²: %6.4f | Pearson: %6.4f | AQI: %5.2f%%",
-                            prov_display, ens_m.get("mae", 0.0), ens_m.get("rmse", 0.0),
-                            ens_m.get("r2", 0.0), ens_m.get("pearson_r", 0.0), ens_m.get("aqi_acc", 0.0))
-                logger.info("  • Stacking Weights: %s", {k: round(v, 4) for k, v in ensemble.weights.items()})
+                    logger.info("\n" + "-" * 75)
+                    logger.info("%s [TRAIN] Resolution: %s | Feature Set: %s | Provider: %s | Samples: N=%d",
+                                log_icon, res_label, fs_label, prov_display, len(sub_train))
+                    logger.info("-" * 75)
 
-                summary_rows.append({
-                    "experiment": exp_id,
-                    "resolution_name": res_label,
-                    "resolution_km": res_km,
-                    "provider": prov_display,
-                    "is_combined": is_comb,
-                    "n_samples": len(sub_train),
-                    "ensemble_mae": ens_m.get("mae", 0.0),
-                    "ensemble_rmse": ens_m.get("rmse", 0.0),
-                    "ensemble_r2": ens_m.get("r2", 0.0),
-                    "ensemble_pearson_r": ens_m.get("pearson_r", 0.0),
-                    "ensemble_aqi_acc": ens_m.get("aqi_acc", 0.0),
-                    "weight_lgbm": round(ensemble.weights.get("lightgbm", 0.0), 3),
-                    "weight_catboost": round(ensemble.weights.get("catboost", 0.0), 3),
-                    "weight_xgboost": round(ensemble.weights.get("xgboost", 0.0), 3),
-                    "weight_rf": round(ensemble.weights.get("random_forest", 0.0), 3),
-                })
+                    if len(sub_train) < min_samples_per_provider:
+                        logger.warning("⚠️ Insufficient samples for provider '%s' (%s, %s) N=%d < min=%d. Skipping.",
+                                       prov_name, res_label, fs_label, len(sub_train), min_samples_per_provider)
+                        continue
 
-                # Cross-provider generalization (train on one provider, predict the others)
-                if cross_provider_eval:
-                    has_test = test_df is not None and len(test_df) >= 2
-                    eval_df = test_df if has_test else train_df
-                    split_name = "test" if has_test else "train(in-sample)"
-                    logger.info("  🔀 Cross-Provider Generalization [%s] (%s → each provider, %s):",
-                                res_label, prov_display, split_name)
-                    for target_prov in norm_providers:
-                        sub_eval = eval_df[eval_df["provider"] == target_prov].copy()
-                        if len(sub_eval) == 0:
-                            continue
-                        f_cols = feature_cols or ensemble.feature_names_
-                        try:
-                            X_ev, y_ev, _ = self.prepare_data(sub_eval, f_cols)
-                        except Exception as exc:
-                            logger.warning("    ⚠️ Skipping %s → %s: %s", prov_display, target_prov, exc)
-                            continue
-                        preds = ensemble.predict(X_ev)
-                        m = compute_dust_metrics(y_ev, preds, pollutant=self.pollutant)
-                        cross_rows.append({
-                            "resolution_name": res_label,
-                            "resolution_km": res_km,
-                            "train_provider": prov_display,
-                            "test_provider": target_prov,
-                            "eval_split": split_name,
-                            "n_samples": len(X_ev),
-                            "mae": m.get("mae", 0.0),
-                            "rmse": m.get("rmse", 0.0),
-                            "r2": m.get("r2", 0.0),
-                            "pearson_r": m.get("pearson_r", 0.0),
-                            "aqi_acc": m.get("aqi_acc", 0.0),
-                        })
-                        logger.info("    ↳ %-22s | N=%-6d | MAE: %6.3f | RMSE: %6.3f | R²: %7.4f | AQI: %5.2f%%",
-                                    target_prov, len(X_ev), m.get("mae", 0.0), m.get("rmse", 0.0),
-                                    m.get("r2", 0.0), m.get("aqi_acc", 0.0))
+                    cv_splits = min(5, max(2, len(sub_train) // 2))
+                    ensemble = self.train_suite(
+                        train_df=sub_train,
+                        cv=cv_splits,
+                        feature_cols=active_cols,
+                        experiment_id=exp_id,
+                    )
+                    benchmark_results["trained_ensembles"][exp_id] = ensemble
+
+                    exp_clean = exp_id.lower().replace("-", "_")
+                    chk_path = self.output_dir / f"{exp_clean}_{self.pollutant}"
+                    if save_checkpoints and chk_path.exists():
+                        benchmark_results["checkpoints"].append(str(chk_path))
+                        logger.info("  💾 Checkpoint persisted: %s", chk_path.name)
+
+                    ens_m = ensemble.oof_metrics_.get("ensemble", {})
+                    logger.info("  • %-26s OOF | MAE: %6.3f | RMSE: %6.3f | R²: %6.4f | Pearson: %6.4f | AQI: %5.2f%%",
+                                prov_display, ens_m.get("mae", 0.0), ens_m.get("rmse", 0.0),
+                                ens_m.get("r2", 0.0), ens_m.get("pearson_r", 0.0), ens_m.get("aqi_acc", 0.0))
+                    logger.info("  • Stacking Weights: %s", {k: round(v, 4) for k, v in ensemble.weights.items()})
+
+                    summary_rows.append({
+                        "experiment": exp_id,
+                        "resolution_name": res_label,
+                        "resolution_km": res_km,
+                        "feature_set": fs_label,
+                        "n_features": len(active_cols),
+                        "provider": prov_display,
+                        "is_combined": is_comb,
+                        "n_samples": len(sub_train),
+                        "ensemble_mae": ens_m.get("mae", 0.0),
+                        "ensemble_rmse": ens_m.get("rmse", 0.0),
+                        "ensemble_r2": ens_m.get("r2", 0.0),
+                        "ensemble_pearson_r": ens_m.get("pearson_r", 0.0),
+                        "ensemble_aqi_acc": ens_m.get("aqi_acc", 0.0),
+                        "weight_lgbm": round(ensemble.weights.get("lightgbm", 0.0), 3),
+                        "weight_catboost": round(ensemble.weights.get("catboost", 0.0), 3),
+                        "weight_xgboost": round(ensemble.weights.get("xgboost", 0.0), 3),
+                        "weight_rf": round(ensemble.weights.get("random_forest", 0.0), 3),
+                    })
+
+                    # Cross-provider generalization (train on one provider, predict the others)
+                    if cross_provider_eval:
+                        has_test = test_df is not None and len(test_df) >= 2
+                        eval_df = test_df if has_test else train_df
+                        split_name = "test" if has_test else "train(in-sample)"
+                        logger.info("  🔀 Cross-Provider Generalization [%s | %s] (%s → each provider, %s):",
+                                    res_label, fs_label, prov_display, split_name)
+                        for target_prov in norm_providers:
+                            sub_eval = eval_df[eval_df["provider"] == target_prov].copy()
+                            if len(sub_eval) == 0:
+                                continue
+                            try:
+                                X_ev, y_ev, _ = self.prepare_data(sub_eval, active_cols)
+                            except Exception as exc:
+                                logger.warning("    ⚠️ Skipping %s → %s: %s", prov_display, target_prov, exc)
+                                continue
+                            preds = ensemble.predict(X_ev)
+                            m = compute_dust_metrics(y_ev, preds, pollutant=self.pollutant)
+                            cross_rows.append({
+                                "resolution_name": res_label,
+                                "resolution_km": res_km,
+                                "feature_set": fs_label,
+                                "train_provider": prov_display,
+                                "test_provider": target_prov,
+                                "eval_split": split_name,
+                                "n_samples": len(X_ev),
+                                "mae": m.get("mae", 0.0),
+                                "rmse": m.get("rmse", 0.0),
+                                "r2": m.get("r2", 0.0),
+                                "pearson_r": m.get("pearson_r", 0.0),
+                                "aqi_acc": m.get("aqi_acc", 0.0),
+                            })
+                            logger.info("    ↳ %-22s | N=%-6d | MAE: %6.3f | RMSE: %6.3f | R²: %7.4f | AQI: %5.2f%%",
+                                        target_prov, len(X_ev), m.get("mae", 0.0), m.get("rmse", 0.0),
+                                        m.get("r2", 0.0), m.get("aqi_acc", 0.0))
 
         summary_df = pd.DataFrame(summary_rows)
         cross_df = pd.DataFrame(cross_rows)
@@ -890,12 +912,12 @@ class ModelTrainer:
             "",
             "## 1. Per-Provider Production Training Summary",
             "",
-            "| Experiment | Resolution | Provider | N | **Ensemble MAE** | RMSE | R² | Pearson r | AQI Acc (%) |",
-            "| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |",
+            "| Experiment | Resolution | Feature Set | Provider | N | **Ensemble MAE** | RMSE | R² | Pearson r | AQI Acc (%) |",
+            "| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |",
         ]
         for _, r in summary_df.iterrows():
             md_lines.append(
-                f"| **{r['experiment']}** | {r['resolution_name']} | {r['provider']} | {r['n_samples']} | "
+                f"| **{r['experiment']}** | {r['resolution_name']} | {r['feature_set']} | {r['provider']} | {r['n_samples']} | "
                 f"**{r['ensemble_mae']:.2f}** | {r['ensemble_rmse']:.2f} | {r['ensemble_r2']:.3f} | "
                 f"{r['ensemble_pearson_r']:.4f} | {r['ensemble_aqi_acc']:.2f} |"
             )
@@ -904,11 +926,11 @@ class ModelTrainer:
         md_lines.append("## 2. Cross-Provider Generalization (train → predict swap)")
         md_lines.append("")
         if not cross_df.empty:
-            md_lines.append("| Resolution | Trained On | Predicted On | Split | N | MAE | RMSE | R² | Pearson r | AQI Acc (%) |")
-            md_lines.append("| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |")
+            md_lines.append("| Resolution | Feature Set | Trained On | Predicted On | Split | N | MAE | RMSE | R² | Pearson r | AQI Acc (%) |")
+            md_lines.append("| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |")
             for _, r in cross_df.iterrows():
                 md_lines.append(
-                    f"| {r['resolution_name']} | {r['train_provider']} | {r['test_provider']} | {r['eval_split']} | "
+                    f"| {r['resolution_name']} | {r['feature_set']} | {r['train_provider']} | {r['test_provider']} | {r['eval_split']} | "
                     f"{r['n_samples']} | {r['mae']:.2f} | {r['rmse']:.2f} | {r['r2']:.3f} | "
                     f"{r['pearson_r']:.4f} | {r['aqi_acc']:.2f} |"
                 )
@@ -928,5 +950,17 @@ class ModelTrainer:
         with open(md_path, "w", encoding="utf-8") as f:
             f.write("\n".join(md_lines))
         logger.info("Saved Markdown provider-partitioned training report to: %s", md_path)
+
+        # CSV exports (training summary + cross-provider train->test matrices)
+        csv_dir = get_evaluation_csv_dir(self.pollutant)
+        csv_dir.mkdir(parents=True, exist_ok=True)
+        if not summary_df.empty:
+            s_csv = csv_dir / f"provider_partitioned_summary{suffix}.csv"
+            summary_df.to_csv(s_csv, index=False)
+            logger.info("Saved provider-partitioned summary CSV -> %s", s_csv)
+        if not cross_df.empty:
+            c_csv = csv_dir / f"provider_partitioned_cross_provider{suffix}.csv"
+            cross_df.to_csv(c_csv, index=False)
+            logger.info("Saved provider-partitioned cross-provider CSV -> %s", c_csv)
 
 
