@@ -63,6 +63,10 @@ class CatBoostDustModel(BaseDustModel):
         self.feature_names_ = f_names
 
         fit_params = dict(self.params)
+        # Defensive: `tweedie_variance_power` is NOT a CatBoostRegressor kwarg —
+        # the power lives inside `loss_function="Tweedie:variance_power=<p>"`.
+        # Drop it if a stale tuned YAML / caller passes it through.
+        fit_params.pop("tweedie_variance_power", None)
         if self.monotonic_constraints and len(self.feature_names_) > 0:
             m_list = [self.monotonic_constraints.get(fn, 0) for fn in self.feature_names_]
             if any(m != 0 for m in m_list):

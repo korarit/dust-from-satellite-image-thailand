@@ -14,6 +14,7 @@ Optuna is imported lazily so the main pipeline keeps working without it
 
 import json
 import logging
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -86,14 +87,18 @@ def suggest_params(trial: Any, model_key: str, base_params: Dict[str, Any]) -> D
             "tweedie_variance_power": trial.suggest_float("tweedie_variance_power", 1.1, 1.9),
         })
     elif model_key == "catboost":
+        # NOTE: CatBoostRegressor has NO `tweedie_variance_power` kwarg — the power
+        # is encoded inside `loss_function="Tweedie:variance_power=<p>"` only.
+        # Suggesting it as an Optuna param is fine, but it must NOT be passed to
+        # the model constructor (TypeError otherwise).
         tvar = trial.suggest_float("tweedie_variance_power", 1.1, 1.9)
         params.update({
             "depth": trial.suggest_int("depth", 4, 10),
             "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.1, log=True),
             "l2_leaf_reg": trial.suggest_float("l2_leaf_reg", 1.0, 20.0, log=True),
-            "tweedie_variance_power": tvar,
             "loss_function": f"Tweedie:variance_power={tvar:.3f}",
         })
+        params.pop("tweedie_variance_power", None)
     elif model_key == "xgboost":
         params.update({
             "max_depth": trial.suggest_int("max_depth", 3, 10),
@@ -200,12 +205,21 @@ def run_optuna_tuning(
     resolution_km: float = 2.0,
     output_yaml: Optional[Path] = None,
     save_history: bool = True,
+    log_every: int = 1,
 ) -> Dict[str, Any]:
     """
     Tunes base learners on the supplied 2 km training dataframe and writes the best
     parameters to ``configs/tuned_params_<pollutant>.yaml`` (returned as a dict).
 
     Returns a mapping ``{"<feature_set>__<provider>": {model_key: params}}``.
+
+    Live logging (per --tune pipeline runs):
+    - header per model: ``=== [key|model] (i/N)`` with trial budget,
+    - one line per trial (or every ``log_every`` trials): current MAE/RMSE/R2 +
+      running best MAE, with ``*`` on improvement,
+    - footer per model: best MAE/R2/elapsed + best-trial number.
+    Per-model trial CSVs (``{key}__{model}_trials.csv``) are still written at
+    the end of each model — the console log is the realtime channel.
     """
     try:
         import optuna
@@ -281,8 +295,11 @@ def run_optuna_tuning(
                         key, len(X_tr), len(X_ho), len(fs_cols))
             logger.info("-" * 80)
 
-            for model_key in models:
+            for mi, model_key in enumerate(models, start=1):
                 base_params = dict(base_models_cfg.get(model_key, {}))
+                logger.info("  === [%s|%s] (%d/%d) trials=%d -- start",
+                            key, model_key, mi, len(models), trials)
+                t_model_start = time.perf_counter()
 
                 def objective(trial, _mk=model_key, _bp=base_params) -> float:
                     params = suggest_params(trial, _mk, _bp)
@@ -296,17 +313,42 @@ def run_optuna_tuning(
                     trial.set_user_attr("aqi_acc", float(m["aqi_acc"]))
                     return float(m["mae"])
 
+                def _trial_log_callback(study, trial) -> None:
+                    try:
+                        n_done = trial.number + 1
+                        is_last = (trial.number == trials - 1)
+                        if (n_done % max(1, log_every) != 0) and not is_last:
+                            return
+                        val = trial.value if trial.value is not None else float("nan")
+                        best = study.best_value if study.best_value is not None else float("nan")
+                        rmse = float(trial.user_attrs.get("rmse", float("nan")))
+                        r2 = float(trial.user_attrs.get("r2", float("nan")))
+                        star = " * new best" if (trial.value is not None
+                                                 and study.best_trial is not None
+                                                 and trial.number == study.best_trial.number) else ""
+                        elapsed = time.perf_counter() - t_model_start
+                        logger.info("    - [%s|%s] trial %2d/%d MAE=%.3f RMSE=%.3f R2=%.4f | best=%.3f (+%ds)%s",
+                                    key, model_key, n_done, trials, val, rmse, r2, best,
+                                    int(elapsed), star)
+                    except Exception:  # logging must never break tuning
+                        pass
+
                 study = optuna.create_study(
                     study_name=f"{key}__{model_key}",
                     direction="minimize",
                     sampler=optuna.samplers.TPESampler(seed=seed),
                 )
-                study.optimize(objective, n_trials=trials, show_progress_bar=False)
+                study.optimize(objective, n_trials=trials, show_progress_bar=False,
+                               callbacks=[_trial_log_callback], catch=(Exception,))
 
                 best_params = dict(base_params)
                 best_params.update(study.best_params)
-                if model_key == "catboost" and "tweedie_variance_power" in study.best_params:
-                    best_params["loss_function"] = f"Tweedie:variance_power={study.best_params['tweedie_variance_power']:.3f}"
+                if model_key == "catboost":
+                    # Drop the Optuna-only search key; the wrapper + YAML must only
+                    # carry `loss_function="Tweedie:variance_power=<p>"`.
+                    best_params.pop("tweedie_variance_power", None)
+                    if "tweedie_variance_power" in study.best_params:
+                        best_params["loss_function"] = f"Tweedie:variance_power={study.best_params['tweedie_variance_power']:.3f}"
                 tuned[key][model_key] = best_params
 
                 if save_history:
@@ -318,6 +360,7 @@ def run_optuna_tuning(
                     hist.to_csv(reports_dir / f"{key}__{model_key}_trials.csv", index=False)
 
                 bt = study.best_trial
+                elapsed_model = time.perf_counter() - t_model_start
                 summary_rows.append({
                     "feature_set": fs_label,
                     "provider": prov,
@@ -332,8 +375,9 @@ def run_optuna_tuning(
                     "trials": trials,
                     "params": json.dumps(best_params),
                 })
-                logger.info("  ✓ %-13s best MAE: %6.3f | R²: %6.4f | (trial %d)",
-                            model_key, float(bt.value), float(bt.user_attrs.get("r2", 0.0)), bt.number)
+                logger.info("  [OK] %-13s best MAE: %6.3f | R2: %6.4f | (trial %d/%d, %ds)",
+                            model_key, float(bt.value), float(bt.user_attrs.get("r2", 0.0)),
+                            bt.number + 1, trials, int(elapsed_model))
 
     if save_history and master_history:
         master_df = pd.concat(master_history, ignore_index=True)
