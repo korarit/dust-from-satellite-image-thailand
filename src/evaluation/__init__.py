@@ -41,6 +41,11 @@ from src.evaluation.benchmark_suite import (
 
 from src.evaluation.plotter import EvaluationPlotter
 
+from src.evaluation.shap_engine import (
+    ShapAttributionEngine,
+    TREE_EXPLAINER_KEYS,
+)
+
 __all__ = [
     # Metrics
     "compute_continuous_metrics",
@@ -68,4 +73,7 @@ __all__ = [
     "RESOLUTION_NAMES",
     # Plotter
     "EvaluationPlotter",
+    # SHAP Attribution Engine
+    "ShapAttributionEngine",
+    "TREE_EXPLAINER_KEYS",
 ]

@@ -149,6 +149,7 @@ from src.evaluation import (
     DustMapVisualizer,
     MultiResolutionBenchmarkSuite,
     EvaluationPlotter,
+    ShapAttributionEngine,
     THAILAND_REGIONS,
     RESOLUTION_NAMES,
 )
@@ -680,6 +681,19 @@ def run_phase_4_smoke_test(target_dt: pd.Timestamp, pollutant: str = "pm25", cad
                     r["lightgbm_importance"], r["catboost_importance"],
                     r["xgboost_importance"], r["random_forest_importance"])
 
+    # 6b. SHAP Ensemble-Consensus Attribution (direction-aware, per-sample)
+    logger.info("\n--- Step 6b: Computing SHAP Ensemble-Consensus Feature Attribution ---")
+    shap_engine = ShapAttributionEngine(
+        ensemble=ensemble,
+        output_dir=get_evaluation_dir(pol),
+        pollutant=pol,
+    )
+    shap_result = shap_engine.compute_and_export(unified_matrix)
+    logger.info("  • SHAP Top 5 Features (mean |SHAP|, signed):")
+    for _, r in shap_result["attribution_df"].head(5).iterrows():
+        logger.info("    %-25s |SHAP| = %7.2f µg/m³  (sign %+0.2f)",
+                    r["feature"], r["mean_abs_shap"], r["mean_signed_shap"])
+
     # 7. Multi-Resolution Experiment Matrix Execution (3km, 2km, 1km, 500m)
     logger.info("\n--- Step 7: Executing Multi-Resolution Benchmark (3km, 2km, 1km, 500m - %s) ---", tgt_name)
     train_matrices_by_res = {
@@ -940,6 +954,20 @@ def run_phase_5_smoke_test(target_dt: pd.Timestamp, pollutant: str = "pm25", cad
     )
     for plot_name, plot_path in eval_plots.items():
         logger.info("  • Diagnostic Plot: %-30s -> %s", plot_name, plot_path.name)
+
+    # 9b. SHAP Ensemble-Consensus Attribution (direction-aware, per-sample)
+    logger.info("\n--- Step 9b: Computing SHAP Ensemble-Consensus Feature Attribution ---")
+    shap_feat_cols = [c for c in ensemble.feature_names_ if c in unified_matrix.columns]
+    shap_engine = ShapAttributionEngine(
+        ensemble=ensemble,
+        output_dir=eval_dir,
+        pollutant=pol,
+    )
+    shap_result = shap_engine.compute_and_export(unified_matrix[shap_feat_cols])
+    logger.info("  • SHAP CSV    -> %s", shap_result["csv"].name)
+    logger.info("  • SHAP Bar    -> %s", shap_result["summary_bar"].name)
+    if shap_result["beeswarm"] is not None:
+        logger.info("  • SHAP Beeswarm -> %s", shap_result["beeswarm"].name)
 
     # 11. Zero-Mock Verification Gate
     logger.info("\n--- Step 10: Executing Phase 1B Zero-Mock Verification Gate ---")

@@ -26,6 +26,9 @@ interpret>=0.6.0
 # Hyperparameter Optimization (Optuna tuning)
 optuna>=3.0.0
 
+# SHAP Explainability (TreeExplainer consensus attribution)
+shap>=0.45.0
+
 # Development, Quality Audit & Testing
 tqdm>=4.65.0
 pytest>=7.0.0
