@@ -1202,7 +1202,8 @@ def _enrich_multi_year_matrix(
     """
     Enriches the multi-year dataset with:
     1. Genuine physical temporal cadence tendencies & hourly rates (dt_hours, delta_bt13_rate_per_hour, delta_btd15_13_rate_per_hour).
-    2. Authentic Master Grid Topography (elevation_m, slope_deg, dist_coast_km, coriolis_param) via cKDTree.
+    2. Authentic Master Grid Topography (elevation_m, slope_deg, dist_coast_km) via cKDTree.
+       (A2 fix: coriolis excluded — lat fingerprint, no 2km physics.)
     3. HII authentic ground weather observations if available.
     4. PhysicsFallbackImputer to guarantee 100% complete feature sets for both:
        - Mode 1: Pure Satellite (NO_WEATHER_FEATURE_COLUMNS)
@@ -1270,7 +1271,8 @@ def _enrich_multi_year_matrix(
         found_grid = next((p for p in grid_candidates if p.exists() and p.stat().st_size > 0), None)
         if found_grid:
             grid_df = pd.read_parquet(found_grid)
-            topo_cols = [c for c in ["elevation_m", "elevation_std", "slope_deg", "aspect_sin", "aspect_cos", "dist_coast_km", "coriolis_param"] if c in grid_df.columns]
+            # A1/A2 fix: topo only — coriolis + solar/time are NOT training features.
+            topo_cols = [c for c in ["elevation_m", "elevation_std", "slope_deg", "aspect_sin", "aspect_cos", "dist_coast_km"] if c in grid_df.columns]
             from scipy.spatial import cKDTree
             tree = cKDTree(np.column_stack([grid_df["centroid_lat"].values, grid_df["centroid_lon"].values]))
             dists, idxs = tree.query(np.column_stack([out_df[lat_col].to_numpy(dtype=float), out_df[lon_col].to_numpy(dtype=float)]))
@@ -1278,7 +1280,8 @@ def _enrich_multi_year_matrix(
                 out_df[c] = grid_df.iloc[idxs][c].values.astype(np.float32)
             logger.info("  ✓ Attached Master Grid Topography (%s) via spatial KDTree.", topo_cols)
 
-    # 3. Solar and Cyclical Features
+    # 3. Solar and Cyclical Features (A1 fix: META ONLY for day/night eval + B07
+    # correction — excluded from ALL_FEATURE_COLUMNS, never enter the model)
     if lat_col and lon_col and "timestamp_utc" in out_df.columns:
         sza, is_day = compute_solar_angles_vectorized(
             out_df["timestamp_utc"],

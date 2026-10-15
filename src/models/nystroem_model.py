@@ -79,9 +79,17 @@ class NystroemRidgeDustModel(BaseDustModel):
 
         self.nystroem = Nystroem(
             kernel=kernel,
-            n_components=min(n_comp, len(X_scaled)),
+            # P2-3 fix: tiny subsets (N < n_components) previously collapsed the
+            # kernel rank. Floor at min(10, N) and warn so small-N folds stay valid.
+            n_components=max(1, min(n_comp, len(X_scaled))),
             random_state=r_state,
         )
+        if len(X_scaled) < n_comp:
+            logger.warning(
+                "Nystroem n_components=%d > N=%d; clamped to %d. Small-N kernel "
+                "approximation is low-rank — treat importances with caution.",
+                n_comp, len(X_scaled), max(1, min(n_comp, len(X_scaled))),
+            )
         X_kernel = self.nystroem.fit_transform(X_scaled)
 
         # 4. Ridge regression

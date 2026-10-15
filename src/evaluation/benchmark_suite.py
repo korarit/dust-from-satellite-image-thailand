@@ -249,12 +249,22 @@ class MultiResolutionBenchmarkSuite:
         else:
             rq1 = "Optimal resolution could not be determined due to empty ensemble data."
 
-        # RQ2: Topography Gain vs Sensor Blur
-        rq2 = (
-            "At 1 km and 500 m resolutions, Copernicus DEM 30m features (TPI basin index, local relief, elevation std) "
-            "provide sharp physical terrain signatures that significantly compensate for Himawari-9 2km IR pixel oversampling, "
-            "especially in Northern mountainous valleys."
-        )
+        # RQ2: Topography Gain vs Sensor Blur (P3-3: data-driven, was hard-coded)
+        try:
+            ens_by_res = ens_df.set_index("resolution_km")["mae"] if not ens_df.empty else None
+            if ens_by_res is not None and 2.0 in ens_by_res.index and 1.0 in ens_by_res.index:
+                gain = float(ens_by_res.loc[2.0] - ens_by_res.loc[1.0])
+                rq2 = (
+                    f"2km -> 1km ensemble MAE delta: {gain:+.2f} µg/m³ "
+                    f"(2km {float(ens_by_res.loc[2.0]):.2f} vs 1km {float(ens_by_res.loc[1.0]):.2f}). "
+                    + ("Positive gain supports DEM-30m downscaling at 1km. "
+                       if gain > 0 else "No gain from 1km downscaling on this split. ")
+                    + "Confirm with leave-province-out + night-only slices before claiming terrain skill."
+                )
+            else:
+                rq2 = "Insufficient resolution coverage to quantify topography gain (need 2km and 1km ensemble MAE)."
+        except Exception:
+            rq2 = "Topography gain could not be quantified from leaderboard data."
 
         # RQ3: Best Model per Resolution
         rq3_parts = []
@@ -263,11 +273,16 @@ class MultiResolutionBenchmarkSuite:
             rq3_parts.append(f"{res}: {best_model['model']} (MAE {best_model['mae']:.2f} µg/m³)")
         rq3 = "; ".join(rq3_parts)
 
-        # RQ4: Compute Trade-off (Pareto Frontier)
-        rq4 = (
-            "1 km × 1 km represents the optimal Pareto Frontier sweet spot between spatial precision (MAE reduction) "
-            "and computational throughput (~12s full snapshot inference vs ~85s for 500m), making it ideal for operational real-time nowcasting."
-        )
+        # RQ4: Compute Trade-off (P3-3: data-driven Pareto from measured latency)
+        try:
+            if not ens_df.empty and "latency_ms" in ens_df.columns and "mae" in ens_df.columns:
+                pareto = ens_df[["resolution", "resolution_km", "mae", "latency_ms"]].sort_values("mae")
+                parts = [f"{r['resolution']} (MAE {r['mae']:.2f}, {r['latency_ms']:.1f}ms)" for _, r in pareto.iterrows()]
+                rq4 = "Measured cost-accuracy Pareto (sorted by MAE): " + "; ".join(parts) + "."
+            else:
+                rq4 = "Latency/throughput not measured for this benchmark; Pareto undetermined."
+        except Exception:
+            rq4 = "Compute trade-off could not be determined from benchmark data."
 
         return {
             "RQ1_Optimal_Resolution": rq1,

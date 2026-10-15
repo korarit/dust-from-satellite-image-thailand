@@ -61,10 +61,9 @@ EXCLUSION_BUFFER_MAP = {
     0.5: 0.5,
 }
 
-# DEM search paths
+# DEM search paths (P3-1 fix: removed hard-coded E:/... absolute path; use env + repo-relative only)
 COMMON_DEM_DIRS = [
     GEO_DIR / "dem",
-    Path("e:/water-analysis-project/weather-forcast-enhance/data/geo/dem"),
     Path("data/geo/dem"),
 ]
 
@@ -133,6 +132,10 @@ def compute_geographic_proxies(
     """
     Computes distance to coast (km) and Coriolis parameter (s^-1) for Thailand coordinates.
     Uses high-resolution polyline KDTree of Thai Andaman and Gulf coastlines in UTM Zone 47N.
+
+    NOTE (A2 fix 15-10-2026): coriolis_param is a pure latitude fingerprint with no
+    physical effect at 2 km scale. It is computed here for back-compat only and
+    MUST NOT be fed to models (excluded from TOPO_SOLAR_COLUMNS).
     """
     lat_arr = np.asarray(lats, dtype=np.float64)
     lon_arr = np.asarray(lons, dtype=np.float64)
@@ -144,11 +147,20 @@ def compute_geographic_proxies(
     dists, _ = tree.query(coords_km)
     dist_coast_km = np.clip(dists, 0.1, 850.0).astype(np.float32)
 
-    # Coriolis parameter: f = 2 * Omega * sin(lat_rad)
+    # Coriolis parameter: f = 2 * Omega * sin(lat_rad) — DEPRECATED for training (A2)
     lat_rad = np.radians(lat_arr)
     coriolis_param = (2.0 * OMEGA_EARTH * np.sin(lat_rad)).astype(np.float32)
 
     return dist_coast_km, coriolis_param
+
+
+def compute_dist_coast_only(
+    lats: np.ndarray,
+    lons: np.ndarray,
+) -> np.ndarray:
+    """A2-compliant helper: distance-to-coast only, no coriolis leakage."""
+    dist_coast_km, _ = compute_geographic_proxies(lats, lons)
+    return dist_coast_km
 
 
 def compute_solar_zenith_angle(
@@ -353,20 +365,26 @@ class MultiResolutionGridEngine:
         tree = cKDTree(coords_km)
 
         n = len(grid_df)
-        tpi = np.zeros(n, dtype=np.float32)
-
-        # Batch query within radius
+        # P2-1 fix: vectorized TPI (was per-cell python loop -> OOM at 276k cells).
+        # mean_surround via bincount over flattened neighbour index array.
         idx_lists = tree.query_ball_point(coords_km, r=radius_km)
-        for i in range(n):
-            nbrs = idx_lists[i]
-            if len(nbrs) > 1:
-                nbr_elevs = elevs[nbrs]
-                valid = nbr_elevs[~np.isnan(nbr_elevs)]
-                mean_surround = float(np.mean(valid)) if len(valid) > 0 else elevs[i]
-            else:
-                mean_surround = elevs[i]
-
-            tpi[i] = float(elevs[i] - mean_surround)
+        counts = np.array([len(v) for v in idx_lists], dtype=np.int64)
+        total_nbrs = int(counts.sum())
+        if total_nbrs > 0:
+            flat = np.concatenate([np.asarray(v, dtype=np.int64) for v in idx_lists if len(v) > 0])
+            flat_elev = np.where(np.isnan(elevs), np.nan, elevs)
+            # nanmean per cell without python loop over values
+            sums = np.bincount(np.repeat(np.arange(n), counts), weights=np.nan_to_num(flat_elev[flat], nan=0.0))
+            valid_counts = np.bincount(
+                np.repeat(np.arange(n), counts),
+                weights=(~np.isnan(flat_elev[flat])).astype(np.float64),
+            )
+            mean_surround = np.where(valid_counts > 0, sums / np.maximum(valid_counts, 1), elevs)
+            # single-neighbour cells (only self): TPI = 0
+            mean_surround = np.where(counts > 1, mean_surround, elevs)
+        else:
+            mean_surround = elevs
+        tpi = (elevs - mean_surround).astype(np.float32)
 
         return tpi
 
@@ -389,21 +407,26 @@ class MultiResolutionGridEngine:
         coords_km = np.column_stack([x_m / 1000.0, y_m / 1000.0])
         tree = cKDTree(coords_km)
 
-        n = len(grid_df)
-        relief = np.zeros(n, dtype=np.float32)
+        # P2-1 fix: vectorized relief (was per-cell python loop).
         idx_lists = tree.query_ball_point(coords_km, r=radius_km)
-
-        for i in range(n):
-            nbrs = idx_lists[i]
-            if len(nbrs) > 1:
-                nbr_elevs = elevs[nbrs]
-                valid = nbr_elevs[~np.isnan(nbr_elevs)]
-                if len(valid) > 1:
-                    relief[i] = float(np.max(valid) - np.min(valid))
-                else:
-                    relief[i] = 0.0
-            else:
-                relief[i] = 0.0
+        counts = np.array([len(v) for v in idx_lists], dtype=np.int64)
+        total_nbrs = int(counts.sum())
+        relief = np.zeros(len(grid_df), dtype=np.float32)
+        if total_nbrs > 0:
+            flat = np.concatenate([np.asarray(v, dtype=np.int64) for v in idx_lists if len(v) > 0])
+            flat_elev = elevs[flat]
+            cell_ids = np.repeat(np.arange(len(grid_df)), counts)
+            # per-cell max/min via bincount on sorted trick: use pandas-free loop over
+            # unique cells only when neighbour count is small; fallback vectorized with
+            # np.maximum.at / np.minimum.at (C-level, no python per-cell stats).
+            fmax = np.full(len(grid_df), -np.inf)
+            fmin = np.full(len(grid_df), np.inf)
+            valid = ~np.isnan(flat_elev)
+            np.maximum.at(fmax, cell_ids[valid], flat_elev[valid])
+            np.minimum.at(fmin, cell_ids[valid], flat_elev[valid])
+            has_multi = counts > 1
+            relief = np.where(has_multi, (fmax - fmin).astype(np.float32), 0.0).astype(np.float32)
+            relief[~np.isfinite(relief)] = 0.0
 
         return relief
 
@@ -431,6 +454,12 @@ class MultiResolutionGridEngine:
             # Subsample 2km grid with stride 2 or query regular grid
             grid_df = master_df.iloc[::2].copy().reset_index(drop=True)
         elif resolution_km == 1.0:
+            # P2-1 note: 1km/500m are NOT true retrievals — fixed-offset UTM
+            # subdivision of the 2km master (approximation for benchmarking).
+            logger.warning(
+                "Resolution 1.0km is a fixed-offset subdivision of the 2km master, "
+                "not a native 1km retrieval. Topo/texture rescaling is heuristic."
+            )
             # Subdivide 2km cells into 1km UTM sub-cells (4 sub-cells per 2km anchor: offsets [-500m, +500m])
             n_anchors = (max_cells // 4 + 1) if max_cells else len(master_df)
             base_subset = master_df.iloc[:n_anchors]
@@ -449,8 +478,14 @@ class MultiResolutionGridEngine:
             lons, lats = self.to_wgs.transform(grid_df["utm_x"].values, grid_df["utm_y"].values)
             grid_df["centroid_lon"] = lons.astype(np.float32)
             grid_df["centroid_lat"] = lats.astype(np.float32)
-            grid_df["coriolis_param"] = (2.0 * 7.2921159e-5 * np.sin(np.radians(lats))).astype(np.float32)
+            # A2 fix: do NOT create coriolis_param (lat fingerprint). Drop if inherited.
+            if "coriolis_param" in grid_df.columns:
+                grid_df = grid_df.drop(columns=["coriolis_param"])
         elif resolution_km == 0.5:
+            logger.warning(
+                "Resolution 0.5km is a fixed-offset subdivision of the 2km master, "
+                "not a native 500m retrieval. Topo/texture rescaling is heuristic."
+            )
             # Subdivide 2km cells into 500m UTM sub-cells (16 sub-cells per 2km anchor: offsets [-750, -250, 250, 750]m)
             n_anchors = (max_cells // 16 + 1) if max_cells else len(master_df)
             base_subset = master_df.iloc[:n_anchors]
@@ -470,7 +505,9 @@ class MultiResolutionGridEngine:
             lons, lats = self.to_wgs.transform(grid_df["utm_x"].values, grid_df["utm_y"].values)
             grid_df["centroid_lon"] = lons.astype(np.float32)
             grid_df["centroid_lat"] = lats.astype(np.float32)
-            grid_df["coriolis_param"] = (2.0 * 7.2921159e-5 * np.sin(np.radians(lats))).astype(np.float32)
+            # A2 fix: do NOT create coriolis_param (lat fingerprint). Drop if inherited.
+            if "coriolis_param" in grid_df.columns:
+                grid_df = grid_df.drop(columns=["coriolis_param"])
 
         if subsample_step and subsample_step > 1:
             grid_df = grid_df.iloc[::subsample_step].copy().reset_index(drop=True)
@@ -478,11 +515,14 @@ class MultiResolutionGridEngine:
         if max_cells and len(grid_df) > max_cells:
             grid_df = grid_df.iloc[:max_cells].copy().reset_index(drop=True)
 
-        # Ensure dist_coast_km and coriolis_param are computed
+        # Ensure dist_coast_km is computed (A2: coriolis excluded from training).
         if "dist_coast_km" not in grid_df.columns:
-            d_coast, coriolis = compute_geographic_proxies(grid_df["centroid_lat"].values, grid_df["centroid_lon"].values)
-            grid_df["dist_coast_km"] = d_coast
-            grid_df["coriolis_param"] = coriolis
+            grid_df["dist_coast_km"] = compute_dist_coast_only(
+                grid_df["centroid_lat"].values, grid_df["centroid_lon"].values
+            )
+        # Drop legacy coriolis if present in master grid file.
+        if "coriolis_param" in grid_df.columns:
+            grid_df = grid_df.drop(columns=["coriolis_param"])
 
         # Supplement with TPI index and local relief if missing
         if "tpi_index" not in grid_df.columns:
@@ -495,6 +535,36 @@ class MultiResolutionGridEngine:
         grid_df["exclusion_radius_km"] = np.float32(EXCLUSION_BUFFER_MAP[resolution_km])
 
         return grid_df
+
+    def attach_solar_meta(
+        self,
+        grid_df: pd.DataFrame,
+        observation_dt: pd.Timestamp,
+        lat_col: str = "centroid_lat",
+        lon_col: str = "centroid_lon",
+    ) -> pd.DataFrame:
+        """
+        A1 fix (15-10-2026): attaches solar/time META columns for eval/stratification
+        ONLY (solar_zenith_angle, is_daytime, hour_sin/cos, month_sin/cos).
+        These columns are NOT in TOPO_SOLAR_COLUMNS and must never enter the model.
+        """
+        out_df = grid_df.copy()
+        lat_alias = lat_col if lat_col in out_df.columns else ("lat" if "lat" in out_df.columns else None)
+        lon_alias = lon_col if lon_col in out_df.columns else ("lon" if "lon" in out_df.columns else None)
+        if lat_alias is None or lon_alias is None:
+            return out_df
+        lats = out_df[lat_alias].to_numpy(dtype=float)
+        lons = out_df[lon_alias].to_numpy(dtype=float)
+
+        sza, is_day = compute_solar_angles_vectorized(observation_dt, lats, lons)
+        out_df["solar_zenith_angle"] = sza
+        out_df["is_daytime"] = is_day
+
+        time_feats = compute_cyclical_time_features(pd.Series([observation_dt] * len(out_df)))
+        for c in ["hour_sin", "hour_cos", "month_sin", "month_cos"]:
+            out_df[c] = time_feats[c].to_numpy()
+
+        return out_df
 
     def attach_solar_and_time_features(
         self,
@@ -509,20 +579,14 @@ class MultiResolutionGridEngine:
         - is_daytime
         - hour_sin, hour_cos
         - month_sin, month_cos
+
+        NOTE (A1 fix): kept for back-compat (tests + pipeline call it). It now
+        delegates to attach_solar_meta(); callers must treat the result as META,
+        not training features (excluded from ALL_FEATURE_COLUMNS).
         """
-        out_df = grid_df.copy()
-        lats = out_df[lat_col].to_numpy(dtype=float)
-        lons = out_df[lon_col].to_numpy(dtype=float)
-
-        sza, is_day = compute_solar_angles_vectorized(observation_dt, lats, lons)
-        out_df["solar_zenith_angle"] = sza
-        out_df["is_daytime"] = is_day
-
-        time_feats = compute_cyclical_time_features(pd.Series([observation_dt] * len(out_df)))
-        for c in ["hour_sin", "hour_cos", "month_sin", "month_cos"]:
-            out_df[c] = time_feats[c].to_numpy()
-
-        return out_df
+        return self.attach_solar_meta(
+            grid_df, observation_dt=observation_dt, lat_col=lat_col, lon_col=lon_col
+        )
 
     def extract_dem_zonal_stats(
         self,

@@ -22,6 +22,7 @@ from src.features.satellite_tabularizer import (
 from src.features.grid_engine import (
     MultiResolutionGridEngine,
     compute_geographic_proxies,
+    compute_dist_coast_only,
     compute_solar_zenith_angle,
     compute_solar_angles_vectorized,
     compute_cyclical_time_features,
@@ -38,6 +39,10 @@ from src.features.feature_matrix_builder import (
     PhysicsFallbackImputer,
     TargetMatcher,
     resolve_dataset_providers,
+    is_offshore_mask,
+    route_offshore_to_pure_sat,
+    add_target_anomaly,
+    get_group_labels,
     KEY_COLUMNS,
     SAT_BT_COLUMNS,
     SAT_BTD_COLUMNS,
@@ -49,8 +54,11 @@ from src.features.feature_matrix_builder import (
     NO_WEATHER_FEATURE_COLUMNS,
     FULL_MULTIMODAL_COLUMNS,
     TOPO_SOLAR_COLUMNS,
+    SOLAR_META_COLUMNS,
     ALL_FEATURE_COLUMNS,
     TARGET_COLUMN,
+    OFFSHORE_DIST_COAST_KM,
+    CLOUD_BT_FILL_K,
 )
 
 __all__ = [
@@ -66,7 +74,12 @@ __all__ = [
     "PhysicsFallbackImputer",
     "TargetMatcher",
     "resolve_dataset_providers",
+    "is_offshore_mask",
+    "route_offshore_to_pure_sat",
+    "add_target_anomaly",
+    "get_group_labels",
     "compute_geographic_proxies",
+    "compute_dist_coast_only",
     "compute_solar_zenith_angle",
     "compute_solar_angles_vectorized",
     "compute_cyclical_time_features",
@@ -90,6 +103,9 @@ __all__ = [
     "NO_WEATHER_FEATURE_COLUMNS",
     "FULL_MULTIMODAL_COLUMNS",
     "TOPO_SOLAR_COLUMNS",
+    "SOLAR_META_COLUMNS",
     "ALL_FEATURE_COLUMNS",
     "TARGET_COLUMN",
+    "OFFSHORE_DIST_COAST_KM",
+    "CLOUD_BT_FILL_K",
 ]

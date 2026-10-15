@@ -275,7 +275,24 @@ class DirectionalWeatherEngine:
                 delta_ew = 0.0
                 grad_x = 0.0
 
-            grad_mag = float(np.hypot(grad_x, grad_y) * 100.0)
+            # P1-1 fix: clip multi-quadrant grad identically to single-quadrant
+            # ([0.2, 5.0] hPa/100km). Unclipped IDW noise previously leaked through.
+            raw_grad_mag = float(np.hypot(grad_x, grad_y) * 100.0)
+            if variable == "pressure":
+                # Allow true 0 (uniform stagnant field) but cap IDW noise at 5.0.
+                # (Single-quadrant barometric estimate keeps its [0.2, 5.0] floor
+                # because 0 there would mean "no gradient measured", not calm.)
+                grad_mag = float(np.clip(raw_grad_mag, 0.0, 5.0))
+            else:
+                grad_mag = float(max(raw_grad_mag, 0.0))
+        elif valid_quadrants == 1 and variable == "humidity":
+            # P1-1 fix: single-quadrant humidity previously fell through to NaN.
+            # One quadrant still constrains the local mean; gradient unknown -> 0.
+            delta_ns = 0.0
+            delta_ew = 0.0
+            grad_x = 0.0
+            grad_y = 0.0
+            grad_mag = 0.0
         else:
             delta_ns = 0.0
             delta_ew = 0.0

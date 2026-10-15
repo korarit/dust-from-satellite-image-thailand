@@ -78,17 +78,15 @@ class HIIWeatherLoader:
             self.metadata_path = found_path
             df = pd.read_csv(self.metadata_path)
         else:
-            logger.warning(
-                "HII master metadata CSV not found at candidate paths. Using nationwide benchmark stations."
+            # P1-5 fix (15-10-2026): fail LOUD. Silent fallback stuffed 20 fake
+            # stations at a single coordinate (13.75, 100.5), manufacturing
+            # bogus gradients. Missing metadata is a hard error now.
+            raise FileNotFoundError(
+                "HII master metadata CSV not found in any candidate path "
+                f"{[str(p) for p in candidates]}. Refusing silent single-point "
+                "fallback (would fabricate gradients). Provide "
+                "data/metadata/hii_stations_master_metadata.csv."
             )
-            # Default fallback 20 benchmark stations across Thailand
-            default_stns = [
-                "ABRT", "ACRU", "AGRI", "AHAR", "AKHO", "ALAN", "AMUA", "ANAN", "APHA", "ASAM",
-                "ATAP", "AWAN", "BCHO", "BDAM", "BDOM", "BKLA", "BKRA", "BLAM", "BMON", "BNON"
-            ]
-            df = pd.DataFrame([
-                {"station_code": sc, "latitude": 13.75, "longitude": 100.5} for sc in default_stns
-            ])
 
         # Ensure standard column naming and coordinate validity
         req_cols = ["station_code", "latitude", "longitude"]

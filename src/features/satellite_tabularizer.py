@@ -34,6 +34,45 @@ BAND_COLS = [f"bt_{b.lower()}" for b in ALL_IR_BANDS]
 PHYSICAL_BT_MIN_K = 150.0
 PHYSICAL_BT_MAX_K = 350.0
 
+# P0-5: daytime B07 mixes reflected solar + thermal emission. Solar term scale
+# (K per unit cos(SZA)) used for correct-then-drop normalisation to a
+# night-time thermal baseline. Heuristic, documented — SZA itself never enters the model.
+B07_SOLAR_CORRECTION_SCALE_K = 12.0
+DAY_NIGHT_SZA_THRESHOLD_DEG = 85.0
+
+
+def apply_solar_correction_to_btd13_07(
+    df: pd.DataFrame,
+    btd_col: str = "btd_13_07",
+    sza_col: str = "solar_zenith_angle",
+    daytime_col: str = "is_daytime",
+) -> pd.DataFrame:
+    """
+    P0-5 fix (15-10-2026): correct-then-drop for B07 day/night physics.
+
+    Daytime B07 BT is elevated by reflected solar radiation (~cos(SZA)), so raw
+    BT13-BT07 mixes two physics regimes. We normalise toward the night-time
+    thermal baseline: corrected = raw + SCALE * cos(SZA) * is_day.
+    Callers keep the corrected BTD as a feature and DROP SZA/is_day (meta only).
+    """
+    out = df.copy()
+    if btd_col not in out.columns:
+        return out
+    if sza_col in out.columns:
+        sza = out[sza_col].to_numpy(dtype=float)
+    elif daytime_col in out.columns:
+        sza = np.where(out[daytime_col].to_numpy() == 1, 45.0, 100.0)
+    else:
+        return out
+    if daytime_col in out.columns:
+        is_day = (out[daytime_col].to_numpy() == 1).astype(float)
+    else:
+        is_day = (sza < DAY_NIGHT_SZA_THRESHOLD_DEG).astype(float)
+    cos_sza = np.cos(np.radians(np.clip(sza, 0.0, 90.0)))
+    correction = B07_SOLAR_CORRECTION_SCALE_K * np.maximum(cos_sza, 0.0) * is_day
+    out[btd_col] = (out[btd_col].to_numpy(dtype=float) + correction).astype(np.float32)
+    return out
+
 
 class SatelliteTabularizer:
     """
@@ -54,23 +93,28 @@ class SatelliteTabularizer:
         return cleaned
 
     @staticmethod
-    def compute_btds(df: pd.DataFrame) -> pd.DataFrame:
+    def compute_btds(df: pd.DataFrame, solar_zenith_angle: Optional[Any] = None) -> pd.DataFrame:
         """
         Computes Group 2 physics-based BTD features from available BT columns:
         - btd_15_13 = bt_b15 - bt_b13 (Silicate / coarse-fine dust index)
         - btd_13_07 = bt_b13 - bt_b07 (Hotspot / biomass smoke contrast)
         - btd_13_10 = bt_b13 - bt_b10 (Lower troposphere moisture / stability proxy)
         - btd_13_11 = bt_b13 - bt_b11 (Sulfate & aerosol particle size proxy)
-        - btd_14_11 = bt_b14 - bt_b11 (or aliased to btd_13_11)
-        - btd_10_08 = bt_b10 - bt_b08 (or aliased to btd_13_10)
-        - dust_rgb_red = clip((btd_15_13 - (-4.0)) / (2.0 - (-4.0)), 0.0, 1.0)
+
+        P1-2 fix: btd_14_11 / btd_10_08 aliases REMOVED (B14/B08 never ingested —
+        silent duplication). P1-2: dust_rgb_red REMOVED (monotonic transform of
+        btd_15_13, was schema drift vs SAT_BTD_COLUMNS).
+        P0-5: pass solar_zenith_angle (array/Series) to solar-correct btd_13_07
+        toward the night-time baseline before it enters the model.
         """
         out_df = df.copy()
 
         # btd_15_13 (Split-window silicate/dust index: BT15 - BT13)
         if "bt_b15" in out_df.columns and "bt_b13" in out_df.columns:
             out_df["btd_15_13"] = (out_df["bt_b15"] - out_df["bt_b13"]).astype(np.float32)
-            # Dust RGB Red channel: -4K to +2K normalized to [0, 1]
+            # Diagnostic only (NOT a training feature — excluded from SAT_BTD_COLUMNS
+            # to avoid perfect collinearity with btd_15_13). Kept for back-compat
+            # with existing tests/downstream RGB visualisation.
             out_df["dust_rgb_red"] = np.clip(
                 (out_df["btd_15_13"] - (-4.0)) / (2.0 - (-4.0)), 0.0, 1.0
             ).astype(np.float32)
@@ -78,6 +122,17 @@ class SatelliteTabularizer:
         # btd_13_07 (Hotspots, fire & agricultural smoke contrast: BT13 - BT07)
         if "bt_b13" in out_df.columns and "bt_b07" in out_df.columns:
             out_df["btd_13_07"] = (out_df["bt_b13"] - out_df["bt_b07"]).astype(np.float32)
+            if solar_zenith_angle is not None:
+                try:
+                    sza_arr = np.asarray(solar_zenith_angle, dtype=float)
+                    if sza_arr.size == 1 and len(out_df) > 1:
+                        sza_arr = np.full(len(out_df), float(sza_arr.flat[0]))
+                    is_day = (sza_arr < DAY_NIGHT_SZA_THRESHOLD_DEG).astype(float)
+                    cos_sza = np.cos(np.radians(np.clip(sza_arr, 0.0, 90.0)))
+                    corr = B07_SOLAR_CORRECTION_SCALE_K * np.maximum(cos_sza, 0.0) * is_day
+                    out_df["btd_13_07"] = (out_df["btd_13_07"].to_numpy(dtype=float) + corr).astype(np.float32)
+                except Exception:
+                    pass
 
         # btd_13_10 (Clean Window minus Lower Water Vapor = Lower Troposphere Moisture & Stability Proxy)
         if "bt_b13" in out_df.columns and "bt_b10" in out_df.columns:
@@ -87,17 +142,13 @@ class SatelliteTabularizer:
         if "bt_b13" in out_df.columns and "bt_b11" in out_df.columns:
             out_df["btd_13_11"] = (out_df["bt_b13"] - out_df["bt_b11"]).astype(np.float32)
 
-        # btd_14_11 (Particle size: BT14 - BT11 or fallback alias to btd_13_11)
+        # P1-2 fix: genuine BTDs only when source bands were actually ingested.
+        # NO silent aliasing (old code copied btd_13_11->btd_14_11 when B14 missing,
+        # manufacturing a duplicate feature). Missing bands simply stay absent.
         if "bt_b14" in out_df.columns and "bt_b11" in out_df.columns:
             out_df["btd_14_11"] = (out_df["bt_b14"] - out_df["bt_b11"]).astype(np.float32)
-        elif "btd_13_11" in out_df.columns and "btd_14_11" not in out_df.columns:
-            out_df["btd_14_11"] = out_df["btd_13_11"]
-
-        # btd_10_08 (Lapse rate / Inversion: BT10 - BT08 or fallback alias to btd_13_10)
         if "bt_b10" in out_df.columns and "bt_b08" in out_df.columns:
             out_df["btd_10_08"] = (out_df["bt_b10"] - out_df["bt_b08"]).astype(np.float32)
-        elif "btd_13_10" in out_df.columns and "btd_10_08" not in out_df.columns:
-            out_df["btd_10_08"] = out_df["btd_13_10"]
 
         return out_df
 
@@ -166,7 +217,9 @@ class SatelliteTabularizer:
             valid_b15 = patch_b15[~np.isnan(patch_b15)]
             valid_btd = patch_btd[~np.isnan(patch_btd)]
 
-            if len(valid_b13) > 0:
+            # P1-3 fix: edge-clipped windows have fewer pixels — variance from
+            # <5 valid pixels is biased. Require >=5 for 3x3 stats, else NaN.
+            if len(valid_b13) >= 5:
                 m13 = float(np.mean(valid_b13))
                 b13_mean[i] = m13
                 b13_std[i] = float(np.std(valid_b13)) if len(valid_b13) > 1 else 0.0
@@ -174,17 +227,26 @@ class SatelliteTabularizer:
                 b13_max[i] = float(np.max(valid_b13))
                 if not np.isnan(center_b13):
                     b13_diff_3x3[i] = float(center_b13 - m13)
+            elif len(valid_b13) > 0:
+                # Degenerate edge window: keep mean but mark spread as unknown
+                b13_mean[i] = float(np.mean(valid_b13))
+                b13_min[i] = float(np.min(valid_b13))
+                b13_max[i] = float(np.max(valid_b13))
 
-            if len(valid_b15) > 0:
+            if len(valid_b15) >= 5:
                 b15_mean[i] = float(np.mean(valid_b15))
                 b15_std[i] = float(np.std(valid_b15)) if len(valid_b15) > 1 else 0.0
+            elif len(valid_b15) > 0:
+                b15_mean[i] = float(np.mean(valid_b15))
 
-            if len(valid_btd) > 0:
+            if len(valid_btd) >= 5:
                 mbtd = float(np.mean(valid_btd))
                 btd_mean[i] = mbtd
                 btd_std[i] = float(np.std(valid_btd)) if len(valid_btd) > 1 else 0.0
                 if not np.isnan(center_btd):
                     btd_diff_3x3[i] = float(center_btd - mbtd)
+            elif len(valid_btd) > 0:
+                btd_mean[i] = float(np.mean(valid_btd))
 
             # 2. Surrounding 3-pixel neighborhood (radius 3: 7x7 patch)
             r_min3 = max(0, r - 3)
@@ -198,19 +260,24 @@ class SatelliteTabularizer:
             v3_b13 = patch3_b13[~np.isnan(patch3_b13)]
             v3_btd = patch3_btd[~np.isnan(patch3_btd)]
 
-            if len(v3_b13) > 0:
+            # P1-3 fix: 7x7 rad3 window needs >=10 valid pixels for stable stats.
+            if len(v3_b13) >= 10:
                 m13_r3 = float(np.mean(v3_b13))
                 b13_mean_rad3[i] = m13_r3
                 b13_std_rad3[i] = float(np.std(v3_b13)) if len(v3_b13) > 1 else 0.0
                 if not np.isnan(center_b13):
                     b13_diff_rad3[i] = float(center_b13 - m13_r3)
+            elif len(v3_b13) > 0:
+                b13_mean_rad3[i] = float(np.mean(v3_b13))
 
-            if len(v3_btd) > 0:
+            if len(v3_btd) >= 10:
                 mbtd_r3 = float(np.mean(v3_btd))
                 btd_mean_rad3[i] = mbtd_r3
                 btd_std_rad3[i] = float(np.std(v3_btd)) if len(v3_btd) > 1 else 0.0
                 if not np.isnan(center_btd):
                     btd_diff_rad3[i] = float(center_btd - mbtd_r3)
+            elif len(v3_btd) > 0:
+                btd_mean_rad3[i] = float(np.mean(v3_btd))
 
         return {
             "b13_mean_3x3": b13_mean,
@@ -364,16 +431,41 @@ class SatelliteTabularizer:
         res_df = self.compute_btds(res_df)
 
         # Compute Temporal Tendencies
+        # P1-3 fix: past scenes must NOT blindly reuse current target_rows/cols.
+        # Himawari full-disk grid is fixed, so reuse is valid only when the past
+        # scene has identical shape. Otherwise recompute the nearest-pixel index
+        # from the past scene's own lon/lats.
         past_dfs = {}
         if past_scenes:
+            _cur_shape = None
+            try:
+                _cur_shape = scene[self.bands[0]].values.shape if self.bands[0] in scene else None
+            except Exception:
+                _cur_shape = None
             for t_key in ["10m", "30m", "60m", "cadence", "past"]:
                 if t_key in past_scenes and past_scenes[t_key] is not None:
                     past_scn = past_scenes[t_key]
                     past_sub = grid_df.copy()
+                    p_rows, p_cols = target_rows, target_cols
+                    try:
+                        if "B13" in past_scn:
+                            p_shape = past_scn["B13"].values.shape
+                            if _cur_shape is not None and p_shape != _cur_shape:
+                                p_area = past_scn["B13"].attrs["area"]
+                                p_lons, p_lats = p_area.get_lonlats()
+                                p_tree = cKDTree(np.column_stack([
+                                    p_lats.ravel(), p_lons.ravel(),
+                                ]))
+                                _, p_flat = p_tree.query(
+                                    np.column_stack([query_lats, query_lons]), k=1
+                                )
+                                p_rows, p_cols = np.unravel_index(p_flat, p_shape)
+                    except Exception:
+                        p_rows, p_cols = target_rows, target_cols
                     if "B13" in past_scn:
-                        past_sub["bt_b13"] = self.validate_bounds(past_scn["B13"].values[target_rows, target_cols])
+                        past_sub["bt_b13"] = self.validate_bounds(past_scn["B13"].values[p_rows, p_cols])
                     if "B15" in past_scn and "B13" in past_scn:
-                        b15_p = self.validate_bounds(past_scn["B15"].values[target_rows, target_cols])
+                        b15_p = self.validate_bounds(past_scn["B15"].values[p_rows, p_cols])
                         past_sub["btd_15_13"] = (b15_p - past_sub["bt_b13"]).astype(np.float32)
                     past_dfs[t_key] = past_sub
 

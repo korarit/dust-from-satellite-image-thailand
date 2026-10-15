@@ -197,6 +197,29 @@ class SpatialTemporalEvaluator:
             "total_evaluated_samples": len(all_y_true),
         }
 
+    def evaluate_day_night(
+        self,
+        df: pd.DataFrame,
+        feature_cols: List[str],
+        model_factory_fn: Any,
+        daytime_col: str = "is_daytime",
+    ) -> Dict[str, Any]:
+        """
+        P0-5 fix: day vs night breakdown. Requires daytime meta column
+        (attached by grid_engine.attach_solar_meta, never a training feature).
+        """
+        from src.evaluation.metrics import compute_day_night_metrics
+        if daytime_col not in df.columns:
+            raise KeyError(f"Day/night eval needs '{daytime_col}' meta column (attach_solar_meta).")
+        valid_df = df[~df[self.target_col].isna()].copy().reset_index(drop=True)
+        X = valid_df[feature_cols]
+        y = valid_df[self.target_col].values
+        model = model_factory_fn()
+        model.fit(X, y)
+        preds = model.predict(X)
+        breakdown = compute_day_night_metrics(y, preds, valid_df[daytime_col].values, pollutant=self.pollutant)
+        return {"in_sample_note": "fit/predict on same split; use holdout for formal numbers.", **breakdown}
+
     def format_regional_report(self, eval_results: Dict[str, Any]) -> str:
         """Formats regional evaluation results into a Markdown report."""
         lines = [

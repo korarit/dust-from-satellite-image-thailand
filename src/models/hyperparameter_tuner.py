@@ -126,14 +126,50 @@ def suggest_params(trial: Any, model_key: str, base_params: Dict[str, Any]) -> D
     return params
 
 
-def split_holdout(df: pd.DataFrame, seed: int, val_frac: float = 0.15) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """Single seeded 85/15 hold-out split (matches pipeline fast direct mode)."""
+def split_holdout(
+    df: pd.DataFrame,
+    seed: int,
+    val_frac: float = 0.15,
+    group_col: Optional[str] = None,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Hold-out split (matches pipeline fast direct mode).
+
+    P0-1 fix: when group_col (station/grid/province) is supplied, splits by
+    GROUP (GroupShuffleSplit) so no station appears on both sides. Falls back
+    to the legacy seeded row shuffle only when no group column exists.
+    """
     n = len(df)
+    if group_col and group_col in df.columns:
+        from sklearn.model_selection import GroupShuffleSplit
+        groups = df[group_col].astype(str).to_numpy()
+        if len(np.unique(groups)) >= 5:
+            gss = GroupShuffleSplit(n_splits=1, test_size=val_frac, random_state=seed)
+            tr_idx, val_idx = next(gss.split(df, groups=groups))
+            return df.iloc[tr_idx].reset_index(drop=True), df.iloc[val_idx].reset_index(drop=True)
+        logger.warning("Too few groups for group holdout; using row shuffle.")
     rng = np.random.RandomState(seed)
     idx = rng.permutation(n)
     n_val = max(1, int(n * val_frac))
     val_idx, tr_idx = idx[:n_val], idx[n_val:]
     return df.iloc[tr_idx].reset_index(drop=True), df.iloc[val_idx].reset_index(drop=True)
+
+
+def split_out_of_time(
+    df: pd.DataFrame,
+    split_date: str = "2026-01-01",
+    timestamp_col: str = "timestamp",
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    P0-1 fix: Out-of-Time split (train 2024-25 / test 2026) as the primary
+    generalisation number alongside GroupKFold. No shuffling — strict past->future.
+    """
+    ts = pd.to_datetime(df[timestamp_col], utc=True)
+    cutoff = pd.to_datetime(split_date, utc=True)
+    return (
+        df[ts < cutoff].reset_index(drop=True),
+        df[ts >= cutoff].reset_index(drop=True),
+    )
 
 
 def _to_native(obj: Any) -> Any:
@@ -224,8 +260,15 @@ def run_optuna_tuning(
                 logger.warning("Provider '%s' (%s) has too few rows (N=%d); skipping.", prov, fs_label, len(subset))
                 continue
 
-            tr_full, ho = split_holdout(subset, seed)
+            # P0-1 fix: group-aware holdout (station/cell) + P2-2: subsample warning.
+            _gcol = next((c for c in ("station_code", "grid_id", "provider") if c in subset.columns), None)
+            tr_full, ho = split_holdout(subset, seed, group_col=_gcol)
             if subsample_frac < 1.0:
+                logger.warning(
+                    "Tuner subsample %.0f%% is NOT representative of full-train distribution; "
+                    "tuned params are 2km-reference only — re-validate on full data.",
+                    subsample_frac * 100,
+                )
                 tr_full = tr_full.sample(frac=max(0.05, subsample_frac), random_state=seed).reset_index(drop=True)
 
             X_tr, y_tr = tr_full[fs_cols], tr_full[tgt_col].astype(float)

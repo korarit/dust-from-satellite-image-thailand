@@ -236,7 +236,9 @@ def compute_aqi_classification_metrics(
         high_risk_pred_correct = np.sum((cat_p >= 3) & high_risk_mask)
         high_risk_recall = float((high_risk_pred_correct / np.sum(high_risk_mask)) * 100.0)
     else:
-        high_risk_recall = 100.0
+        # P0-6 fix (15-10-2026): no high-risk samples -> undefined, NOT 100%.
+        # Returning 100% fabricates perfect alert skill on clean-air splits.
+        high_risk_recall = float("nan")
 
     return {
         "accuracy": round(acc, 2),
@@ -268,6 +270,28 @@ def compute_comprehensive_metrics(
         "high_risk_recall": aqi_metrics["high_risk_recall"],
         "per_tier_metrics": aqi_metrics["per_tier"],
         "confusion_matrix": aqi_metrics["confusion_matrix"],
+    }
+
+
+def compute_day_night_metrics(
+    y_true: Union[pd.Series, np.ndarray, List[float]],
+    y_pred: Union[pd.Series, np.ndarray, List[float]],
+    is_daytime: Union[pd.Series, np.ndarray, List[int]],
+    pollutant: str = "pm25",
+) -> Dict[str, Any]:
+    """
+    P0-5 fix (15-10-2026): every run must report day vs night separately.
+    B07 mixes solar+thermal by day and thermal-only by night — a single pooled
+    MAE hides regime failure. Returns {'day': metrics, 'night': metrics}.
+    """
+    y_t = np.asarray(y_true).ravel()
+    y_p = np.asarray(y_pred).ravel()
+    day_mask = np.asarray(is_daytime).ravel() == 1
+    return {
+        "day": compute_comprehensive_metrics(y_t[day_mask], y_p[day_mask], pollutant=pollutant),
+        "night": compute_comprehensive_metrics(y_t[~day_mask], y_p[~day_mask], pollutant=pollutant),
+        "n_day": int(np.sum(day_mask)),
+        "n_night": int(np.sum(~day_mask)),
     }
 
 

@@ -19,7 +19,7 @@ import joblib
 import numpy as np
 import pandas as pd
 from scipy.optimize import nnls, minimize
-from sklearn.model_selection import KFold
+from sklearn.model_selection import KFold, GroupKFold, GroupShuffleSplit
 
 from src.models.base_model import BaseDustModel, compute_dust_metrics
 from src.models.lgbm_model import LGBMDustModel
@@ -114,6 +114,7 @@ class DustStackingEnsemble(BaseDustModel):
         cv: int = 5,
         random_state: int = 42,
         benchmark_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
+        groups: Optional[Union[pd.Series, np.ndarray, List[str]]] = None,
     ) -> "DustStackingEnsemble":
         """
         Fits the ensemble using K-Fold Out-Of-Fold (OOF) stacking:
@@ -121,6 +122,9 @@ class DustStackingEnsemble(BaseDustModel):
         2. Optimizes meta-learner non-negative weights (w_i >= 0, sum(w) = 1.0)
         3. Trains full base learners on 100% of the training dataset
 
+        P0-1 fix (15-10-2026): pass groups (station_id / grid_id / province) to
+        use GroupKFold instead of row-level KFold. Without groups the old
+        row-shuffle leaks adjacent hours + same station into train and val.
         If ``benchmark_callback`` is provided, it is invoked immediately after each
         base learner finishes training, receiving that model's benchmark record
         (metrics, estimator name, fit time) for the current resolution/experiment.
@@ -128,16 +132,32 @@ class DustStackingEnsemble(BaseDustModel):
         X_arr, f_names = self._prepare_inputs(X, feature_names)
         y_arr = self._prepare_target(y)
         self.feature_names_ = f_names
+        groups_arr = np.asarray(groups).ravel() if groups is not None else None
+        if groups_arr is not None and len(groups_arr) != len(y_arr):
+            logger.warning("groups length mismatch (%d vs %d); ignoring groups.", len(groups_arr), len(y_arr))
+            groups_arr = None
 
         n_samples = len(y_arr)
         effective_cv = min(cv, n_samples)
         if effective_cv < 2:
             logger.info("Fast Direct Training Mode (No K-Fold): Training Quartet on %d samples...", n_samples)
-            val_size = min(int(n_samples * 0.15), 50000)
-            train_size = n_samples - val_size
-            indices = np.arange(n_samples)
-            np.random.RandomState(random_state).shuffle(indices)
-            tr_idx, val_idx = indices[:train_size], indices[train_size:]
+            # P0-1 fix: group-aware holdout when groups supplied (no station in both sides).
+            if groups_arr is not None and len(np.unique(groups_arr)) >= 5:
+                gss = GroupShuffleSplit(n_splits=1, test_size=0.15, random_state=random_state)
+                tr_idx, val_idx = next(gss.split(X_arr, y_arr, groups_arr))
+                eval_mode = "group_holdout"
+            else:
+                if groups_arr is not None:
+                    logger.warning(
+                        "Too few groups (%d) for group holdout; using seeded row shuffle.",
+                        len(np.unique(groups_arr)),
+                    )
+                val_size = min(int(n_samples * 0.15), 50000)
+                train_size = n_samples - val_size
+                indices = np.arange(n_samples)
+                np.random.RandomState(random_state).shuffle(indices)
+                tr_idx, val_idx = indices[:train_size], indices[train_size:]
+                eval_mode = "holdout"
 
             X_tr, y_tr = X_arr[tr_idx], y_arr[tr_idx]
             X_vl, y_vl = X_arr[val_idx], y_arr[val_idx]
@@ -166,7 +186,7 @@ class DustStackingEnsemble(BaseDustModel):
                     benchmark_callback({
                         "model": m_key,
                         "model_name": model.name,
-                        "eval_mode": "holdout",
+                        "eval_mode": eval_mode,
                         "n_train": int(len(X_tr)),
                         "n_eval": int(len(X_vl)),
                         "fit_seconds": round(float(t_elapsed), 2),
@@ -200,10 +220,20 @@ class DustStackingEnsemble(BaseDustModel):
                 normalized_weights = raw_weights / sum_w if sum_w > 1e-7 else init_w
 
             self.weights = {m_key: float(normalized_weights[i]) for i, m_key in enumerate(MODEL_KEYS)}
+            # P2-3 fix: concentrate dilute septet — zero out noise weights (<2%) and
+            # renormalize so the blend does not average 7 weak learners equally.
+            tiny = {k: v for k, v in self.weights.items() if v < 0.02}
+            if tiny and len(tiny) < len(self.weights):
+                for k in tiny:
+                    self.weights[k] = 0.0
+                s = sum(self.weights.values())
+                if s > 1e-9:
+                    self.weights = {k: v / s for k, v in self.weights.items()}
+                logger.info("Pruned dilute weights (<2%%): %s", sorted(tiny))
             logger.info("Optimal Non-Negative Meta-Weights: %s",
-                        {k: round(v, 4) for k, v in self.weights.items()})
+                    {k: round(v, 4) for k, v in self.weights.items()})
 
-            ens_val_preds = np.sum(val_preds_matrix * normalized_weights, axis=1)
+            ens_val_preds = np.sum(val_preds_matrix * np.array([self.weights[k] for k in MODEL_KEYS]), axis=1)
             self.oof_metrics_["ensemble"] = compute_dust_metrics(y_vl, ens_val_preds, pollutant=self.pollutant)
             logger.info("  ⭐ VAL ENSEMBLE  MAE: %.3f µg/m³, RMSE: %.3f, R2: %.4f",
                         self.oof_metrics_["ensemble"]["mae"],
@@ -226,10 +256,21 @@ class DustStackingEnsemble(BaseDustModel):
         # Step 1: Out-Of-Fold (OOF) Prediction Matrix
         # ----------------------------------------------------------------------
         oof_matrix = np.zeros((n_samples, len(MODEL_KEYS)), dtype=np.float32)
-        kf = KFold(n_splits=effective_cv, shuffle=True, random_state=random_state)
-
-        logger.info("Executing %d-Fold Cross-Validation for OOF Stacking Matrix...", effective_cv)
-        for fold_idx, (train_idx, val_idx) in enumerate(kf.split(X_arr)):
+        # P0-1 fix: GroupKFold by station/cell when groups supplied; row KFold otherwise.
+        if groups_arr is not None and len(np.unique(groups_arr)) >= effective_cv:
+            splitter = GroupKFold(n_splits=effective_cv)
+            splits = splitter.split(X_arr, y_arr, groups_arr)
+            logger.info(
+                "Executing %d-Fold GROUP Cross-Validation (by station/cell, %d groups)...",
+                effective_cv, len(np.unique(groups_arr)),
+            )
+        else:
+            if groups is not None:
+                logger.warning("Falling back to row-level KFold (too few groups for GroupKFold).")
+            splitter = KFold(n_splits=effective_cv, shuffle=True, random_state=random_state)
+            splits = splitter.split(X_arr)
+            logger.info("Executing %d-Fold Cross-Validation for OOF Stacking Matrix...", effective_cv)
+        for fold_idx, (train_idx, val_idx) in enumerate(splits):
             X_tr, y_tr = X_arr[train_idx], y_arr[train_idx]
             X_vl, y_vl = X_arr[val_idx], y_arr[val_idx]
 
@@ -294,6 +335,16 @@ class DustStackingEnsemble(BaseDustModel):
                 normalized_weights = init_w
 
         self.weights = {m_key: float(normalized_weights[i]) for i, m_key in enumerate(MODEL_KEYS)}
+        # P2-3 fix: concentrate dilute septet (see holdout path).
+        tiny = {k: v for k, v in self.weights.items() if v < 0.02}
+        if tiny and len(tiny) < len(self.weights):
+            for k in tiny:
+                self.weights[k] = 0.0
+            s = sum(self.weights.values())
+            if s > 1e-9:
+                self.weights = {k: v / s for k, v in self.weights.items()}
+            logger.info("Pruned dilute weights (<2%%): %s", sorted(tiny))
+            normalized_weights = np.array([self.weights[k] for k in MODEL_KEYS])
         logger.info("Optimal Non-Negative Meta-Weights: %s",
                     {k: round(v, 4) for k, v in self.weights.items()})
 
@@ -424,18 +475,15 @@ class DustStackingEnsemble(BaseDustModel):
         return df
 
     def save(self, dir_path: Union[str, Path]) -> None:
-        """Persists all 4 base models and ensemble metadata into directory with pollutant suffix."""
+        """Persists all base models and ensemble metadata (P3-3: single write, no duplication)."""
         save_dir = Path(dir_path)
         save_dir.mkdir(parents=True, exist_ok=True)
 
         pol = self.pollutant.lower()
-        # Save base models with pollutant in filename: e.g. lightgbm_model_pm25.joblib
+        # P3-3 fix: write each base model ONCE (pollutant-suffixed). Loader still
+        # accepts legacy unsuffixed names, so back-compat is preserved on read.
         for m_key, m in self.base_models.items():
-            m_path_pol = save_dir / f"{m_key}_model_{pol}.joblib"
-            m.save(m_path_pol)
-            # Also save standard filename for backward compatibility
-            m_path_std = save_dir / f"{m_key}_model.joblib"
-            m.save(m_path_std)
+            m.save(save_dir / f"{m_key}_model_{pol}.joblib")
 
         # Save metadata and weights
         meta = {
@@ -453,10 +501,9 @@ class DustStackingEnsemble(BaseDustModel):
         with open(save_dir / "ensemble_meta.json", "w", encoding="utf-8") as f:
             json.dump(meta, f, indent=2)
 
-        # Save OOF predictions if present
+        # Save OOF predictions if present (single file; loader accepts both names)
         if self.oof_predictions_ is not None:
             self.oof_predictions_.to_parquet(save_dir / f"oof_predictions_{pol}.parquet", index=False)
-            self.oof_predictions_.to_parquet(save_dir / "oof_predictions.parquet", index=False)
 
     @classmethod
     def load(cls, dir_path: Union[str, Path]) -> "DustStackingEnsemble":

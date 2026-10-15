@@ -135,6 +135,9 @@ WEATHER_HUMIDITY_COLUMNS = [
 ]
 
 TOPO_SOLAR_COLUMNS = [
+    # A1+A2 fix (15-10-2026): time/solar + coriolis removed from training features.
+    # Only static topography + coastline remain. Solar/time are meta-only (see
+    # SOLAR_META_COLUMNS) used for stratify/eval and B07 physics correction.
     "elevation_m",
     "tpi_index",
     "slope_deg",
@@ -143,7 +146,12 @@ TOPO_SOLAR_COLUMNS = [
     "elevation_std",
     "relief_m",
     "dist_coast_km",
-    "coriolis_param",
+]
+
+# Solar geometry + cyclical time — META ONLY (never fed to models).
+# Attached by grid_engine.attach_solar_meta() / attach_solar_and_time_features()
+# for day-night stratification, B07 physics correction and reporting.
+SOLAR_META_COLUMNS = [
     "solar_zenith_angle",
     "is_daytime",
     "hour_sin",
@@ -151,6 +159,10 @@ TOPO_SOLAR_COLUMNS = [
     "month_sin",
     "month_cos",
 ]
+
+# Back-compat alias: old code imported TOPO_SOLAR_COLUMNS expecting 15 cols.
+# Kept for reference only — DO NOT use for training.
+TOPO_SOLAR_ALL_COLUMNS = TOPO_SOLAR_COLUMNS + SOLAR_META_COLUMNS + ["coriolis_param"]
 
 WEATHER_FEATURE_COLUMNS = WEATHER_PRESSURE_COLUMNS + WEATHER_HUMIDITY_COLUMNS
 
@@ -197,6 +209,79 @@ CLIMATOLOGY_PRESSURE_HPA = 1013.25
 CLIMATOLOGY_HUMIDITY_PCT = 70.0
 CLIMATOLOGY_SURFACE_BT_K = 290.0
 DEEP_CLOUD_BT_THRESHOLD_K = 220.0
+# P0-4 fix: cloud-occluded NaN BT must NOT be filled with clear-sky ~290K.
+# Use a physically cold cloud-top default so flag+BTD keep the cloud signal.
+CLOUD_BT_FILL_K = 210.0
+# P1-1 fix: offshore / out-of-domain threshold (no ground stations beyond this).
+OFFSHORE_DIST_COAST_KM = 50.0
+
+
+def is_offshore_mask(df: pd.DataFrame) -> pd.Series:
+    """P1-1 router helper: True for maritime/out-of-domain cells (pure-sat only)."""
+    if "dist_coast_km" in df.columns:
+        return df["dist_coast_km"].astype(float) > OFFSHORE_DIST_COAST_KM
+    return pd.Series(False, index=df.index)
+
+
+def route_offshore_to_pure_sat(
+    df: pd.DataFrame,
+    weather_cols: Optional[List[str]] = None,
+) -> pd.DataFrame:
+    """
+    P1-1 fix: offshore cells must not use imputed land climatology as if it were
+    a measurement. Blank out ground-weather features offshore so downstream code
+    is forced onto the pure-satellite path (or climatology flag).
+    """
+    out = df.copy()
+    mask = is_offshore_mask(out)
+    if not bool(mask.any()):
+        return out
+    wcols = weather_cols or (WEATHER_PRESSURE_COLUMNS + WEATHER_HUMIDITY_COLUMNS)
+    for c in wcols:
+        if c in out.columns:
+            out.loc[mask, c] = np.nan
+    out["offshore_pure_sat_only"] = mask.astype(np.int32)
+    return out
+
+
+def add_target_anomaly(
+    df: pd.DataFrame,
+    target_col: str = TARGET_COLUMN,
+    group_col: str = "grid_id",
+    timestamp_col: str = "timestamp",
+) -> pd.DataFrame:
+    """
+    A2 fix: target-anomaly to stop the model memorising station x season x hour
+    means via static fingerprints. anomaly = y - monthly_station_climatology.
+    Train on the anomaly; add climatology back at inference.
+    """
+    out = df.copy()
+    if target_col not in out.columns:
+        return out
+    ts = pd.to_datetime(out[timestamp_col], utc=True, errors="coerce") if timestamp_col in out.columns else None
+    month = ts.dt.month if ts is not None else 1
+    grp = out[group_col] if group_col in out.columns else "all"
+    clim_key = pd.DataFrame({"_g": grp, "_m": month, "_y": out[target_col].astype(float)})
+    climatology = clim_key.groupby(["_g", "_m"])["_y"].transform("mean")
+    out[f"{target_col}_climatology"] = climatology.astype(np.float32)
+    out[f"{target_col}_anomaly"] = (out[target_col].astype(float) - climatology).astype(np.float32)
+    return out
+
+
+def get_group_labels(
+    df: pd.DataFrame,
+    group_col: Optional[str] = None,
+) -> np.ndarray:
+    """
+    P0-1 fix: group labels for GroupKFold (station/province/cell).
+    Priority: explicit group_col > station_code > grid_id > provider > region.
+    """
+    if group_col and group_col in df.columns:
+        return df[group_col].astype(str).to_numpy()
+    for cand in ("station_code", "grid_id", "provider", "region"):
+        if cand in df.columns:
+            return df[cand].astype(str).to_numpy()
+    return np.zeros(len(df), dtype=str)
 
 
 # ==============================================================================
@@ -361,10 +446,31 @@ class PhysicsFallbackImputer:
         """Applies imputation using fitted training statistics."""
         return self.impute_features(df)
 
+    def _fitted_or_default(self, col: str, default: float) -> float:
+        """P0-2 fix: fitted train median first, else deterministic climatology default.
+
+        Never falls back to the current batch median here (that would be
+        test-imputing-test + train-serve skew). Batch medians are only learned
+        in fit().
+        """
+        if col in self.fitted_stats_:
+            return float(self.fitted_stats_[col])
+        if not self.fitted_stats_:
+            logger.warning(
+                "PhysicsFallbackImputer not fitted; using climatology default "
+                "%.3f for '%s'. Call fit(train_df) once before transform().",
+                default, col,
+            )
+        return float(default)
+
     def impute_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Ensures all model feature columns are free of NaN values while preserving
         physical laws and attaching diagnostic flags.
+
+        P0-2: transform path uses ONLY fitted_stats_ + climatology defaults.
+        P0-4: cloud-occluded BT NaNs use CLOUD_BT_FILL_K (210K), not clear-sky 290K.
+        P1-2: no silent BTD aliases, no dust_rgb_red (removed from schema).
         """
         out_df = df.copy()
 
@@ -374,31 +480,34 @@ class PhysicsFallbackImputer:
             cloud_mask = np.isnan(b13_vals) | (b13_vals < DEEP_CLOUD_BT_THRESHOLD_K)
             out_df["cloud_occluded_flag"] = cloud_mask.astype(np.int32)
         else:
+            cloud_mask = np.zeros(len(out_df), dtype=bool)
             out_df["cloud_occluded_flag"] = 0
 
         # Track if any imputation was applied
         imputed_mask = np.zeros(len(out_df), dtype=bool)
 
-        # 2. Impute Satellite BT Columns
+        # 2. Impute Satellite BT Columns (P0-4: cloud pixels keep cold signal)
+        cloud_series = pd.Series(cloud_mask, index=out_df.index)
         for col in SAT_BT_COLUMNS:
             if col in out_df.columns:
                 nans = out_df[col].isna()
                 if nans.any():
-                    imputed_mask |= nans
-                    if col in self.fitted_stats_:
-                        median_val = self.fitted_stats_[col]
-                    else:
-                        valid_vals = out_df[col].dropna()
-                        median_val = float(valid_vals.median()) if len(valid_vals) > 0 else CLIMATOLOGY_SURFACE_BT_K
-                    out_df[col] = out_df[col].fillna(median_val).astype(np.float32)
+                    imputed_mask |= nans.to_numpy()
+                    clear_fill = self._fitted_or_default(col, CLIMATOLOGY_SURFACE_BT_K)
+                    fill_vals = pd.Series(np.float32(clear_fill), index=out_df.index)
+                    # Cloud-occluded rows: cold cloud-top default, never clear-sky median
+                    fill_vals = fill_vals.where(~(nans & (cloud_series == True)), np.float32(CLOUD_BT_FILL_K))  # noqa: E712
+                    out_df[col] = out_df[col].fillna(fill_vals).astype(np.float32)
             else:
-                default_bt = self.fitted_stats_.get(col, CLIMATOLOGY_SURFACE_BT_K)
+                default_bt = self._fitted_or_default(col, CLIMATOLOGY_SURFACE_BT_K)
                 out_df[col] = np.float32(default_bt)
                 imputed_mask[:] = True
 
-        # 3. Impute / Recalculate BTD Columns
+        # 3. Impute / Recalculate BTD Columns (P1-2: genuine only, no silent aliases;
+        # dust_rgb_red kept as diagnostic only, never a training feature)
         if "bt_b15" in out_df.columns and "bt_b13" in out_df.columns:
             out_df["btd_15_13"] = (out_df["bt_b15"] - out_df["bt_b13"]).astype(np.float32)
+            # Diagnostic only (not in SAT_BTD_COLUMNS / not a training feature).
             out_df["dust_rgb_red"] = np.clip(
                 (out_df["btd_15_13"] - (-4.0)) / (2.0 - (-4.0)), 0.0, 1.0
             ).astype(np.float32)
@@ -412,21 +521,16 @@ class PhysicsFallbackImputer:
         if "bt_b13" in out_df.columns and "bt_b11" in out_df.columns:
             out_df["btd_13_11"] = (out_df["bt_b13"] - out_df["bt_b11"]).astype(np.float32)
 
-        if "bt_b14" in out_df.columns and "bt_b11" in out_df.columns:
-            out_df["btd_14_11"] = (out_df["bt_b14"] - out_df["bt_b11"]).astype(np.float32)
-        elif "btd_13_11" in out_df.columns and "btd_14_11" not in out_df.columns:
-            out_df["btd_14_11"] = out_df["btd_13_11"]
-
-        if "bt_b10" in out_df.columns and "bt_b08" in out_df.columns:
-            out_df["btd_10_08"] = (out_df["bt_b10"] - out_df["bt_b08"]).astype(np.float32)
-        elif "btd_13_10" in out_df.columns and "btd_10_08" not in out_df.columns:
-            out_df["btd_10_08"] = out_df["btd_13_10"]
+        # NOTE: btd_14_11 / btd_10_08 / dust_rgb_red intentionally NOT created
+        # (P1-2: B14/B08 never ingested; dust_rgb_red is a monotonic transform of
+        # btd_15_13). Downstream prune in trainer drops exact duplicates if legacy
+        # files still contain them.
 
         for col in SAT_BTD_COLUMNS:
             if col in out_df.columns:
                 nans = out_df[col].isna()
                 if nans.any():
-                    imputed_mask |= nans
+                    imputed_mask |= nans.to_numpy() if hasattr(nans, "to_numpy") else nans
                     out_df[col] = out_df[col].fillna(0.0).astype(np.float32)
             else:
                 out_df[col] = np.float32(0.0)
@@ -488,19 +592,11 @@ class PhysicsFallbackImputer:
         out_df["temporal_delta_valid"] = temporal_valid.astype(np.float32)
 
         # 6. Impute Weather Pressure Columns with Barometric Elevation Scaling
-        p_mean = (
-            self.fitted_stats_.get("pressure_mean_surround")
-            if "pressure_mean_surround" in self.fitted_stats_
-            else (
-                float(out_df["pressure_mean_surround"].dropna().median())
-                if "pressure_mean_surround" in out_df.columns and not out_df["pressure_mean_surround"].dropna().empty
-                else CLIMATOLOGY_PRESSURE_HPA
-            )
-        )
+        # P0-2 fix: fitted median first, else deterministic climatology (no batch leak).
+        p_mean = self._fitted_or_default("pressure_mean_surround", CLIMATOLOGY_PRESSURE_HPA)
         # Barometric elevation scale factor: P(z) = P0 * (1 - L*z/T0)^5.25588
         if "elevation_m" in out_df.columns:
-            _elev = out_df["elevation_m"].dropna()
-            _elev_fill = float(_elev.median()) if len(_elev) > 0 else 0.0
+            _elev_fill = self._fitted_or_default("elevation_m", 0.0)
             z_s = out_df["elevation_m"].fillna(_elev_fill).clip(lower=0.0).astype(float)
             f_baro = (1.0 - (0.0065 * z_s) / 288.15) ** 5.25588
             p_elevation_adjusted = (p_mean * f_baro).astype(np.float32)
@@ -525,24 +621,18 @@ class PhysicsFallbackImputer:
             else:
                 out_df[p_grad] = np.float32(0.0)
 
-        # Impute pressure_grad_mag with climatology median (not 0.0, which falsely implies calm stagnation)
-        p_grad_default = 1.2  # Typical synoptic gradient: ~1.2 hPa / 100 km
+        # Impute pressure_grad_mag with fitted median (not 0.0, which falsely implies calm stagnation)
+        p_grad_default = self._fitted_or_default("pressure_grad_mag", 1.2)
         if "pressure_grad_mag" in out_df.columns:
-            valid_pg = out_df["pressure_grad_mag"].dropna()
-            pg_med = float(valid_pg.median()) if len(valid_pg) > 0 and valid_pg.median() > 0 else p_grad_default
             nans = out_df["pressure_grad_mag"].isna()
             if nans.any():
-                imputed_mask |= nans
-                out_df["pressure_grad_mag"] = out_df["pressure_grad_mag"].fillna(pg_med).astype(np.float32)
+                imputed_mask |= nans.to_numpy() if hasattr(nans, "to_numpy") else nans
+                out_df["pressure_grad_mag"] = out_df["pressure_grad_mag"].fillna(p_grad_default).astype(np.float32)
         else:
             out_df["pressure_grad_mag"] = np.float32(p_grad_default)
 
-        # 7. Impute Weather Humidity Columns
-        h_mean = (
-            float(out_df["humidity_mean_surround"].dropna().median())
-            if "humidity_mean_surround" in out_df.columns and not out_df["humidity_mean_surround"].dropna().empty
-            else CLIMATOLOGY_HUMIDITY_PCT
-        )
+        # 7. Impute Weather Humidity Columns (P0-2: fitted or climatology, no batch leak)
+        h_mean = self._fitted_or_default("humidity_mean_surround", CLIMATOLOGY_HUMIDITY_PCT)
         if "humidity_mean_surround" in out_df.columns:
             nans = out_df["humidity_mean_surround"].isna()
             if nans.any():
@@ -551,34 +641,35 @@ class PhysicsFallbackImputer:
         else:
             out_df["humidity_mean_surround"] = np.float32(h_mean)
 
-        # humidity_grad_mag uses a median default (0.0 would falsely imply a
+        # humidity_grad_mag uses a fitted/climatology default (0.0 would falsely imply a
         # perfectly uniform humidity field); humidity_std_surround keeps 0.0
         # (zero spatial spread is the neutral value).
+        h_grad_default = self._fitted_or_default("humidity_grad_mag", 0.0)
         for h_col in ["humidity_std_surround", "humidity_grad_mag"]:
             if h_col in out_df.columns:
                 nans = out_df[h_col].isna()
                 if nans.any():
-                    imputed_mask |= nans
+                    imputed_mask |= nans.to_numpy() if hasattr(nans, "to_numpy") else nans
                     if h_col == "humidity_grad_mag":
-                        valid_h = out_df[h_col].dropna()
-                        h_default = float(valid_h.median()) if len(valid_h) > 0 and valid_h.median() > 0 else 0.0
-                        out_df[h_col] = out_df[h_col].fillna(h_default).astype(np.float32)
+                        out_df[h_col] = out_df[h_col].fillna(h_grad_default).astype(np.float32)
                     else:
                         out_df[h_col] = out_df[h_col].fillna(0.0).astype(np.float32)
             else:
                 out_df[h_col] = np.float32(0.0)
 
-        # 8. Impute Topography & Solar Columns
+        # 8. Impute Topography Columns (A1/A2: topo only — solar/time are meta, never imputed as features)
         for col in TOPO_SOLAR_COLUMNS:
             if col in out_df.columns:
                 nans = out_df[col].isna()
                 if nans.any():
-                    imputed_mask |= nans
-                    valid = out_df[col].dropna()
-                    val = float(valid.median()) if len(valid) > 0 else 0.0
+                    imputed_mask |= nans.to_numpy() if hasattr(nans, "to_numpy") else nans
+                    val = self._fitted_or_default(col, 0.0)
                     out_df[col] = out_df[col].fillna(val).astype(np.float32)
             else:
                 out_df[col] = np.float32(0.0)
+        # Legacy coriolis column: drop if present (A2 — must not enter the model).
+        if "coriolis_param" in out_df.columns:
+            out_df = out_df.drop(columns=["coriolis_param"])
 
         out_df["imputed_flag"] = imputed_mask.astype(np.int32)
         return out_df
@@ -822,8 +913,16 @@ class FeatureMatrixBuilder:
         # Standardize Keys & Coordinates
         matrix = self.standardize_keys(matrix, run_dt)
 
-        # 3. Attach Solar Angles & Cyclical Time
-        matrix = self.grid_engine.attach_solar_and_time_features(
+        # 3. Attach Solar Angles & Cyclical Time as META ONLY (A1 fix).
+        # Kept in output for day/night stratify + B07 correction, but excluded
+        # from ALL_FEATURE_COLUMNS so they never enter the model.
+        # Late import to avoid circular dependency.
+        try:
+            from src.features.satellite_tabularizer import apply_solar_correction_to_btd13_07
+            _has_solar_corr = True
+        except Exception:
+            _has_solar_corr = False
+        matrix = self.grid_engine.attach_solar_meta(
             matrix, observation_dt=run_dt, lat_col="lat", lon_col="lon"
         )
 
@@ -877,17 +976,48 @@ class FeatureMatrixBuilder:
         SpatialAntiLeakageValidator.verify_target_feature_isolation(
             feature_columns=ALL_FEATURE_COLUMNS, target_col=[TARGET_COLUMN, TARGET_COLUMN_PM10]
         )
+        # A1 guard: solar/time meta must never be in the training schema.
+        for _leak in ("solar_zenith_angle", "is_daytime", "hour_sin", "hour_cos",
+                      "month_sin", "month_cos", "coriolis_param"):
+            if _leak in ALL_FEATURE_COLUMNS:
+                raise TargetFeatureIsolationError(f"Leakage: '{_leak}' must not be in ALL_FEATURE_COLUMNS")
 
-        # 8. Deterministic Physics Fallback Imputer
+        # P0-5: physics-correct B07 (correct-then-drop) once SZA meta exists.
+        if _has_solar_corr and "btd_13_07" in matrix.columns and "solar_zenith_angle" in matrix.columns:
+            try:
+                matrix = apply_solar_correction_to_btd13_07(matrix)
+            except Exception as exc:
+                logger.warning("B07 solar correction skipped: %s", exc)
+
+        # P1-1: offshore router — flag maritime out-of-domain cells BEFORE imputation
+        # so they can be forced onto the pure-sat path downstream.
+        try:
+            matrix = route_offshore_to_pure_sat(matrix)
+        except Exception as exc:
+            logger.warning("Offshore routing skipped: %s", exc)
+
+        # 8. Deterministic Physics Fallback Imputer (P0-2: fit-once, transform-many)
         if impute_missing:
-            matrix = self.imputer.impute_features(matrix)
+            if not self.imputer.fitted_stats_:
+                if training_only:
+                    # First training snapshot defines the imputation climatology.
+                    self.imputer.fit(matrix)
+                else:
+                    logger.warning(
+                        "Imputer not fitted and training_only=False; using "
+                        "climatology defaults only (no batch-median leak)."
+                    )
+            matrix = self.imputer.transform(matrix)
 
         # 9. Enforce Column Order & Float32 Precision
+        # P0-3 fix: temporal_delta_valid restored to diagnostics (was silently dropped).
+        # Solar meta retained in output for day/night eval, but NOT as features.
         present_keys = [c for c in KEY_COLUMNS if c in matrix.columns]
         present_features = [c for c in ALL_FEATURE_COLUMNS if c in matrix.columns]
-        diagnostic_cols = [c for c in ["cloud_occluded_flag", "imputed_flag"] if c in matrix.columns]
+        diagnostic_cols = [c for c in (list(AUXILIARY_FEATURE_COLUMNS) + ["offshore_pure_sat_only"]) if c in matrix.columns]
+        meta_cols = [c for c in SOLAR_META_COLUMNS if c in matrix.columns and c not in present_features]
 
-        ordered_cols = present_keys + present_features + diagnostic_cols
+        ordered_cols = present_keys + present_features + diagnostic_cols + meta_cols
         for tc in ["observed_pm25", "observed_pm10"]:
             if tc in matrix.columns and tc not in ordered_cols:
                 ordered_cols.append(tc)

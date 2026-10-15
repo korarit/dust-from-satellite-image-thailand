@@ -116,7 +116,7 @@ def configure_paths(
         MAPS_DIR = OUTPUTS_PM25_DIR / "maps"
         EVALUATION_DIR = OUTPUTS_PM25_DIR / "evaluation"
 
-    ensure_directories()
+    ensure_directories(seed_reference_data=True)
 
 
 def seed_metadata_if_needed() -> None:
@@ -177,8 +177,13 @@ def seed_geo_if_needed() -> None:
                         pass
 
 
-def ensure_directories() -> None:
-    """Ensures all required project directories exist."""
+def ensure_directories(seed_reference_data: bool = False) -> None:
+    """Ensures all required project directories exist.
+
+    P3-2 fix: importing this module must NOT copy/seed reference files.
+    Seeding (metadata/geo copies) only runs when seed_reference_data=True
+    (explicit pipeline start via configure_paths() or run_pipeline).
+    """
     dirs = [
         CONFIGS_DIR,
         DATA_DIR,
@@ -212,10 +217,12 @@ def ensure_directories() -> None:
     for d in dirs:
         d.mkdir(parents=True, exist_ok=True)
 
-    seed_metadata_if_needed()
-    seed_geo_if_needed()
+    if seed_reference_data:
+        seed_metadata_if_needed()
+        seed_geo_if_needed()
 
 
-# Initialize directories on import
-ensure_directories()
+# P3-2 fix: import-time side effect limited to mkdir (no file seeding/writes).
+# Pass seed_reference_data=True explicitly at pipeline start if needed.
+ensure_directories(seed_reference_data=False)
 

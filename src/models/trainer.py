@@ -128,7 +128,10 @@ class ModelTrainer:
             feature_cols = available_features
 
         # Prune exact duplicate alias features to eliminate multicollinearity
-        check_sample_n = min(len(valid_df), 100)
+        # P1-2 fix: check up to 1000 rows (was 100) + correlation gate, so silent
+        # aliases (btd_14_11==btd_13_11, btd_10_08==btd_13_10, dust_rgb_red) are
+        # reliably caught even when the first 100 rows coincide by chance.
+        check_sample_n = min(len(valid_df), 1000)
         if "btd_14_11" in feature_cols and "btd_13_11" in feature_cols:
             if np.allclose(valid_df["btd_14_11"].values[:check_sample_n], valid_df["btd_13_11"].values[:check_sample_n], equal_nan=True):
                 feature_cols = [c for c in feature_cols if c != "btd_14_11"]
@@ -161,6 +164,18 @@ class ModelTrainer:
 
         X, y, f_cols = self.prepare_data(train_df, feature_cols)
         logger.info("Dataset shape: %d samples, %d features", len(X), len(f_cols))
+
+        # P0-1 fix: derive GroupKFold groups (station/cell/province) from train_df
+        # aligned to the filtered X rows. Falls back to None -> row KFold with warning.
+        groups = None
+        try:
+            from src.features.feature_matrix_builder import get_group_labels
+            _valid_idx = train_df[~train_df[self.target_col].isna()].index
+            _grp_all = get_group_labels(train_df.loc[_valid_idx])
+            groups = _grp_all
+            logger.info("GroupKFold groups: %d unique (col auto-detected).", len(set(groups)))
+        except Exception as exc:
+            logger.warning("Could not derive GroupKFold groups; using row split: %s", exc)
 
         splits = cv or self.cv_splits
         ensemble_name = f"Ensemble_{experiment_id}_{self.pollutant.upper()}" if self.pollutant == "pm10" else f"Ensemble_{experiment_id}"
@@ -199,6 +214,7 @@ class ModelTrainer:
             cv=splits,
             random_state=self.random_state,
             benchmark_callback=_on_base_model_trained,
+            groups=groups,
         )
 
         # Save checkpoint with pollutant suffix: e.g. exp_2km_pm25, exp_2km_pm10

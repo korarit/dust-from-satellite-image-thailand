@@ -441,13 +441,21 @@ class HimawariIRLoader:
         query_lats = coords_df[lat_col].to_numpy()
         query_lons = coords_df[lon_col].to_numpy()
 
+        # P2-4 fix: old key (first/last coord + len) collided for different grids
+        # sharing endpoints, silently reusing a wrong spatial index. Key now hashes
+        # the full coordinate set (stable, order-sensitive) + segments + max_dist.
+        import hashlib
+        _coord_bytes = np.ascontiguousarray(
+            np.column_stack([
+                np.round(query_lats.astype(np.float64), 4),
+                np.round(query_lons.astype(np.float64), 4),
+            ])
+        ).tobytes()
         cache_key = (
             tuple(sorted(use_segments)),
             len(coords_df),
-            round(float(query_lats[0]), 4) if len(query_lats) > 0 else 0.0,
-            round(float(query_lons[0]), 4) if len(query_lons) > 0 else 0.0,
-            round(float(query_lats[-1]), 4) if len(query_lats) > 0 else 0.0,
-            round(float(query_lons[-1]), 4) if len(query_lons) > 0 else 0.0,
+            round(float(max_dist_deg), 4),
+            hashlib.md5(_coord_bytes).hexdigest(),
         )
 
         if cache_key in self._cached_spatial_index:
@@ -475,6 +483,15 @@ class HimawariIRLoader:
             tree = cKDTree(np.column_stack([sub_lats, sub_lons]))
             dists, idxs = tree.query(np.column_stack([query_lats, query_lons]), k=1)
             valid_dist_mask = (dists <= max_dist_deg)
+            # P2-4 fix: previously stations beyond max_dist were NaNed silently.
+            n_dropped = int(np.sum(~valid_dist_mask))
+            if n_dropped > 0:
+                logger.warning(
+                    "sample_at_coordinates: %d/%d coords beyond %.3f deg from any "
+                    "pixel (outside loaded segments %s) -> NaN. Load all segments "
+                    "[3,4,5] for nationwide coverage.",
+                    n_dropped, len(query_lats), max_dist_deg, sorted(use_segments),
+                )
             self._cached_spatial_index[cache_key] = (bbox_mask, idxs, valid_dist_mask)
 
         # For each band, extract the pixel values at idxs

@@ -35,7 +35,10 @@ logger = logging.getLogger(__name__)
 
 OPENAQ_S3_BUCKET = "openaq-data-archive"
 OPENAQ_API_BASE = "https://api.openaq.org/v3"
-DEFAULT_OPENAQ_API_KEY = "3e9769688ce05126a2db31d3abbe82c672c3eec5c135013d3ab498cf1017e950"
+# P3-1 fix (15-10-2026): no hard-coded secret. Read from env OPENAQ_API_KEY or
+# configs/data_config.yaml at runtime; empty string if unset (API still works
+# with rate limits, S3 path needs no key).
+DEFAULT_OPENAQ_API_KEY = ""
 
 # Official Thailand Air4Thai Benchmark Location IDs on OpenAQ (Geographically Diverse Nationwide Subset)
 DEFAULT_THAILAND_OPENAQ_LOCATIONS = {
@@ -148,6 +151,15 @@ class OpenAQLoader:
             elif c_found is not None:
                 self._stations_df = pd.read_csv(c_found)
             else:
+                # P3 hygiene: metadata missing — placeholder coords are NOT measurements.
+                # Callers must not derive gradients from these; fail-soft with warning
+                # (hard fail would break offline smoke tests; HII path already fails loud).
+                logger.warning(
+                    "OpenAQ station catalog not found; using %d placeholder locations "
+                    "at (13.75, 100.5). Coordinates are NOT authentic — do not use "
+                    "for spatial training without real metadata.",
+                    len(DEFAULT_THAILAND_OPENAQ_LOCATIONS),
+                )
                 records = [
                     {
                         "location_id": loc_id,
