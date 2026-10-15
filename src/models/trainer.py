@@ -658,12 +658,10 @@ class ModelTrainer:
                                    prov_name, res_label, len(sub_train), min_samples_per_provider)
                     continue
 
-                # Determine CV splits dynamically based on sample size
-                cv_splits = min(5, max(2, len(sub_train) // 2))
-
+                # Fast direct training (no K-Fold): single 85/15 holdout split
                 ensemble = self.train_suite(
                     train_df=sub_train,
-                    cv=cv_splits,
+                    cv=1,
                     feature_cols=feature_cols,
                     experiment_id=exp_id,
                 )
@@ -873,10 +871,10 @@ class ModelTrainer:
                                        prov_name, res_label, fs_label, len(sub_train), min_samples_per_provider)
                         continue
 
-                    cv_splits = min(5, max(2, len(sub_train) // 2))
+                    # Fast direct training (no K-Fold): single 85/15 holdout split
                     ensemble = self.train_suite(
                         train_df=sub_train,
-                        cv=cv_splits,
+                        cv=1,
                         feature_cols=active_cols,
                         experiment_id=exp_id,
                     )
