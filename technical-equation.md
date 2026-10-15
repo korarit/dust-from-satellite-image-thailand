@@ -15,23 +15,23 @@
 | $I_\lambda$ | - | ความเข้มรังสีเชิงสเปกตรัม (Spectral Radiance) | $\mathrm{W}\cdot\mathrm{m}^{-2}\cdot\mathrm{sr}^{-1}\cdot\mu\mathrm{m}^{-1}$ |
 | $T_{b, \lambda}$ | `bt_b07`, `bt_b10`, `bt_b11`, `bt_b13`, `bt_b15` | อุณหภูมิความสว่างเทียบเท่าวัตถุดำ 5 แบนด์หลัก (Core IR Brightness Temperature) | $\mathrm{K}$ |
 | $\Delta T_{15, 13}$ | `btd_15_13` | ผลต่าง Split-Window ดักจับฝุ่นซิลิเกต ($T_{b,15} - T_{b,13}$) | $\mathrm{K}$ |
-| $\Delta T_{13, 07}$ | `btd_13_07` | ผลต่างความเปรียบต่างจุดความร้อนไฟป่าและการเผาชีวมวล ($T_{b,13} - T_{b,07}$) | $\mathrm{K}$ |
+| $\Delta T_{13, 07}^{\mathrm{corr}}$ | `btd_13_07` | ผลต่างความเปรียบต่างจุดความร้อนไฟป่า **แบบแก้แสงอาทิตย์** ($T_{b,13} - T_{b,07} + 12\cos(SZA)\mathbb{I}_{\mathrm{day}}$, $SZA<85^\circ$) | $\mathrm{K}$ |
 | $\Delta T_{13, 10}$ | `btd_13_10` | ผลต่างไอน้ำโทรโพสเฟียร์ชั้นล่าง / ดัชนีเสถียรภาพอุณหภูมิผกผัน ($T_{b,13} - T_{b,10}$) | $\mathrm{K}$ |
 | $\Delta T_{13, 11}$ | `btd_13_11` | ผลต่างการดูดกลืนซัลเฟตและขนาดอนุภาค ($T_{b,13} - T_{b,11}$) แทนที่ $BTD_{14,11}$ เดิม | $\mathrm{K}$ |
 | $R_{\mathrm{dust}}$ | `dust_rgb_red` | ดัชนีฝุ่นและขี้เถ้าสีแดงมาตรฐาน WMO ปรับสเกล $[0, 1]$ | ไร้มิติ |
-| $\sigma_{\mathrm{tex}}$ | `b13_std_3x3`, `btd_15_13_std_3x3` | ค่าเบี่ยงเบนมาตรฐานเนื้อภาพเชิงพื้นที่ $3\times 3$ แยกฝุ่นออกจากขอบเมฆ | $\mathrm{K}$ |
-| $\Delta_{\mathrm{cad}} T, \Delta_{\mathrm{cad}} BTD$ | `delta_bt13_cadence`, `delta_btd15_13_cadence` | ผลต่างการเปลี่ยนแปลงตามรอบดาวเทียมจริง ($t - \Delta t_{\mathrm{cadence}}$) | $\mathrm{K}$ |
-| $\dot{T}_{13}, \dot{BTD}$ | `delta_bt13_rate_per_hour`, `delta_btd15_13_rate_per_hour` | อัตราความเร็วการเปลี่ยนแปลงของอุณหภูมิและการสะสมฝุ่นต่อชั่วโมง | $\mathrm{K}/\mathrm{hr}$ |
+| $\sigma_{\mathrm{tex}}$ | `b13/b15/btd_15_13_{mean,std}_3x3 + min/max (B13)`, `b13/btd_15_13_{mean,std}_rad3` (12 cols; `*_diff_*` ตัดออกเพราะ collinear) | ค่าเบี่ยงเบนมาตรฐานเนื้อภาพเชิงพื้นที่ $3\times 3$ (~6×6 km) + rad3-$7\times 7$ (~14×14 km) แยกฝุ่นออกจากขอบเมฆ | $\mathrm{K}$ |
+| $\Delta_{\mathrm{cad}} T, \Delta_{\mathrm{cad}} BTD$ | (intermediate; ป้อนโมเดลเฉพาะ rate) | ผลต่างการเปลี่ยนแปลงตามรอบดาวเทียมจริง ($t - \Delta t_{\mathrm{cadence}}$) | $\mathrm{K}$ |
+| $\dot{T}_{13}, \dot{BTD}$ | `delta_bt13_rate_per_hour`, `delta_btd15_13_rate_per_hour` (+ mask `temporal_delta_valid`) | อัตราความเร็วการเปลี่ยนแปลงของอุณหภูมิและการสะสมฝุ่นต่อชั่วโมง (2 ฟีเจอร์เดียวที่เข้าโมเดล) | $\mathrm{K}/\mathrm{hr}$ |
 | $P$ | `pressure` | ความกดอากาศบรรยากาศ (Atmospheric Pressure) | $\mathrm{hPa}$ |
 | $\Delta P_{\mathrm{NS}}, \Delta P_{\mathrm{EW}}$ | `delta_p_ns`, `delta_p_ew` | ผลต่างความกดอากาศ ทิศเหนือ-ใต้ และ ตะวันออก-ตะวันตก | $\mathrm{hPa}$ |
 | $\|\nabla P\|$ | `pressure_grad_mag` | ขนาดความชันความกดอากาศเชิงพื้นที่ (Stagnation Index) | $\mathrm{hPa} / 100\,\mathrm{km}$ |
 | $z$ | `elevation_m` | ระดับความสูงภูมิประเทศเหนือระดับน้ำทะเลปานกลาง | $\mathrm{m}$ |
 | $\mathrm{TPI}$ | `tpi_index` | ดัชนีตำแหน่งภูมิประเทศ / ดัชนีแอ่งกระทะกักฝุ่น | $\mathrm{m}$ |
 | $u_{\mathrm{aspect}}, v_{\mathrm{aspect}}$ | `aspect_sin`, `aspect_cos` | เวกเตอร์ทิศทางลาดชันภูมิประเทศ ($\sin\psi, \cos\psi$) | ไร้มิติ |
-| $\theta_z$ | `solar_zenith_angle` | มุมเอียงของดวงอาทิตย์จากแนวดิ่ง (Solar Zenith Angle) | องศา ($^\circ$) |
-| $\mathbb{I}_{\mathrm{day}}$ | `is_daytime` | ฟังก์ชันบ่งชี้สภาวะกลางวัน ($1 = \text{Day}, 0 = \text{Night}$) | ไร้มิติ (Binary) |
-| $f$ | `coriolis_param` | พารามิเตอร์แรงโคริออลิสเนื่องจากการหมุนของโลก | $\mathrm{s}^{-1}$ |
-| $\mathbf{w}$ | `ensemble_weights` | เวกเตอร์ค่าน้ำหนักของโมเดลรวม Stacking ($\sum w_k = 1$) | ไร้มิติ |
+| $\theta_z$ | `solar_zenith_angle` (META ONLY, ไม่เข้าโมเดล) | มุมเอียงของดวงอาทิตย์จากแนวดิ่ง (Solar Zenith Angle) | องศา ($^\circ$) |
+| $\mathbb{I}_{\mathrm{day}}$ | `is_daytime` (META ONLY) | ฟังก์ชันบ่งชี้สภาวะกลางวัน ($1 = \text{Day} \iff \theta_z < 85^\circ$, $0 = \text{Night}$) | ไร้มิติ (Binary) |
+| $f$ | `coriolis_param` (DEPRECATED META ONLY, ไม่เข้าโมเดล) | พารามิเตอร์แรงโคริออลิสเนื่องจากการหมุนของโลก ($2\Omega\sin\phi$) — ถูกตัดออกจาก training schema (A2 fix) | $\mathrm{s}^{-1}$ |
+| $\mathbf{w}$ | `ensemble_weights` ($w \in \mathbb{R}^7$, $\sum w_k = 1$) | เวกเตอร์ค่าน้ำหนักของโมเดลรวม Stacking 7 ขุนพล (SLSQP + NNLS fallback, prune $<0.02$) | ไร้มิติ |
 
 ---
 
@@ -89,11 +89,11 @@ $$R_{\mathrm{dust}} = \min\left( 1.0, \, \max\left( 0.0, \, \frac{\Delta T_{15, 
 
 ---
 
-### 2.4 ดัชนีความเปรียบต่างจุดความร้อนไฟป่าและการเผาชีวมวล (Mid-IR Fire Hotspot Contrast: $\Delta T_{13, 07}$)
+### 2.4 ดัชนีความเปรียบต่างจุดความร้อนไฟป่าและการเผาชีวมวล (Mid-IR Fire Hotspot Contrast: $\Delta T_{13, 07}^{\mathrm{corr}}$, แบบแก้แสงอาทิตย์)
 
-ผลต่างอุณหภูมิความสว่างระหว่างคลื่น Thermal IR กับ Shortwave IR (บันทึกในคอลัมน์ `btd_13_07`):
+ผลต่างอุณหภูมิความสว่างระหว่างคลื่น Thermal IR กับ Shortwave IR **หลังแก้แสงอาทิตย์แล้ว** (บันทึกในคอลัมน์ `btd_13_07`, `satellite_tabularizer.py:44-74,125-133`):
 
-$$\Delta T_{13, 07} = T_{b, 13} - T_{b, 07} = T_b(10.4\,\mu\mathrm{m}) - T_b(3.9\,\mu\mathrm{m})$$
+$$\Delta T_{13, 07}^{\mathrm{corr}} = \left[T_{b, 13} - T_{b, 07}\right] + 12.0 \cdot \cos(\min(\theta_z, 90^\circ)) \cdot \mathbb{I}_{\mathrm{day}}, \quad \mathbb{I}_{\mathrm{day}} = 1 \iff \theta_z < 85.0^\circ$$
 
 #### การพิสูจน์ความถูกต้องทางกายภาพ (Physical Derivation):
 ตามกฎการกระจัดของวีน (Wien's Displacement Law):
@@ -136,9 +136,9 @@ $$\Delta T_{13, 11} = T_{b, 13} - T_{b, 11} = T_b(10.4\,\mu\mathrm{m}) - T_b(8.6
 
 ---
 
-### 2.7 สถิติเนื้อภาพเชิงพื้นที่ $3\times 3$ แยกแยะม่านฝุ่นออกจากขอบเมฆ (Spatial Texture Disambiguation)
+### 2.7 สถิติเนื้อภาพเชิงพื้นที่ $3\times 3$ + rad3-$7\times 7$ แยกแยะม่านฝุ่นออกจากขอบเมฆ (Spatial Texture Disambiguation, 12 ฟีเจอร์)
 
-ในหน้าต่างพิกเซล $3 \times 3$ รอบจุดตรวจวัด ($N = 9$ พิกเซล ครอบคลุมพื้นที่ประมาณ $6 \times 6\,\mathrm{km}$):
+ในหน้าต่างพิกเซล $3 \times 3$ รอบจุดตรวจวัด ($N = 9$ พิกเซล ครอบคลุมพื้นที่ประมาณ $6 \times 6\,\mathrm{km}$) และหน้าต่าง rad3 $7 \times 7$ (radius 3, ประมาณ $14 \times 14\,\mathrm{km}$) (`satellite_tabularizer.py:155-299`):
 
 $$\mu_{\mathrm{tex}} = \frac{1}{9} \sum_{k=1}^9 T_{b, 13}^{(k)}$$
 
@@ -148,12 +148,13 @@ $$\sigma_{\mathrm{tex}}(\Delta T_{15, 13}) = \sqrt{\frac{1}{9} \sum_{k=1}^9 \lef
 
 - **ม่านฝุ่นและหมอกควันแผ่กว้าง (Homogeneous Haze/Dust)**: การกระจายตัวเชิงพื้นที่มีความสม่ำเสมอสูง $\sigma_{\mathrm{tex}}(T_{b, 13}) < 0.5\,\mathrm{K}$
 - **ขอบเมฆและกลุ่มเมฆก้อน (Heterogeneous Cloud Edges)**: ความแตกต่างระหว่างผืนดินร้อนและยอดเมฆเย็นจัดทำให้ค่าความแปรปรวนเชิงพื้นที่สูงเด่นชัด $\sigma_{\mathrm{tex}}(T_{b, 13}) > 2.5\,\mathrm{K}$
+- **Schema ที่ป้อนโมเดลจริง 12 คอลัมน์** (`SAT_TEXTURE_COLUMNS`): `b13_{mean,std,min,max}_3x3`, `b15_{mean,std}_3x3`, `btd_15_13_{mean,std}_3x3`, `b13_{mean,std}_rad3`, `btd_15_13_{mean,std}_rad3` — `*_diff_*` (= center − mean) ถูกตัดออกเพราะ collinear สมบูรณ์; gate `≥5` (3×3) / `≥10` (rad3)
 
 ---
 
 ### 2.8 อนุพันธ์ตามเวลาและการเคลื่อนตัวของมวลฝุ่นตามรอบดาวเทียมจริง (Authentic Cadence Dynamics & Hourly Rates)
 
-ในการประมวลผลระดับปฏิบัติการจริง ภาพถ่ายดาวเทียม Himawari-9 ถูกดึงตามรอบความถี่การสังเกตการณ์จริง ($\Delta t_{\mathrm{cadence}}$ เช่น ทุก 3 ชั่วโมง หรือ 6 ชั่วโมง) ระบบจึงยกเลิกการฟิกซ์ช่วงเวลาจำลองเดิม (10m, 30m, 60m ซึ่งในอดีตสร้าง dummy zeros) แล้วเปลี่ยนมาคำนวณการเปลี่ยนแปลงและอัตราต่อชั่วโมงตามรอบเวลาจริง:
+ในการประมวลผลระดับปฏิบัติการจริง ภาพถ่ายดาวเทียม Himawari-9 ถูกดึงตามรอบความถี่การสังเกตการณ์จริง ($\Delta t_{\mathrm{cadence}}$ เช่น ทุก 3 ชั่วโมง หรือ 6 ชั่วโมง) ระบบจึงยกเลิกการฟิกซ์ช่วงเวลาจำลองเดิม (10m, 30m, 60m ซึ่งในอดีตสร้าง dummy zeros) แล้วเปลี่ยนมาคำนวณการเปลี่ยนแปลงและอัตราต่อชั่วโมงตามรอบเวลาจริง — **ป้อนเข้าโมเดลเฉพาะ 2 อัตรา** (`SAT_TEMPORAL_COLUMNS`; `*_cadence` ถูก drop เพราะ collinear กับ rate สำหรับแถวที่ valid):
 
 1. **ผลต่างการเปลี่ยนแปลงอุณหภูมิความสว่างตามรอบเวลาจริง (Cadence Brightness Temperature Delta)**:
    $$\Delta_{\mathrm{cad}} T_{b, 13}(t) = T_{b, 13}(t) - T_{b, 13}(t - \Delta t_{\mathrm{cadence}})$$
@@ -171,7 +172,7 @@ $$\sigma_{\mathrm{tex}}(\Delta T_{15, 13}) = \sqrt{\frac{1}{9} \sum_{k=1}^9 \lef
   - เมื่อ $\dot{BTD}_{15, 13} > 0$: มวลฝุ่นหินแร่ธาตุและควันซิลิเกตกำลังสะสมตัวหนาแน่นขึ้นต่อชั่วโมง ณ พิกัดดังกล่าว
   - เมื่อ $\dot{BTD}_{15, 13} < 0$: ลมพัดพาหรือเกิดการเจือจางและสลายตัวของมวลฝุ่น
   - การหารด้วย $\Delta t_{\mathrm{cadence}}$ ทำให้ฟีเจอร์มีความคงทน (Invariant) ไม่ว่ารอบดาวเทียมที่โหลดจะเป็น 1, 3, หรือ 6 ชั่วโมงก็ตาม
-  - ระบบใช้เกณฑ์ **Strict Continuous Cadence**: หากข้อมูลดาวเทียม ณ $t - \Delta t_{\mathrm{cadence}}$ ขาดหาย จะข้ามการเทรนในรอบเวลานั้นเพื่อป้องกันการป้อนค่าศูนย์เทียมเข้าสู่โมเดล
+  - ระบบใช้เกณฑ์ **Strict Continuous Cadence**: หากข้อมูลดาวเทียม ณ $t - \Delta t_{\mathrm{cadence}}$ ขาดหาย ค่า delta เป็น NaN แล้ว impute เป็น 0 พร้อม mask `temporal_delta_valid = 0` (`feature_matrix_builder.py:581-592`) เพื่อป้องกันการป้อนค่าศูนย์เทียมแบบไร้ร่องรอย
 
 ---
 
@@ -230,7 +231,7 @@ $$P_{\mathrm{ref}}(z) = 1013.25 \left( 1 - \frac{0.0065 z}{288.15} \right)^{5.25
 
 ### 3.2 การประมาณค่าความกดอากาศ 4 ทิศทางด้วย Inverse Distance Weighting พร้อม Proximity Exclusion
 
-เพื่อป้องกัน **Spatial Data Leakage** ไม่ให้โมเดลจำสถานีวัดความกดอากาศในกริดตนเอง ระบบตัดสถานีในรัศมี $d_i < r_{\mathrm{excl}}$ ($r_{\mathrm{excl}} = 2.0\,\mathrm{km}$) ออกอย่างเข้มงวด:
+เพื่อป้องกัน **Spatial Data Leakage** ไม่ให้โมเดลจำสถานีวัดความกดอากาศในกริดตนเอง ระบบตัดสถานีในรัศมี $d_i < r_{\mathrm{excl}}$ ออกอย่างเข้มงวด โดย $r_{\mathrm{excl}}$ เป็นแบบ **per-resolution** (`RESOLUTION_EXCLUSION_MAP = {3.0: 3, 2.0: 2, 1.0: 1, 0.5: 0.5}` km, default 2.0; `spatial_directional.py:31-39`) และค้นไม่เกิน $r_{\max} = 50$ km:
 
 เซตสถานีตรวจวัดที่ได้รับอนุญาตให้ใช้งาน:
 $$\mathcal{S}_{\mathrm{valid}} = \left\{ i \in \mathcal{S} \;\middle|\; d_i = \sqrt{(x_i - x_0)^2 + (y_i - y_0)^2} \ge r_{\mathrm{excl}} \;\land\; d_i \le r_{\max} \right\}$$
@@ -279,7 +280,7 @@ $$\mathrm{TPI}_R(x_0, y_0) = z(x_0, y_0) - \bar{z}_R$$
 
 $$\bar{z}_R = \frac{1}{|\mathcal{N}_R|} \sum_{i \in \mathcal{N}_R} z(x_i, y_i)$$
 
-โดยที่ $\mathcal{N}_R$ คือจุดความสูงทั้งหมดภายในรัศมีวงแหวน $R = 6.0\,\mathrm{km}$
+โดยที่ $\mathcal{N}_R$ คือจุดความสูงทั้งหมดภายในรัศมีวงแหวน $R$ — **default $R = 6.0\,\mathrm{km}$ ที่กริด 2 km** (`compute_tpi_index(radius_km=6.0)`) และปรับตามสเกลจริง $R(r) = 3.0 \times r$ (1.5/3.0/6.0/9.0 km สำหรับ 0.5/1.0/2.0/3.0 km; `adapt_feature_matrix_for_resolution()`)
 - **$\mathrm{TPI} < -15\,\mathrm{m}$**: บ่งชี้สภาวะก้นหุบเขาหรือแอ่งกระทะ (Valley Basin) เกิดปรากฏการณ์อุณหภูมิผกผัน (Thermal Inversion)
 - **$\mathrm{TPI} > +15\,\mathrm{m}$**: บ่งชี้สันเขาหรือยอดดอย (Ridge)
 
@@ -369,11 +370,11 @@ $$\mathrm{Relief}_r = \max_{i \in \mathcal{N}_r}(z_i) - \min_{i \in \mathcal{N}_
 
 ---
 
-### 5.2 พารามิเตอร์แรงโคริออลิส (Coriolis Parameter)
+### 5.2 พารามิเตอร์แรงโคริออลิส (Coriolis Parameter — DEPRECATED, META ONLY)
 
-แรงเบี่ยงเบนเนื่องจากการหมุนของโลก (บันทึกใน `coriolis_param`):
+แรงเบี่ยงเบนเนื่องจากการหมุนของโลก (`grid_engine.py:47,151-152`, $f = 2\Omega\sin\phi$, $\Omega = 7.2921159 \times 10^{-5}\,\mathrm{rad}\cdot\mathrm{s}^{-1}$) **ถูกตัดออกจาก training schema แล้ว** (A2 fix — เป็นเพียง latitude fingerprint ไม่มีฟิสิกส์ระดับ 2 km; `TOPO_SOLAR_COLUMNS` เหลือเฉพาะ 8 topo คงที่ + `dist_coast_km`):
 
-$$f = 2 \Omega \sin\phi$$
+$$f = 2 \Omega \sin\phi \quad \text{(คำนวณไว้เป็น meta เท่านั้น ไม่ป้อนเข้าโมเดล)}$$
 
 โดยที่:
 - $\Omega = 7.2921159 \times 10^{-5}\,\mathrm{rad}\cdot\mathrm{s}^{-1}$ (ความเร็วเชิงมุมของการหมุนของโลก)
@@ -387,16 +388,16 @@ $$f = 2 \Omega \sin\phi$$
 
 ตามทฤษฎีของ Breiman (1996) และอัลกอริทึมของ Lawson & Hanson (1974):
 
-กำหนดให้เมทริกซ์การทำนายแบบ Out-Of-Fold ของโมเดล 4 ขุนพลคือ $\mathbf{S} \in \mathbb{R}^{N \times 4}$:
-$$\mathbf{S} = \begin{bmatrix} f_{\mathrm{lgb}}(\mathbf{x}_1) & f_{\mathrm{cat}}(\mathbf{x}_1) & f_{\mathrm{xgb}}(\mathbf{x}_1) & f_{\mathrm{rf}}(\mathbf{x}_1) \\ \vdots & \vdots & \vdots & \vdots \\ f_{\mathrm{lgb}}(\mathbf{x}_N) & f_{\mathrm{cat}}(\mathbf{x}_N) & f_{\mathrm{xgb}}(\mathbf{x}_N) & f_{\mathrm{rf}}(\mathbf{x}_N) \end{bmatrix}$$
+กำหนดให้เมทริกซ์การทำนายแบบ Out-Of-Fold ของโมเดล 7 ขุนพลคือ $\mathbf{S} \in \mathbb{R}^{N \times 7}$ (`MODEL_KEYS = [lightgbm, catboost, xgboost, extra_trees, figs, nystroem, random_forest]`, `ensemble_model.py:35-43`):
+$$\mathbf{S} = \begin{bmatrix} f_{\mathrm{lgb}}(\mathbf{x}_1) & f_{\mathrm{cat}}(\mathbf{x}_1) & f_{\mathrm{xgb}}(\mathbf{x}_1) & f_{\mathrm{et}}(\mathbf{x}_1) & f_{\mathrm{figs}}(\mathbf{x}_1) & f_{\mathrm{nys}}(\mathbf{x}_1) & f_{\mathrm{rf}}(\mathbf{x}_1) \\ \vdots & \vdots & \vdots & \vdots & \vdots & \vdots & \vdots \\ f_{\mathrm{lgb}}(\mathbf{x}_N) & f_{\mathrm{cat}}(\mathbf{x}_N) & f_{\mathrm{xgb}}(\mathbf{x}_N) & f_{\mathrm{et}}(\mathbf{x}_N) & f_{\mathrm{figs}}(\mathbf{x}_N) & f_{\mathrm{nys}}(\mathbf{x}_N) & f_{\mathrm{rf}}(\mathbf{x}_N) \end{bmatrix}$$
 
 และเวกเตอร์ค่าจริงจากการตรวจวัดภาคพื้นดินคือ $\mathbf{y} \in \mathbb{R}^N$ ฟังก์ชันเป้าหมายที่ต้องหาค่าน้อยที่สุดคือ:
 
-$$\min_{\mathbf{w}} \frac{1}{2} \|\mathbf{y} - \mathbf{S} \mathbf{w}\|_2^2 = \min_{\mathbf{w}} \frac{1}{2} \sum_{i=1}^N \left( y_i - \sum_{k=1}^4 w_k f_k(\mathbf{x}_i) \right)^2$$
+$$\min_{\mathbf{w}} \frac{1}{2} \|\mathbf{y} - \mathbf{S} \mathbf{w}\|_2^2 = \min_{\mathbf{w}} \frac{1}{2} \sum_{i=1}^N \left( y_i - \sum_{k=1}^7 w_k f_k(\mathbf{x}_i) \right)^2$$
 
-ภายใต้เงื่อนไขบังคับเชิงฟิสิกส์:
-$$w_k \ge 0, \quad \forall k \in \{1, 2, 3, 4\}$$
-$$\sum_{k=1}^4 w_k = 1.0$$
+ภายใต้เงื่อนไขบังคับเชิงฟิสิกส์ (SLSQP หลัก + NNLS fallback, prune น้ำหนัก $< 0.02$ แล้ว renormalize; `ensemble_model.py:200-232,310-347`):
+$$w_k \ge 0, \quad \forall k \in \{1, \dots, 7\}$$
+$$\sum_{k=1}^7 w_k = 1.0$$
 
 เงื่อนไข Karush-Kuhn-Tucker (KKT Conditions) สำหรับคำตอบเหมาะสมที่สุด $\mathbf{w}^*$:
 $$\mathbf{S}^T (\mathbf{S} \mathbf{w}^* - \mathbf{y}) - \boldsymbol{\lambda} + \mu \mathbf{1} = \mathbf{0}$$

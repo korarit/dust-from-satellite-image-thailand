@@ -17,9 +17,9 @@ flowchart LR
     end
 
     subgraph FeatureEng ["2. Image Feature Transformation"]
-        Calib --> BTD["Physics-Informed BTDs<br>• BTD15-13 (Silicate Dust)<br>• BTD13-07 (Hotspots & Fires)<br>• BTD13-10 (Lower Moisture & Stability)<br>• BTD13-11 (Sulfate & Particle Size)<br>• Dust RGB Red Channel"]
-        Calib --> Tex["3x3 Spatial Texture<br>• Mean, Std (Smoothness)<br>• Min, Max (~6x6 km window)"]
-        Calib --> Temp["Temporal Tendencies<br>• ΔBT_cadence, ΔBTD_cadence<br>• Hourly Rates (K/hr)"]
+        Calib --> BTD["Physics-Informed BTDs<br>• BTD15-13 (Silicate Dust)<br>• BTD13-07corr (Hotspots & Fires, +12·cosSZA·is_day, SZA<85°)<br>• BTD13-10 (Lower Moisture & Stability)<br>• BTD13-11 (Sulfate & Particle Size)<br>• Dust RGB Red (diagnostic-only, excluded from training)"]
+        Calib --> Tex["Spatial Texture 12 cols<br>• 3x3 (~6x6 km): mean, std, min, max<br>• rad3-7x7 (~14x14 km): mean, std<br>• *_diff_* excluded (collinear)"]
+        Calib --> Temp["Temporal Tendencies (rates only)<br>• ΔBT_cadence, ΔBTD_cadence → rate/hr<br>• temporal_delta_valid mask (no-zero-fill)"]
     end
 
     subgraph GeoIntegration ["3. Streaming & Multi-Resolution Tabularization"]
@@ -99,8 +99,9 @@ $$BTD_{13-11} = T_b(\text{B13}, 10.4\,\mu\text{m}) - T_b(\text{B11}, 8.6\,\mu\te
 - แถบคลื่น B11 ($8.6\,\mu\text{m}$) ไวต่อการดูดกลืนรังสีของสารประกอบซัลเฟต ($\text{SO}_4^{2-}$) และกรดซัลฟิวริกจากกิจกรรมอุตสาหกรรมและการเผาไหม้
 - เมื่อคำนวณผลต่างร่วมกับ Clean Window B13 ($10.4\,\mu\text{m}$) จะสามารถแยกแยะอนุภาคฝุ่นละอองทุติยภูมิ (Secondary Inorganic Aerosols) ออกจากละอองน้ำของเมฆระดับต่ำได้ โดยสูตรนี้เข้ามาแทนที่ $BTD_{14-11}$ เดิมอย่างสมบูรณ์แบบหลังตัดแบนด์ B14 ที่ซ้ำซ้อนออก (ระบบยังคงมี Fallback Compatibility รองรับหากไฟล์ข้อมูลเก่ามี B14)
 
-### 4.3 ดัชนีความเปรียบต่างควันชีวมวลและจุดความร้อน ($BTD_{13-07}$)
-$$BTD_{13-07} = T_b(\text{B13}, 10.4\,\mu\text{m}) - T_b(\text{B07}, 3.9\,\mu\text{m})$$
+### 4.3 ดัชนีความเปรียบต่างควันชีวมวลและจุดความร้อน ($BTD_{13-07}$, แบบแก้แสงอาทิตย์)
+$$BTD_{13-07}^{\mathrm{corr}} = \left[T_b(\text{B13}, 10.4\,\mu\text{m}) - T_b(\text{B07}, 3.9\,\mu\text{m})\right] + 12.0 \cdot \cos(\min(SZA, 90^\circ)) \cdot \mathbb{I}_{\mathrm{day}}$$
+- ตามโค้ด `satellite_tabularizer.py:40-41,44-74,125-133`: `B07_SOLAR_CORRECTION_SCALE_K = 12.0`, `DAY_NIGHT_SZA_THRESHOLD_DEG = 85.0` ($\mathbb{I}_{\mathrm{day}} = 1$ เมื่อ $SZA < 85^\circ$) — บวกค่าแก้กลับเข้าหา night thermal baseline แล้ว **drop SZA/is_day ออกจาก training features** (META ONLY)
 - แถบคลื่น B07 ($3.9\,\mu\text{m}$) ตอบสนองต่อการแผ่รังสีของแหล่งความร้อนอุณหภูมิสูง (Hotspots) ตามกฎการแทนที่ของวีน ($\lambda_{\max} \propto 1/T$)
 - ผลต่าง $BTD_{13-07}$ ให้ค่าเชิงลบสูงมากในบริเวณที่มีไฟป่าและการเผาเศษวัสดุการเกษตร ซึ่งเป็นต้นตอหลักของวิกฤตฝุ่น $\text{PM}_{2.5}$ ภาคเหนือของไทย
 
@@ -116,9 +117,12 @@ $$R_{\mathrm{dust}} = \min\left( 1.0, \, \max\left( 0.0, \, \frac{\Delta T_{15, 
 
 ---
 
-## 5. การสกัดเนื้อภาพเชิงพื้นที่และการจำแนกเมฆ (Spatial Texture Disambiguation)
+## 5. การสกัดเนื้อภาพเชิงพื้นที่และการจำแนกเมฆ (Spatial Texture Disambiguation: 3×3 + rad3-7×7, 12 ฟีเจอร์)
 
-ปัญหาสำคัญในการใช้ภาพถ่ายดาวเทียมเพื่อพยากรณ์ฝุ่นคือ **ความสับสนระหว่างม่านฝุ่นควันและขอบเมฆระดับต่ำ** เนื่องจากทั้งสองปรากฏการณ์ลดค่าอุณหภูมิความสว่างลงเหมือนกัน ระบบจึงใช้เทคนิคการวิเคราะห์เนื้อภาพเชิงพื้นที่ในหน้าต่าง $3 \times 3$ พิกเซล (Spatial Window ขนาดประมาณ $6 \times 6\,\text{km}$):
+ปัญหาสำคัญในการใช้ภาพถ่ายดาวเทียมเพื่อพยากรณ์ฝุ่นคือ **ความสับสนระหว่างม่านฝุ่นควันและขอบเมฆระดับต่ำ** เนื่องจากทั้งสองปรากฏการณ์ลดค่าอุณหภูมิความสว่างลงเหมือนกัน ระบบจึงใช้เทคนิคการวิเคราะห์เนื้อภาพเชิงพื้นที่ **2 สเกล** (`satellite_tabularizer.py:155-299`, `feature_matrix_builder.py:95-108`):
+- **หน้าต่าง $3 \times 3$ (radius 1, ~$6 \times 6\,\text{km}$)**: `b13/b15/btd_15_13` → mean, std (+ min/max เฉพาะ B13)
+- **หน้าต่าง rad3 $7 \times 7$ (radius 3, ~$14 \times 14\,\text{km}$)**: `b13`, `btd_15_13` → mean, std
+- รวม **12 คอลัมน์** (`SAT_TEXTURE_COLUMNS`); `*_diff_* (center − mean)` ถูกตัดออกเพราะ collinear สมบูรณ์; gate ความครบข้อมูล `≥5` (3×3) / `≥10` (rad3) มิฉะนั้น std เป็น NaN แล้ว impute ภายหลัง
 
 $$\mu_{3\times 3} = \frac{1}{9} \sum_{i=-1}^{1} \sum_{j=-1}^{1} T_b(r+i, c+j)$$
 
@@ -133,7 +137,7 @@ $$\sigma_{3\times 3} = \sqrt{\frac{1}{9} \sum_{i=-1}^{1} \sum_{j=-1}^{1} \left( 
 
 ## 6. การติดตามอนุพันธ์เวลาและการเคลื่อนตัวตามรอบดาวเทียมจริง (Authentic Cadence Dynamics & Hourly Velocity)
 
-ในการปฏิบัติงานจริง ภาพดาวเทียมถูกดึงตามรอบ Cadence ที่กำหนด ($\Delta t_{\text{cadence}}$ เช่น 3 ชั่วโมง หรือ 6 ชั่วโมง) ระบบจึงยกเลิกการฟิกซ์ช่วงเวลาจำลองเดิม (10m, 30m, 60m ซึ่งในอดีตสร้าง dummy zeros) แล้วเปลี่ยนมาคำนวณอนุพันธ์ตามเวลาจริง:
+ในการปฏิบัติงานจริง ภาพดาวเทียมถูกดึงตามรอบ Cadence ที่กำหนด ($\Delta t_{\text{cadence}}$ เช่น 3 ชั่วโมง หรือ 6 ชั่วโมง) ระบบจึงยกเลิกการฟิกซ์ช่วงเวลาจำลองเดิม (10m, 30m, 60m ซึ่งในอดีตสร้าง dummy zeros) แล้วเปลี่ยนมาคำนวณอนุพันธ์ตามเวลาจริง — และป้อนเข้าโมเดล **เฉพาะอัตราต่อชั่วโมง 2 ฟีเจอร์** (`delta_bt13_rate_per_hour`, `delta_btd15_13_rate_per_hour`; `*_cadence` ถูก drop เพราะ collinear กับ rate — `feature_matrix_builder.py:110-118`):
 
 $$\Delta_{\mathrm{cad}} T_{b, 13}(t) = T_b(t) - T_b(t - \Delta t_{\mathrm{cadence}})$$
 
@@ -141,7 +145,8 @@ $$\Delta_{\mathrm{cad}} BTD_{15-13}(t) = BTD_{15-13}(t) - BTD_{15-13}(t - \Delta
 
 $$\text{Hourly Velocity} = \frac{\Delta_{\mathrm{cad}} BTD_{15-13}(t)}{\Delta t_{\mathrm{cadence}}} \quad (\mathrm{K}/\mathrm{hr})$$
 
-- **ความต่อเนื่องเชิงเวลา (Continuous Cadence Gate)**: กรองเฉพาะรอบเวลาที่มีภาพดาวเทียม $t - \Delta t_{\mathrm{cadence}}$ ต่อเนื่องเท่านั้น หากข้อมูลก่อนหน้าขาดหาย ระบบจะข้ามสแนปช็อตนั้นทันทีเพื่อไม่ให้มีข้อมูลศูนย์เทียมรั่วไหลเข้าสู่โมเดล
+- **ความต่อเนื่องเชิงเวลา (Continuous Cadence Gate)**: กรองเฉพาะรอบเวลาที่มีภาพดาวเทียม $t - \Delta t_{\mathrm{cadence}}$ ต่อเนื่องเท่านั้น หากข้อมูลก่อนหน้าขาดหาย ค่า delta เป็น **NaN แล้ว impute เป็น 0 พร้อม mask `temporal_delta_valid = 0`** (`feature_matrix_builder.py:581-592`) — ไม่ป้อนศูนย์เทียมแบบไร้ร่องรอย
+- **Legacy frames** `delta_{bt13,btd15_13}_{10m,30m,60m}` ถูกคำนวณ **เฉพาะเมื่อส่ง past frames เข้ามา显式** (`satellite_tabularizer.py:352-363`) ไม่ใช่ default path
 - ค่าอัตราความเร็วต่อ 1 ชั่วโมง ($\mathrm{K}/\mathrm{hr}$) ช่วยให้โมเดลประเมินทิศทางและอัตราเร่งของการสะสมตัวของมวลหมอกควันข้ามพรมแดนได้อย่างแม่นยำ
 
 ---
@@ -176,6 +181,8 @@ $$\text{CRS: UTM Zone 47N (EPSG:32647)}$$
 
 ### 8.2 การจับคู่พิกัดพิกเซลด้วย cKDTree (Nearest Neighbor Indexing)
 จุดกึ่งกลางของทุกกริดเซลล์ (ขนาด 500m, 1km, 2km, 3km) จะถูกค้นหาพิกัดพิกเซลบนภาพดาวเทียมผ่านโครงสร้างข้อมูล **cKDTree** ในพิกัด UTM เพื่อความเร็วในการประมวลผลระดับมิลลิวินาที ทำให้ระบบสามารถ Tabularize ข้อมูลทั้งประเทศครอบคลุมกว่าแสนกริดเซลล์ได้ภายในไม่กี่วินาที
+
+> **ตรงโค้ดปัจจุบัน**: Solar/Time/Coriolis (`solar_zenith_angle`, `is_daytime`, `hour_sin/cos`, `month_sin/cos`, `coriolis_param`) เป็น **META ONLY ไม่ถูกป้อนเข้าโมเดล** (`feature_matrix_builder.py:137-161`; `grid_engine.py:481-483`) — ใช้เพื่อ B07 solar correction + แยกประเมิน day/night เท่านั้น; เซลล์นอกชายฝั่ง (`dist_coast_km > 50`) ถูก blank ค่า weather บังคับลงเส้นทาง pure-satellite (`route_offshore_to_pure_sat()`); exclusion รัศมีเป็นแบบ per-resolution `{3.0: 3, 2.0: 2, 1.0: 1, 0.5: 0.5} km` (`spatial_directional.py:31-38`)
 
 ---
 

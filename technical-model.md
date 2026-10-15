@@ -15,10 +15,10 @@
 ```mermaid
 flowchart TD
     subgraph InputMatrix ["1. Unified Feature Matrix (N samples x Multi-Scale Clean Features)"]
-        F1["Core 5 Satellite IR Features (BTs: B07-B15; BTDs: 15-13, 13-07, 13-10, 13-11; 3x3 Texture, 3-Pixel Defect/Diff Residuals, Cadence Dynamics)"]
-        F2["Directional Atmospheric Telemetry (4 Quadrants, ||∇P||, ||∇RH||)"]
-        F3["Copernicus DEM 30m Topography (Elevation, TPI, Slope, Aspect)"]
-        F4["Solar Astronomy & Cyclical Time (SZA, Coriolis, Hour, Month)"]
+        F1["Core 5 Satellite IR Features (BTs B07/B10/B11/B13/B15; BTDs 15-13, 13-07*corr, 13-10, 13-11; Texture 3x3 + rad3-7x7 12 cols; Temporal rates/hr only 2 cols + temporal_delta_valid mask)"]
+        F2["Directional Atmospheric Telemetry (Pressure 8 + Humidity 3 = 11 feats; IDW p=1.0, exclusion per-res {3:3, 2:2, 1:1, 0.5:0.5} km, grad hPa/100km; ||∇P||, ||∇RH||)"]
+        F3["Copernicus DEM 30m Topography (Elevation, TPI, Slope, Aspect, Relief, Roughness, Coast Dist)"]
+        F4["Solar Astronomy & Cyclical Time — META ONLY, never fed to models (SZA, is_daytime SZA<85°, hour/month sin-cos, coriolis; used for B07 correction + day-night stratification)"]
     end
 
     subgraph SeptetSuite ["2. The Septet Base Learners (Fast Direct / K-Fold OOF Predictions)"]
@@ -50,10 +50,11 @@ flowchart TD
 ```
 
 ### 1.1 สถาปัตยกรรมโมเดลคู่ขนาน (Dual Model Architecture Strategy)
-1. **Model 1: Pure Satellite Suite (โหมดดาวเทียมล้วน / พร้อมสำหรับพื้นที่ทางทะเลและชายแดน)**:
+> **Feature schema ปัจจุบันใน `src/features/feature_matrix_builder.py`**: Physical 42 + Quality-mask 3 = **Full Multimodal 45 ฟีเจอร์** (`SAT_BT 5 + BTD 4 + Texture 12 + Temporal-rate 2 + Pressure 8 + Humidity 3 + Topo 8 + Aux 3`); **Pure Satellite 34 ฟีเจอร์** (ตัด Weather 11 ออก: `23 + 8 + 3 = 34`) — Solar/Time/Coriolis เป็น **META ONLY** ไม่ถูกป้อนเข้าโมเดล (A1+A2 fix)
+1. **Model 1: Pure Satellite Suite (โหมดดาวเทียมล้วน / พร้อมสำหรับพื้นที่ทางทะเลและชายแดน, 34 ฟีเจอร์)**:
    - ใช้เฉพาะฟีเจอร์จากดาวเทียม Himawari-9 (IR Bands, BTDs, Texture, Cadence Dynamics) ผสานกับภูมิประเทศ Copernicus DEM, ระยะห่างชายฝั่ง และมุมดวงอาทิตย์
    - **ไม่ต้องพึ่งพาเซนเซอร์สภาพอากาศภาคพื้นดินแม้แต่จุดเดียว**: ปฏิบัติการได้ 100% บนพื้นที่อ่าวไทย ทะเลอันดามัน และแนวเทือกเขาชายแดนห่างไกล
-2. **Model 2: Full Multimodal Suite (โหมดมัลติโมดอลสมบูรณ์)**:
+2. **Model 2: Full Multimodal Suite (โหมดมัลติโมดอลสมบูรณ์, 45 ฟีเจอร์: 42 physical + 3 quality-mask)**:
    - เสริมข้อมูลความกดอากาศ 4 ทิศทาง ($\|\nabla P\|$) และความชื้นสัมพัทธ์จากเครือข่ายโทรมาตร สสน. (HII) เพื่อเพิ่มความแม่นยำสูงสุดในเขตแผ่นดินใหญ่และเมืองหลวง
 
 ---
@@ -128,15 +129,14 @@ flowchart TD
 ## 3. การบังคับข้อจำกัดทางฟิสิกส์และการแจกแจงทางสถิติ (Physics & Statistical Loss Modeling)
 
 ### 3.1 ตารางข้อจำกัดทางฟิสิกส์สำหรับแบบจำลอง (Monotonic Constraints Table)
-ในสภาวะจริงทางอุตุนิยมวิทยา มีฟีเจอร์บางประการที่มีทิศทางความสัมพันธ์กับความเข้มข้นของฝุ่นอย่างชัดเจนตามกฎเกณฑ์ฟิสิกส์บรรยากาศ หากปล่อยให้โมเดลเรียนรู้อย่างอิสระ อาจเกิดกรณีที่ต้นไม้ตัดสินใจทำนายสวนทางกับความเป็นจริงในพื้นที่ที่ข้อมูลเบาบาง ระบบจึงรองรับ **Monotonic Constraints** ให้แก่โมเดล LightGBM และ XGBoost:
+ในสภาวะจริงทางอุตุนิยมวิทยา มีฟีเจอร์บางประการที่มีทิศทางความสัมพันธ์กับความเข้มข้นของฝุ่นอย่างชัดเจนตามกฎเกณฑ์ฟิสิกส์บรรยากาศ หากปล่อยให้โมเดลเรียนรู้อย่างอิสระ อาจเกิดกรณีที่ต้นไม้ตัดสินใจทำนายสวนทางกับความเป็นจริงในพื้นที่ที่ข้อมูลเบาบาง ระบบจึงรองรับ **Monotonic Constraints** ให้แก่โมเดล LightGBM, CatBoost และ XGBoost เท่านั้น (RF / ExtraTrees / FIGS / Nystroem ไม่รองรับ — `ensemble_model.py` ส่งต่อ `mono_constraints` ให้เฉพาะ 3 ตัวแรก) โดยค่าที่เปิดใช้งานจริงใน [`model_config.yaml`](configs/model_config.yaml) มีเพียง **2 ข้อ** ดังนี้:
 
 | ฟีเจอร์ (Feature) | ทิศทางบังคับ (Constraint) | เหตุผลและกฎทางฟิสิกส์บรรยากาศรองรับ |
 | :--- | :---: | :--- |
-| **ขนาดความชันความกดอากาศ ($\|\nabla P\|$)** | **$-1$ (ลดลงทางเดียว)** | เมื่อความชันความกดอากาศเข้าใกล้ศูนย์ ลมจะสงบนิ่ง เกิดสภาวะ **Air Stagnation** ฝุ่นต้องสะสมตัวเพิ่มขึ้นอย่างเคร่งครัด (Horton et al., 2014) |
-| **ผลต่างหน้าต่างคู่ ($BTD_{15-13}$)** | **$+1$ (เพิ่มขึ้นทางเดียว)** | การดูดกลืนรังสีของอนุภาคซิลิเกตที่ $10.4\,\mu\text{m}$ สูงกว่า $12.4\,\mu\text{m}$ เมื่อ $BTD_{15-13}$ ขยับจากลบเข้าสู่บวก สัดส่วนฝุ่นต้องเพิ่มขึ้น (Ackerman, 1997) |
-| **ดัชนีฝุ่นสีแดง ($R_{\mathrm{dust}}$ หรือ `dust_rgb_red`)** | **$+1$ (เพิ่มขึ้นทางเดียว)** | ดัชนีความหนาแน่นม่านฝุ่นมาตรฐาน WMO ยิ่งมีค่าสูง ฝุ่นภาคพื้นดินยิ่งต้องหนาแน่น |
-| **ดัชนีจุดความร้อนไฟป่า ($BTD_{13-07}$)** | **$-1$ (ลดลงทางเดียว)** | เมื่อผลต่างติดลบสูงมาก บ่งชี้การแผ่รังสีของเปลวไฟอุณหภูมิสูง (Hotspots) ซึ่งเป็นแหล่งกำเนิดปฐมภูมิของ $\text{PM}_{2.5}$ (Wooster et al., 2005) |
-| **ดัชนีไอน้ำโทรโพสเฟียร์ชั้นล่าง ($BTD_{13-10}$)** | **$-1$ (ลดลงทางเดียว)** | เมื่อความต่างอุณหภูมิระหว่างผิวโลกและบรรยากาศชั้นล่างลดลง บ่งชี้สภาวะอุณหภูมิผกผัน (Thermal Inversion Capping) ฝุ่นถูกกักขังใกล้ผิวดิน (Che et al., 2019) |
+| **ขนาดความชันความกดอากาศ ($\|\nabla P\|**, `pressure_grad_mag` **)** | **$-1$ (ลดลงทางเดียว)** | เมื่อความชันความกดอากาศเข้าใกล้ศูนย์ ลมจะสงบนิ่ง เกิดสภาวะ **Air Stagnation** ฝุ่นต้องสะสมตัวเพิ่มขึ้นอย่างเคร่งครัด (Horton et al., 2014) |
+| **ผลต่างหน้าต่างคู่ ($BTD_{15-13}$**, `btd_15_13`**)** | **$+1$ (เพิ่มขึ้นทางเดียว)** | การดูดกลืนรังสีของอนุภาคซิลิเกตที่ $10.4\,\mu\text{m}$ สูงกว่า $12.4\,\mu\text{m}$ เมื่อ $BTD_{15-13}$ ขยับจากลบเข้าสู่บวก สัดส่วนฝุ่นต้องเพิ่มขึ้น (Ackerman, 1997) |
+
+> หมายเหตุ: ข้อจำกัดเพิ่มเติม (`dust_rgb_red`, `btd_13_07`, `btd_13_10`) ที่เคยระบุในเอกสารฉบับก่อน **ไม่ได้เปิดใช้งานในโค้ดปัจจุบัน** — `dust_rgb_red` เป็น transform เชิงเดี่ยวของ `btd_15_13` จึงถูกตัดออกจาก training schema เพื่อเลี่ยง collinearity (`feature_matrix_builder.py:82-83`)
 
 ### 3.2 การพยากรณ์ในโหมดดาวเทียมล้วน (Satellite-Only Physics Dependency)
 ในสภาวะที่ไม่มีข้อมูลสถานีโทรมาตรภาคพื้นดิน ($P, RH$ ขาดหายหรือไม่ครอบคลุม):
@@ -153,7 +153,9 @@ flowchart TD
 2. **การแจกแจงแบบเบ้ขวาอย่างรุนแรง (Heavily Right-skewed Distribution)**: ข้อมูลส่วนใหญ่มีความเข้มข้นต่ำ (ช่วงอากาศดีหรือหน้าฝน) แต่มีส่วนหางยาว (Heavy Tail) ในช่วงวิกฤตหมอกควันไฟป่า
 3. **ความแปรปรวนแปรผันตามค่าเฉลี่ย ($\text{Var}(Y) = \phi \mu^p$)**: เมื่อฝุ่นเข้มข้นสูง ค่าความคลาดเคลื่อนจะกว้างขึ้นตามธรรมชาติ
 
-ระบบจึงนำ **Tweedie Deviance Loss ($1 < p < 2$, โดยตั้งค่า $p = 1.5$ ซึ่งตรงกับการแจกแจงแบบ Compound Poisson-Gamma)** มาใช้เป็นฟังก์ชันจุดประสงค์หลักในโมเดลตระกูล Gradient Boosting (LightGBM, CatBoost, XGBoost):
+ระบบจึงนำ **Tweedie Deviance Loss ($1 < p < 2$, โดยตั้งค่า $p = 1.5$ ซึ่งตรงกับการแจกแจงแบบ Compound Poisson-Gamma)** มาใช้เป็นฟังก์ชันจุดประสงค์หลักในโมเดลตระกูล Gradient Boosting (LightGBM, CatBoost, XGBoost) **ผ่าน `configs/model_config.yaml`** (`lightgbm.objective: tweedie`, `catboost.loss_function: Tweedie:variance_power=1.5`, `xgboost.objective: reg:tweedie`):
+
+> หมายเหตุตรงโค้ด: class default ใน `lgbm_model.py` / `catboost_model.py` / `xgboost_model.py` เป็น MAE/`reg:absoluteerror` แต่ `DustStackingEnsemble` ส่ง `models_cfg` จาก YAML ผ่าน constructor จึงได้ Tweedie $p=1.5$ ในโหมด production; `hyperparameter_tuner.py` ค้น `tweedie_variance_power ∈ [1.1, 1.9]`
 
 $$d(y, \mu) = 2 \left( \frac{y^{2-p}}{(1-p)(2-p)} - \frac{y \mu^{1-p}}{1-p} + \frac{\mu^{2-p}}{2-p} \right)$$
 
