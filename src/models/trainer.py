@@ -85,6 +85,7 @@ class ModelTrainer:
         """Loads Optuna-tuned hyper-parameters for this pollutant, if available."""
         path = get_tuned_params_path(self.pollutant)
         if not path.exists():
+            logger.info("No tuned hyper-parameters at %s — using default model config.", path)
             return {}
         try:
             data = load_yaml_config(path)
