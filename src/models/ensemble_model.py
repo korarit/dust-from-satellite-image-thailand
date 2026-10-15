@@ -14,7 +14,7 @@ import json
 import time
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union, Any
+from typing import Callable, Dict, List, Optional, Tuple, Union, Any
 import joblib
 import numpy as np
 import pandas as pd
@@ -113,12 +113,17 @@ class DustStackingEnsemble(BaseDustModel):
         feature_names: Optional[List[str]] = None,
         cv: int = 5,
         random_state: int = 42,
+        benchmark_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
     ) -> "DustStackingEnsemble":
         """
         Fits the ensemble using K-Fold Out-Of-Fold (OOF) stacking:
         1. Generates out-of-fold prediction matrix S (N x 4)
         2. Optimizes meta-learner non-negative weights (w_i >= 0, sum(w) = 1.0)
         3. Trains full base learners on 100% of the training dataset
+
+        If ``benchmark_callback`` is provided, it is invoked immediately after each
+        base learner finishes training, receiving that model's benchmark record
+        (metrics, estimator name, fit time) for the current resolution/experiment.
         """
         X_arr, f_names = self._prepare_inputs(X, feature_names)
         y_arr = self._prepare_target(y)
@@ -156,6 +161,21 @@ class DustStackingEnsemble(BaseDustModel):
                 logger.info("  ✓ [%d/%d] %-14s completed in %6.1fs | Val MAE: %6.3f | RMSE: %6.3f | R²: %6.4f",
                             m_idx, len(MODEL_KEYS), model.name, t_elapsed,
                             m_metrics["mae"], m_metrics["rmse"], m_metrics["r2"])
+
+                if benchmark_callback is not None:
+                    benchmark_callback({
+                        "model": m_key,
+                        "model_name": model.name,
+                        "eval_mode": "holdout",
+                        "n_train": int(len(X_tr)),
+                        "n_eval": int(len(X_vl)),
+                        "fit_seconds": round(float(t_elapsed), 2),
+                        "mae": m_metrics["mae"],
+                        "rmse": m_metrics["rmse"],
+                        "r2": m_metrics["r2"],
+                        "pearson_r": m_metrics["pearson_r"],
+                        "aqi_acc": m_metrics["aqi_acc"],
+                    })
 
             loss_metric = self.config.get("general", {}).get("eval_metric", "mae").lower()
 
@@ -294,7 +314,25 @@ class DustStackingEnsemble(BaseDustModel):
             logger.info("  [100%% Fit %d/4] Training %s on %d samples...", m_idx, m.name, len(X_arr))
             t_mstart = time.perf_counter()
             m.fit(X_arr, y_arr, eval_set=eval_set, feature_names=self.feature_names_)
-            logger.info("  ✓ [100%% Fit %d/4] %s completed in %.1fs", m_idx, m.name, time.perf_counter() - t_mstart)
+            t_mfit = time.perf_counter() - t_mstart
+            logger.info("  ✓ [100%% Fit %d/4] %s completed in %.1fs", m_idx, m.name, t_mfit)
+
+            if benchmark_callback is not None:
+                mm = self.oof_metrics_.get(m_key, {})
+                benchmark_callback({
+                    "model": m_key,
+                    "model_name": m.name,
+                    "eval_mode": "oof",
+                    "n_train": int(len(X_arr)),
+                    "n_eval": int(len(X_arr)),
+                    "fit_seconds": round(float(t_mfit), 2),
+                    "weight": float(self.weights.get(m_key, 0.0)),
+                    "mae": mm.get("mae", 0.0),
+                    "rmse": mm.get("rmse", 0.0),
+                    "r2": mm.get("r2", 0.0),
+                    "pearson_r": mm.get("pearson_r", 0.0),
+                    "aqi_acc": mm.get("aqi_acc", 0.0),
+                })
 
         self.is_fitted_ = True
         return self

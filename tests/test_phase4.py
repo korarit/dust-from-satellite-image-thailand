@@ -314,6 +314,37 @@ def test_dust_stacking_ensemble(deterministic_training_data, tmp_path):
     assert np.allclose(orig_preds, loaded_preds, atol=1e-5)
 
 
+def test_per_model_benchmark_callback(deterministic_training_data):
+    """Verifies each base learner is benchmarked (callback invoked) immediately after it trains."""
+    df, f_cols, target = deterministic_training_data
+    X = df[f_cols]
+    y = df[target]
+
+    cfg = {
+        "models": {
+            "lightgbm": {"n_estimators": 5, "learning_rate": 0.1, "min_child_samples": 2},
+            "catboost": {"iterations": 5, "learning_rate": 0.1, "depth": 3},
+            "xgboost": {"n_estimators": 5, "learning_rate": 0.1, "max_depth": 3},
+            "extra_trees": {"n_estimators": 5, "max_depth": 4, "min_samples_split": 2},
+            "figs": {"max_rules": 6, "max_trees": 2, "random_state": 42},
+            "nystroem": {"n_components": 10, "alpha": 1.0, "random_state": 42},
+            "random_forest": {"n_estimators": 5, "max_depth": 4, "min_samples_split": 2},
+        },
+        "features": {"monotonic_constraints": {}},
+    }
+
+    records = []
+    ensemble = DustStackingEnsemble(config=cfg, name="BenchEnsemble")
+    ensemble.fit(X, y, cv=1, random_state=42, benchmark_callback=records.append)
+
+    assert len(records) == len(MODEL_KEYS)
+    assert {r["model"] for r in records} == set(MODEL_KEYS)
+    for r in records:
+        assert "mae" in r and "rmse" in r and "r2" in r and "aqi_acc" in r
+        assert r["eval_mode"] == "holdout"
+        assert r["n_eval"] >= 2
+
+
 def test_model_trainer_multi_resolution(deterministic_training_data, tmp_path):
     """Verifies ModelTrainer orchestration and multi-resolution benchmark execution."""
     df, f_cols, target = deterministic_training_data

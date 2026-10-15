@@ -73,6 +73,9 @@ class ModelTrainer:
         self.random_state = self.config.get("general", {}).get("random_state", 42)
         self.cv_splits = self.config.get("general", {}).get("cv_splits", 5)
 
+        # Accumulates per-base-learner benchmark records across resolutions/experiments
+        self.per_model_benchmark_records: List[Dict[str, Any]] = []
+
     def prepare_data(
         self,
         df: pd.DataFrame,
@@ -138,12 +141,26 @@ class ModelTrainer:
             pollutant=self.pollutant,
             target_col=self.target_col,
         )
+
+        def _on_base_model_trained(rec: Dict[str, Any]) -> None:
+            rec = dict(rec)
+            rec["experiment"] = experiment_id
+            rec["pollutant"] = self.pollutant
+            self.per_model_benchmark_records.append(rec)
+            logger.info(
+                "  🧪 [BENCH %s] %-13s | %s | MAE: %6.3f | RMSE: %6.3f | R²: %7.4f | Pearson: %6.4f | AQI: %5.2f%%",
+                rec.get("eval_mode", ""), rec.get("model", ""), experiment_id,
+                rec.get("mae", 0.0), rec.get("rmse", 0.0), rec.get("r2", 0.0),
+                rec.get("pearson_r", 0.0), rec.get("aqi_acc", 0.0),
+            )
+
         ensemble.fit(
             X=X,
             y=y,
             feature_names=f_cols,
             cv=splits,
             random_state=self.random_state,
+            benchmark_callback=_on_base_model_trained,
         )
 
         # Save checkpoint with pollutant suffix: e.g. exp_2km_pm25, exp_2km_pm10
@@ -153,7 +170,60 @@ class ModelTrainer:
         ensemble.save(checkpoint_dir)
         logger.info("Model checkpoint successfully saved to: %s", checkpoint_dir)
 
+        # Persist the accumulating per-base-learner benchmark (log + CSV + md/json)
+        self._write_per_model_benchmark_reports()
+
         return ensemble
+
+    def _write_per_model_benchmark_reports(self) -> None:
+        """
+        Persists the accumulating per-base-learner benchmark (each learner is benchmarked
+        immediately after it finishes training, scoped to the current resolution/experiment):
+        a CSV that accumulates every experiment's rows, plus an md/json report.
+        """
+        if not self.per_model_benchmark_records:
+            return
+
+        df = pd.DataFrame(self.per_model_benchmark_records)
+        suffix = f"_{self.pollutant}"
+        pol_name = self.pollutant.upper()
+
+        csv_dir = get_evaluation_csv_dir(self.pollutant)
+        csv_dir.mkdir(parents=True, exist_ok=True)
+        csv_path = csv_dir / f"phase4_per_model_benchmark{suffix}.csv"
+        df.to_csv(csv_path, index=False)
+        logger.info("Saved per-model benchmark CSV (%d rows) -> %s", len(df), csv_path)
+
+        target_dir = get_reports_dir(self.pollutant)
+        target_dir.mkdir(parents=True, exist_ok=True)
+        json_path = target_dir / f"phase4_per_model_benchmark{suffix}.json"
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(self.per_model_benchmark_records, f, indent=2, default=str)
+
+        md_lines = [
+            f"# 🧪 Phase 4: Per-Model (Base Learner) Benchmark Report ({pol_name})",
+            "",
+            "> Each base learner is benchmarked immediately after it finishes training, per resolution/experiment.",
+            "",
+        ]
+        for exp_id, grp in df.groupby("experiment", sort=False):
+            md_lines.append(f"## {exp_id}")
+            md_lines.append("")
+            md_lines.append("| Model | Eval | N Train | MAE | RMSE | R² | Pearson r | AQI Acc (%) | Fit (s) |")
+            md_lines.append("| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |")
+            for _, r in grp.iterrows():
+                md_lines.append(
+                    f"| {r.get('model_name', r.get('model', ''))} | {r.get('eval_mode', '')} | "
+                    f"{int(r.get('n_train', 0))} | {float(r.get('mae', 0.0)):.3f} | {float(r.get('rmse', 0.0)):.3f} | "
+                    f"{float(r.get('r2', 0.0)):.4f} | {float(r.get('pearson_r', 0.0)):.4f} | "
+                    f"{float(r.get('aqi_acc', 0.0)):.2f} | {float(r.get('fit_seconds', 0.0)):.1f} |"
+                )
+            md_lines.append("")
+
+        md_path = target_dir / f"phase4_per_model_benchmark{suffix}.md"
+        with open(md_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(md_lines))
+        logger.info("Saved per-model benchmark report -> %s", md_path)
 
     def evaluate_suite(
         self,
