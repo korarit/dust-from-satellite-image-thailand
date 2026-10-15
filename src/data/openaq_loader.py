@@ -106,7 +106,11 @@ class OpenAQLoader:
         self._stations_df: Optional[pd.DataFrame] = None
         self._stations_dict: Dict[int, str] = dict(DEFAULT_THAILAND_OPENAQ_LOCATIONS)
 
-    def get_thailand_stations(self, region: Optional[str] = None) -> pd.DataFrame:
+    def get_thailand_stations(
+        self,
+        region: Optional[str] = None,
+        provider: Optional[str] = None,
+    ) -> pd.DataFrame:
         """
         Loads the catalog of 618 authentic OpenAQ monitoring stations across Thailand.
         Optionally filters by geographical region:
@@ -116,6 +120,10 @@ class OpenAQLoader:
         - 'east': Eastern seaboard (Rayong, Chonburi, Trat, etc.)
         - 'south': Southern peninsula (Phuket, Surat Thani, Songkhla, etc.)
         - 'all': Nationwide (all regions)
+
+        Optionally filters by data provider:
+        - 'Air4Thai': Official PCD government regulatory monitors
+        - 'AirGradient': Dense IoT optical sensor network
         """
         if self._stations_df is None:
             from src.config.paths import PROJECT_ROOT
@@ -155,8 +163,14 @@ class OpenAQLoader:
                 self._stations_df = pd.DataFrame(records)
 
         df = self._stations_df.copy()
+
+        # Optional provider filter
+        if provider and provider.lower() != "all" and "provider" in df.columns:
+            p_clean = provider.strip().lower()
+            df = df[df["provider"].astype(str).str.strip().str.lower() == p_clean].copy()
+
         if not region or region.lower() == "all":
-            return df
+            return df.reset_index(drop=True)
 
         region_lower = region.lower()
         if region_lower in ["bangkok", "central"]:
@@ -177,7 +191,7 @@ class OpenAQLoader:
             mask = df["latitude"] < 12.0
         else:
             logger.warning("Unknown region '%s'; returning all stations", region)
-            return df
+            return df.reset_index(drop=True)
 
         return df[mask].reset_index(drop=True)
 
@@ -438,6 +452,16 @@ class OpenAQLoader:
 
         return (int(sensor_id) if sensor_id else None), station_name, lat, lon
 
+    def get_station_provider(self, location_id: int) -> str:
+        """Resolves data provider ('Air4Thai', 'AirGradient', etc.) for an OpenAQ location ID."""
+        stations = self.get_thailand_stations()
+        match = stations[stations["location_id"] == location_id]
+        if not match.empty:
+            p = match.iloc[0].get("provider")
+            if pd.notna(p) and str(p).strip():
+                return str(p).strip()
+        return "Air4Thai"
+
     def fetch_station_api(
         self,
         location_id: int,
@@ -461,16 +485,18 @@ class OpenAQLoader:
         if df_meas.empty:
             return pd.DataFrame()
 
+        prov = self.get_station_provider(location_id)
         df_meas["location_id"] = int(location_id)
         df_meas["station_code"] = f"OPENAQ_{location_id}"
         df_meas["station_name"] = station_name
         df_meas["latitude"] = lat
         df_meas["longitude"] = lon
-        df_meas["source"] = "OpenAQ_Air4Thai"
+        df_meas["source"] = f"OpenAQ_{prov}"
+        df_meas["provider"] = prov
 
         cols = [
             "location_id", "station_code", "station_name", "timestamp_utc",
-            target_col, "latitude", "longitude", "source"
+            target_col, "latitude", "longitude", "source", "provider"
         ]
         return df_meas[cols]
 

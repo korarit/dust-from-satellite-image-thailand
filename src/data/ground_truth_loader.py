@@ -175,7 +175,8 @@ class GroundTruthLoader:
                 "observed_pm10": val_pm10,
                 "latitude": lat,
                 "longitude": lon,
-                "source": "PCD_Air4Thai"
+                "source": "PCD_Air4Thai",
+                "provider": "Air4Thai",
             })
 
         df = pd.DataFrame(records)
@@ -429,3 +430,19 @@ class GroundTruthLoader:
             res["mean_pm10"] = mean_v
             res["within_bounds_0_to_1000"] = bool((vals >= 0.0).all() and (vals <= 1000.0).all()) if len(vals) > 0 else False
         return res
+
+    @staticmethod
+    def filter_allowed_providers(
+        df: pd.DataFrame,
+        allowed_providers: Tuple[str, ...] = ("Air4Thai", "AirGradient")
+    ) -> pd.DataFrame:
+        """
+        Filters ground truth dataframe to retain only authorized, representative providers
+        (default: Air4Thai and AirGradient). Excludes sparse providers like Clarity, AirNow, HabitatMap.
+        """
+        if df.empty or "provider" not in df.columns:
+            return df
+        norm_allowed = {p.lower() for p in allowed_providers}
+        mask = df["provider"].astype(str).str.strip().str.lower().isin(norm_allowed)
+        return df[mask].reset_index(drop=True)
+

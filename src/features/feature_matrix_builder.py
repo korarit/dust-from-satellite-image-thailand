@@ -43,6 +43,7 @@ from src.config.paths import (
     GEO_DIR,
     HII_DIR,
     TARGET_DIR,
+    METADATA_DIR,
     REPORTS_DIR,
 )
 from src.features.spatial_directional import (
@@ -622,20 +623,47 @@ class TargetMatcher:
         grid_tree = cKDTree(grid_coords_km)
         dists, cell_idxs = grid_tree.query(gt_coords_km, distance_upper_bound=max_distance_km)
 
-        # Assign observed PM2.5 to matched cells
+        # Extract or infer providers from valid_gt
+        gt_providers: List[Optional[str]] = []
+        has_prov_col = "provider" in valid_gt.columns
+        for _, r in valid_gt.iterrows():
+            if has_prov_col and pd.notna(r["provider"]):
+                gt_providers.append(str(r["provider"]).strip())
+            else:
+                stn = str(r.get("station_code", ""))
+                src = str(r.get("source", ""))
+                if stn.startswith("PCD_") or "Air4Thai" in src:
+                    gt_providers.append("Air4Thai")
+                elif "AirGradient" in src:
+                    gt_providers.append("AirGradient")
+                else:
+                    gt_providers.append(None)
+
+        # Assign observed PM2.5 and provider to matched cells
         gt_vals = valid_gt[target_val_col].to_numpy(dtype=np.float32)
         matched_cells: Dict[int, List[float]] = {}
+        matched_providers: Dict[int, List[str]] = {}
 
-        for d, idx, val in zip(dists, cell_idxs, gt_vals):
+        for d, idx, val, prov in zip(dists, cell_idxs, gt_vals, gt_providers):
             if d <= max_distance_km and idx < len(out_df):
                 if idx not in matched_cells:
                     matched_cells[idx] = []
+                    matched_providers[idx] = []
                 matched_cells[idx].append(float(val))
+                if prov is not None:
+                    matched_providers[idx].append(prov)
 
         # Assign average using positional iloc indexing to guarantee index alignment
         col_pos = out_df.columns.get_loc(target_val_col)
+        if "provider" not in out_df.columns:
+            out_df["provider"] = None
+        prov_col_pos = out_df.columns.get_loc("provider")
+
         for idx, vals in matched_cells.items():
             out_df.iloc[idx, col_pos] = float(np.mean(vals))
+            p_list = matched_providers.get(idx, [])
+            if p_list:
+                out_df.iloc[idx, prov_col_pos] = p_list[0]
 
         logger.info(
             "Attached PM2.5 ground truth: Matched %d distinct grid cells from %d station records (max dist=%.1f km)",
@@ -829,6 +857,8 @@ class FeatureMatrixBuilder:
         for tc in ["observed_pm25", "observed_pm10"]:
             if tc in matrix.columns and tc not in ordered_cols:
                 ordered_cols.append(tc)
+        if "provider" in matrix.columns and "provider" not in ordered_cols:
+            ordered_cols.append("provider")
 
         matrix = matrix[ordered_cols].copy()
 
@@ -934,3 +964,93 @@ class FeatureMatrixBuilder:
             cols = None
 
         return pd.read_parquet(p, columns=cols)
+
+
+def resolve_dataset_providers(
+    df: pd.DataFrame,
+    metadata_path: Optional[Path] = None,
+    allowed_providers: Tuple[str, ...] = ("Air4Thai", "AirGradient"),
+) -> pd.DataFrame:
+    """
+    Ensures that every training sample has an authenticated ground data provider label.
+    Resolves providers from:
+    1. Existing 'provider' column if valid
+    2. 'station_code' / 'source' mapping (PCD_* -> Air4Thai, OPENAQ_* -> openaq metadata)
+    3. Spatial KDTree nearest neighbor matching against openaq_thailand_stations.csv
+
+    Strictly filters out sparse, non-representative providers (e.g. Clarity, AirNow, HabitatMap)
+    and retains only authorized representative providers (default: Air4Thai and AirGradient).
+    """
+    if df.empty:
+        return df
+
+    out_df = df.copy()
+    meta_p = metadata_path or (METADATA_DIR / "openaq_thailand_stations.csv")
+    meta_df = pd.DataFrame()
+    if meta_p.exists():
+        meta_df = pd.read_csv(meta_p) if meta_p.suffix == ".csv" else pd.read_parquet(meta_p)
+
+    code_map: Dict[str, str] = {}
+    if not meta_df.empty and "station_code" in meta_df.columns and "provider" in meta_df.columns:
+        code_map = dict(zip(meta_df["station_code"].astype(str), meta_df["provider"].astype(str)))
+
+    providers: List[Optional[str]] = []
+    need_kdtree = False
+
+    lat_col = "lat" if "lat" in out_df.columns else "centroid_lat"
+    lon_col = "lon" if "lon" in out_df.columns else "centroid_lon"
+    has_coords = lat_col in out_df.columns and lon_col in out_df.columns
+
+    has_prov_col = "provider" in out_df.columns
+
+    for i in range(len(out_df)):
+        row = out_df.iloc[i]
+        if has_prov_col:
+            p_val = row.get("provider")
+            if pd.notna(p_val) and str(p_val).strip() and str(p_val).strip().lower() not in ("none", "nan", "unknown"):
+                providers.append(str(p_val).strip())
+            else:
+                providers.append(None)
+            continue
+
+        sc = str(row.get("station_code", ""))
+        src = str(row.get("source", ""))
+        if sc.startswith("PCD_") or "Air4Thai" in src:
+            providers.append("Air4Thai")
+        elif "AirGradient" in src:
+            providers.append("AirGradient")
+        elif sc in code_map and pd.notna(code_map[sc]):
+            providers.append(code_map[sc].strip())
+        else:
+            providers.append(None)
+            need_kdtree = True
+
+    # If some rows still lack provider and provider column wasn't explicitly given, use KDTree
+    if need_kdtree and has_coords and not meta_df.empty:
+        to_utm = pyproj.Transformer.from_crs("EPSG:4326", "EPSG:32647", always_xy=True)
+        valid_meta = meta_df.dropna(subset=["longitude", "latitude", "provider"]).copy()
+        sx, sy = to_utm.transform(
+            valid_meta["longitude"].to_numpy(dtype=float),
+            valid_meta["latitude"].to_numpy(dtype=float)
+        )
+        tree = cKDTree(np.column_stack([sx / 1000.0, sy / 1000.0]))
+
+        mx, my = to_utm.transform(
+            out_df[lon_col].to_numpy(dtype=float),
+            out_df[lat_col].to_numpy(dtype=float)
+        )
+        dists, idxs = tree.query(np.column_stack([mx / 1000.0, my / 1000.0]), distance_upper_bound=100.0)
+
+        meta_provs = valid_meta["provider"].tolist()
+        for idx_row, (p, d, m_idx) in enumerate(zip(providers, dists, idxs)):
+            if p is None and m_idx < len(meta_provs):
+                providers[idx_row] = str(meta_provs[m_idx]).strip()
+
+    out_df["provider"] = providers
+
+    # Strict Filtering: Exclude sparse providers (Clarity, AirNow, HabitatMap, etc.) and None
+    norm_allowed = {p.strip().lower() for p in allowed_providers}
+    mask = out_df["provider"].notna() & out_df["provider"].astype(str).str.strip().str.lower().isin(norm_allowed)
+    filtered = out_df[mask].reset_index(drop=True)
+    return filtered
+

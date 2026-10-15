@@ -39,6 +39,8 @@ from src.models import (
     assign_aqi_category,
     MODEL_KEYS,
 )
+from src.features import resolve_dataset_providers
+from src.evaluation import EvaluationPlotter
 from src.data.provenance_auditor import CodeASTScanner
 
 
@@ -486,4 +488,105 @@ def test_tweedie_loss_boosters_execution(deterministic_training_data):
     cat.fit(X, y)
     assert cat.is_fitted_
     assert len(cat.predict(X)) == len(X)
+
+
+def test_resolve_dataset_providers_filter_sparse():
+    """Verifies that sparse networks (Clarity, AirNow, HabitatMap, NaN) are dropped, retaining Air4Thai & AirGradient."""
+    mock_df = pd.DataFrame({
+        "station_code": ["PCD_01", "OPENAQ_1", "OPENAQ_2", "OPENAQ_3", "OPENAQ_4", "OPENAQ_5"],
+        "provider": ["Air4Thai", "AirGradient", "Clarity", "AirNow", "HabitatMap", None],
+        "lat": [13.75, 18.78, 13.80, 13.66, 16.18, 14.0],
+        "lon": [100.5, 98.98, 100.40, 100.70, 103.30, 101.0],
+        "observed_pm25": [25.0, 30.0, 45.0, 50.0, 60.0, 22.0],
+    })
+
+    filtered = resolve_dataset_providers(mock_df, allowed_providers=("Air4Thai", "AirGradient"))
+    assert len(filtered) == 2
+    assert set(filtered["provider"].unique()) == {"Air4Thai", "AirGradient"}
+    assert "Clarity" not in filtered["provider"].values
+    assert "AirNow" not in filtered["provider"].values
+    assert "HabitatMap" not in filtered["provider"].values
+
+
+def test_multi_resolution_provider_benchmark_execution(deterministic_training_data, tmp_path):
+    """Verifies Multi-Resolution Provider Benchmark executes Air4Thai first, AirGradient second, Combined third."""
+    df, f_cols, target = deterministic_training_data
+    # Create dataset with equal Air4Thai and AirGradient rows
+    half = len(df) // 2
+    df_prov = df.copy()
+    df_prov["provider"] = ["Air4Thai"] * half + ["AirGradient"] * (len(df) - half)
+
+    trainer = ModelTrainer(output_dir=tmp_path / "models")
+    trainer.config = {
+        "general": {"target_column": target, "random_state": 42, "cv_splits": 2},
+        "models": {
+            "lightgbm": {"n_estimators": 5, "learning_rate": 0.1, "min_child_samples": 2},
+            "catboost": {"iterations": 5, "learning_rate": 0.1, "depth": 2},
+            "xgboost": {"n_estimators": 5, "learning_rate": 0.1, "max_depth": 2},
+            "random_forest": {"n_estimators": 5, "max_depth": 3, "min_samples_split": 2},
+        },
+        "features": {
+            "monotonic_constraints": {"pressure_grad_mag": -1, "btd_15_13": -1}
+        },
+    }
+
+    train_matrices = {
+        2.0: df_prov.copy(),
+        1.0: df_prov.copy(),
+    }
+
+    results = trainer.run_multi_resolution_provider_benchmark(
+        train_matrices_by_res=train_matrices,
+        test_matrices_by_res={},
+        feature_cols=f_cols,
+        target_providers=["Air4Thai", "AirGradient"],
+        include_combined=True,
+    )
+
+    assert "summary_table" in results
+    summary_df = pd.DataFrame(results["summary_table"])
+    assert not summary_df.empty
+
+    # Confirm both 2km and 1km are benchmarked
+    assert 2.0 in summary_df["resolution_km"].values
+    assert 1.0 in summary_df["resolution_km"].values
+
+    # Confirm Air4Thai, AirGradient, and Combined are present
+    prov_set = set(summary_df["provider"].unique())
+    assert "Air4Thai" in prov_set
+    assert "AirGradient" in prov_set
+    assert any("Combined" in p for p in prov_set)
+
+
+def test_evaluation_plotter_provider_graphics(tmp_path):
+    """Verifies that EvaluationPlotter generates separate provider comparison plots and parity plots."""
+    plotter = EvaluationPlotter(output_dir=tmp_path / "plots", pollutant="pm25")
+
+    # 1. Summary comparison bar chart
+    mock_summary = [
+        {"resolution_name": "2km", "provider": "Air4Thai", "ensemble_mae": 2.1, "ensemble_r2": 0.85},
+        {"resolution_name": "2km", "provider": "AirGradient", "ensemble_mae": 2.8, "ensemble_r2": 0.80},
+        {"resolution_name": "2km", "provider": "Combined (Air4Thai + AirGradient)", "ensemble_mae": 2.3, "ensemble_r2": 0.83},
+        {"resolution_name": "1km", "provider": "Air4Thai", "ensemble_mae": 1.9, "ensemble_r2": 0.88},
+        {"resolution_name": "1km", "provider": "AirGradient", "ensemble_mae": 2.5, "ensemble_r2": 0.82},
+        {"resolution_name": "1km", "provider": "Combined (Air4Thai + AirGradient)", "ensemble_mae": 2.0, "ensemble_r2": 0.86},
+    ]
+
+    p_comp = plotter.plot_provider_comparison(mock_summary, pollutant="pm25")
+    assert p_comp.exists()
+    assert (tmp_path / "plots" / "csv" / "provider_benchmark_summary_pm25.csv").exists()
+
+    # 2. Provider-partitioned parity scatter
+    y_true = np.array([15.0, 25.0, 35.0, 45.0, 55.0, 65.0])
+    y_pred = np.array([16.0, 24.0, 34.0, 47.0, 53.0, 64.0])
+    providers = np.array(["Air4Thai", "Air4Thai", "Air4Thai", "AirGradient", "AirGradient", "AirGradient"])
+
+    p_dict = plotter.plot_provider_parity_scatter(y_true, y_pred, providers, pollutant="pm25")
+    assert "Air4Thai" in p_dict
+    assert "AirGradient" in p_dict
+    assert "panel" in p_dict
+    assert p_dict["Air4Thai"].exists()
+    assert p_dict["AirGradient"].exists()
+    assert p_dict["panel"].exists()
+
 

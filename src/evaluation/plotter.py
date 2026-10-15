@@ -631,3 +631,180 @@ class EvaluationPlotter:
             "ensemble_weights_pie": p_w,
         }
 
+    def plot_provider_comparison(
+        self,
+        summary_table: Union[pd.DataFrame, List[Dict[str, Any]]],
+        filename: Optional[str] = None,
+        pollutant: str = "pm25",
+    ) -> Path:
+        """
+        Generates Multi-Panel Bar Comparison across Resolutions and Providers:
+        - Panel 1: Ensemble MAE (µg/m³) for Air4Thai vs AirGradient vs Combined
+        - Panel 2: Ensemble R² Coefficient of Determination across resolutions
+        """
+        pol = pollutant.lower()
+        pol_name = pol.upper()
+        fname = filename or f"provider_comparison_{pol}.png"
+        df = pd.DataFrame(summary_table) if not isinstance(summary_table, pd.DataFrame) else summary_table.copy()
+
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6), facecolor=BG_COLOR)
+        for ax in (ax1, ax2):
+            ax.set_facecolor(PANEL_COLOR)
+
+        if df.empty or "provider" not in df.columns:
+            logger.warning("Empty or invalid provider summary table. Skipping provider comparison plot.")
+            plt.close(fig)
+            return self.output_dir / fname
+
+        # Grouped bar plots
+        res_col = "resolution_name" if "resolution_name" in df.columns else "resolution_km"
+        provider_order = [p for p in ["Air4Thai", "AirGradient"] if p in df["provider"].unique()]
+        comb_names = [p for p in df["provider"].unique() if "combined" in str(p).lower()]
+        provider_order += comb_names
+
+        prov_palette = {
+            "Air4Thai": "#38bdf8",     # Cyan/Blue
+            "AirGradient": "#34d399",  # Emerald/Green
+        }
+        for cn in comb_names:
+            prov_palette[cn] = "#f59e0b"  # Amber
+
+        # 1. MAE
+        sns.barplot(
+            data=df, x=res_col, y="ensemble_mae", hue="provider",
+            hue_order=provider_order, palette=prov_palette, ax=ax1,
+            edgecolor="#ffffff", linewidth=0.5
+        )
+        ax1.set_title(f"Ensemble {pol_name} MAE by Resolution & Provider", fontsize=12, fontweight="bold", color=ACCENT_BLUE)
+        ax1.set_xlabel("Spatial Resolution", fontsize=11, fontweight="bold")
+        ax1.set_ylabel(f"Ensemble MAE (µg/m³)", fontsize=11, fontweight="bold")
+        ax1.grid(True, alpha=0.4)
+        ax1.legend(title="Provider", facecolor="#090d16", edgecolor=GRID_COLOR, fontsize=9)
+
+        # 2. R²
+        sns.barplot(
+            data=df, x=res_col, y="ensemble_r2", hue="provider",
+            hue_order=provider_order, palette=prov_palette, ax=ax2,
+            edgecolor="#ffffff", linewidth=0.5
+        )
+        ax2.set_title(f"Ensemble {pol_name} R² by Resolution & Provider", fontsize=12, fontweight="bold", color=ACCENT_BLUE)
+        ax2.set_xlabel("Spatial Resolution", fontsize=11, fontweight="bold")
+        ax2.set_ylabel("Coefficient of Determination (R²)", fontsize=11, fontweight="bold")
+        ax2.grid(True, alpha=0.4)
+        ax2.legend(title="Provider", facecolor="#090d16", edgecolor=GRID_COLOR, fontsize=9)
+
+        plt.suptitle(f"Thailand Multi-Resolution {pol_name} Nowcasting: Ground Truth Provider Benchmark",
+                     fontsize=14, fontweight="bold", color=TEXT_COLOR, y=0.98)
+        plt.tight_layout()
+
+        out_path = self.output_dir / fname
+        plt.savefig(out_path, dpi=200, bbox_inches="tight")
+        plt.close(fig)
+        logger.info("Saved Provider Comparison Plot -> %s", out_path)
+
+        # Export CSV
+        csv_path = self.csv_dir / f"provider_benchmark_summary_{pol}.csv"
+        df.to_csv(csv_path, index=False)
+        logger.info("Saved Provider Benchmark CSV -> %s", csv_path)
+
+        return out_path
+
+    def plot_provider_parity_scatter(
+        self,
+        y_true: Union[np.ndarray, pd.Series, List[float]],
+        y_pred: Union[np.ndarray, pd.Series, List[float]],
+        providers: Union[np.ndarray, pd.Series, List[str]],
+        pollutant: str = "pm25",
+    ) -> Dict[str, Path]:
+        """
+        Generates individual and multi-panel parity scatter plots for each provider
+        (Air4Thai, AirGradient, and Combined).
+        """
+        pol = pollutant.lower()
+        pol_name = pol.upper()
+        y_t = np.asarray(y_true, dtype=np.float64).ravel()
+        y_p = np.asarray(y_pred, dtype=np.float64).ravel()
+        p_arr = np.asarray(providers).ravel()
+
+        unique_provs = [
+            p for p in np.unique(p_arr)
+            if str(p).lower() not in ("none", "nan", "unknown", "clarity", "airnow", "habitatmap")
+        ]
+        outputs = {}
+
+        # 1. Individual parity plot per provider
+        for prov in unique_provs:
+            mask = p_arr == prov
+            if np.sum(mask) >= 2:
+                prov_clean = str(prov).lower().replace(" ", "_")
+                fname = f"parity_scatter_{pol}_{prov_clean}.png"
+                p_out = self.plot_parity_scatter(
+                    y_t[mask], y_p[mask],
+                    model_name=f"Stacking Ensemble ({prov} Only)",
+                    filename=fname,
+                    pollutant=pol,
+                )
+                outputs[prov] = p_out
+
+        # 2. Combined overview multi-panel plot
+        active_panels = [p for p in ["Air4Thai", "AirGradient"] if p in unique_provs] + ["Combined"]
+        n_panels = len(active_panels)
+        fig, axes = plt.subplots(1, n_panels, figsize=(6.5 * n_panels, 6), facecolor=BG_COLOR)
+        if n_panels == 1:
+            axes = [axes]
+
+        valid_mask = (~np.isnan(y_t)) & (~np.isnan(y_p))
+        if not np.any(valid_mask):
+            plt.close(fig)
+            return outputs
+
+        max_val = max(100.0, float(np.nanmax(np.concatenate([y_t[valid_mask], y_p[valid_mask]]))) * 1.1)
+
+        for ax, panel_name in zip(axes, active_panels):
+            ax.set_facecolor(PANEL_COLOR)
+            if panel_name == "Combined":
+                mask = np.isin(p_arr, unique_provs) & valid_mask
+                title_label = f"Combined ({' + '.join(unique_provs)})"
+            else:
+                mask = (p_arr == panel_name) & valid_mask
+                title_label = panel_name
+
+            sub_yt = y_t[mask]
+            sub_yp = y_p[mask]
+            if len(sub_yt) < 2:
+                ax.set_title(f"{title_label} (N={len(sub_yt)} - Insufficient)", color=MUTED_TEXT)
+                continue
+
+            sub_m = compute_continuous_metrics(sub_yt, sub_yp)
+            cats = assign_aqi_category(sub_yt, pollutant=pol)
+            pt_colors = [AQI_COLOR_HEX[c] for c in cats]
+
+            ax.plot([0, max_val], [0, max_val], color="#ef4444", linestyle="--", linewidth=1.6, label="1:1 Identity")
+            ax.scatter(sub_yt, sub_yp, c=pt_colors, s=50, alpha=0.85, edgecolors="#ffffff", linewidth=0.5)
+
+            if len(sub_yt) > 2 and np.var(sub_yt) > 1e-6:
+                coeffs = np.polyfit(sub_yt, sub_yp, deg=1)
+                poly_x = np.linspace(0, max_val, 100)
+                poly_y = np.polyval(coeffs, poly_x)
+                ax.plot(poly_x, poly_y, color=ACCENT_CYAN, linestyle="-", linewidth=1.8, label=f"Fit: {coeffs[0]:.2f}x + {coeffs[1]:.2f}")
+
+            ax.set_xlim(0, max_val)
+            ax.set_ylim(0, max_val)
+            ax.set_xlabel(f"Observed {pol_name} (µg/m³)", fontsize=10, fontweight="bold")
+            ax.set_ylabel(f"Predicted {pol_name} (µg/m³)", fontsize=10, fontweight="bold")
+            ax.set_title(f"{title_label}\n[MAE: {sub_m['mae']:.2f} | R²: {sub_m['r2']:.3f} | N={len(sub_yt)}]",
+                         fontsize=11, fontweight="bold", color=ACCENT_BLUE)
+            ax.grid(True, alpha=0.35)
+            ax.legend(loc="lower right", facecolor="#090d16", edgecolor=GRID_COLOR, fontsize=8)
+
+        plt.suptitle(f"Provider-Partitioned Parity Comparison ({pol_name})", fontsize=13, fontweight="bold", color=TEXT_COLOR, y=0.98)
+        plt.tight_layout()
+
+        panel_path = self.output_dir / f"provider_parity_scatter_{pol}.png"
+        plt.savefig(panel_path, dpi=200, bbox_inches="tight")
+        plt.close(fig)
+        logger.info("Saved Multi-Panel Provider Parity Plot -> %s", panel_path)
+        outputs["panel"] = panel_path
+        return outputs
+
+

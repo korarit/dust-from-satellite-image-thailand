@@ -650,6 +650,33 @@ def run_phase_4_smoke_test(target_dt: pd.Timestamp, pollutant: str = "pm25") -> 
         test_matrices_by_res={},
     )
 
+    # 7b. Multi-Resolution Provider Benchmark Execution (Air4Thai -> AirGradient -> Combined)
+    logger.info("\n--- Step 7b: Executing Multi-Resolution Provider Benchmark (%s: Air4Thai -> AirGradient -> Combined) ---", tgt_name)
+    provider_res = trainer.run_multi_resolution_provider_benchmark(
+        train_matrices_by_res=train_matrices_by_res,
+        test_matrices_by_res={},
+        target_providers=["Air4Thai", "AirGradient"],
+        include_combined=True,
+    )
+    benchmark_res["provider_benchmark"] = provider_res
+
+    # Generate Provider Evaluation Visualizations (Separate Grouped Bar & Parity Scatter Plots)
+    eval_dir = get_evaluation_dir(pol)
+    plotter = EvaluationPlotter(output_dir=eval_dir, pollutant=pol)
+    if "summary_table" in provider_res:
+        plotter.plot_provider_comparison(provider_res["summary_table"], pollutant=pol)
+
+    mat_prov = unified_matrix.get("provider")
+    if mat_prov is not None:
+        p_cols = [c for c in ALL_FEATURE_COLUMNS if c in unified_matrix.columns]
+        preds_base = ensemble.predict(unified_matrix[p_cols])
+        plotter.plot_provider_parity_scatter(
+            y_true=unified_matrix[tgt_col].values,
+            y_pred=preds_base,
+            providers=mat_prov.values,
+            pollutant=pol,
+        )
+
     # 8. Zero-Mock Verification Gate
     logger.info("\n--- Step 8: Executing Phase 1B Zero-Mock Verification Gate ---")
     gate_passed = run_phase_1b_verification()

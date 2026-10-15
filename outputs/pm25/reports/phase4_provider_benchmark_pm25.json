@@ -1,0 +1,1064 @@
+{
+  "pollutant": "pm25",
+  "target_providers": [
+    "Air4Thai",
+    "AirGradient"
+  ],
+  "include_combined": true,
+  "by_resolution": {
+    "EXP-2KM-AIR4THAI": {
+      "experiment": "EXP-2KM-AIR4THAI",
+      "resolution_km": 2.0,
+      "resolution_name": "2km",
+      "provider": "Air4Thai",
+      "is_combined": false,
+      "n_samples": 20,
+      "eval_mode": "Out-Of-Fold CV",
+      "metrics": {
+        "ensemble": {
+          "mae": 0.471,
+          "rmse": 0.845,
+          "mape": 1.0,
+          "r2": 0.949,
+          "pearson_r": 0.9846,
+          "aqi_acc": 100.0,
+          "count": 20
+        },
+        "lightgbm": {
+          "mae": 2.989,
+          "rmse": 3.486,
+          "mape": 6.48,
+          "r2": 0.1316,
+          "pearson_r": 0.6612,
+          "aqi_acc": 100.0,
+          "count": 20
+        },
+        "catboost": {
+          "mae": 3.51,
+          "rmse": 3.965,
+          "mape": 7.51,
+          "r2": -0.1238,
+          "pearson_r": -0.1522,
+          "aqi_acc": 100.0,
+          "count": 20
+        },
+        "xgboost": {
+          "mae": 2.422,
+          "rmse": 2.924,
+          "mape": 5.26,
+          "r2": 0.3889,
+          "pearson_r": 0.9125,
+          "aqi_acc": 100.0,
+          "count": 20
+        },
+        "random_forest": {
+          "mae": 0.64,
+          "rmse": 1.074,
+          "mape": 1.37,
+          "r2": 0.9176,
+          "pearson_r": 0.9728,
+          "aqi_acc": 100.0,
+          "count": 20
+        },
+        "weights": {
+          "lightgbm": 3.790184426846583e-16,
+          "catboost": 2.803811485325421e-17,
+          "xgboost": 3.9378050714347764e-16,
+          "extra_trees": 0.859557351712544,
+          "figs": 0.14044264828745498,
+          "nystroem": 2.254400552661938e-16,
+          "random_forest": 5.917937908790277e-17
+        }
+      },
+      "weights": {
+        "lightgbm": 3.790184426846583e-16,
+        "catboost": 2.803811485325421e-17,
+        "xgboost": 3.9378050714347764e-16,
+        "extra_trees": 0.859557351712544,
+        "figs": 0.14044264828745498,
+        "nystroem": 2.254400552661938e-16,
+        "random_forest": 5.917937908790277e-17
+      },
+      "lgbm_mae": 2.989,
+      "catboost_mae": 3.51,
+      "xgboost_mae": 2.422,
+      "rf_mae": 0.64,
+      "ensemble_mae": 0.471,
+      "ensemble_rmse": 0.845,
+      "ensemble_r2": 0.949,
+      "ensemble_pearson_r": 0.9846,
+      "ensemble_aqi_acc": 100.0,
+      "weight_lgbm": 0.0,
+      "weight_catboost": 0.0,
+      "weight_xgboost": 0.0,
+      "weight_rf": 0.0
+    },
+    "EXP-2KM-AIRGRADIENT": {
+      "experiment": "EXP-2KM-AIRGRADIENT",
+      "resolution_km": 2.0,
+      "resolution_name": "2km",
+      "provider": "AirGradient",
+      "is_combined": false,
+      "n_samples": 20,
+      "eval_mode": "Out-Of-Fold CV",
+      "metrics": {
+        "ensemble": {
+          "mae": 0.436,
+          "rmse": 0.821,
+          "mape": 1.29,
+          "r2": 0.9518,
+          "pearson_r": 0.9829,
+          "aqi_acc": 95.0,
+          "count": 20
+        },
+        "lightgbm": {
+          "mae": 2.996,
+          "rmse": 3.488,
+          "mape": 9.08,
+          "r2": 0.1306,
+          "pearson_r": 0.6517,
+          "aqi_acc": 80.0,
+          "count": 20
+        },
+        "catboost": {
+          "mae": 3.496,
+          "rmse": 3.952,
+          "mape": 10.42,
+          "r2": -0.1161,
+          "pearson_r": -0.1525,
+          "aqi_acc": 80.0,
+          "count": 20
+        },
+        "xgboost": {
+          "mae": 2.422,
+          "rmse": 2.924,
+          "mape": 7.37,
+          "r2": 0.3889,
+          "pearson_r": 0.9125,
+          "aqi_acc": 80.0,
+          "count": 20
+        },
+        "random_forest": {
+          "mae": 0.714,
+          "rmse": 0.986,
+          "mape": 2.09,
+          "r2": 0.9305,
+          "pearson_r": 0.9741,
+          "aqi_acc": 85.0,
+          "count": 20
+        },
+        "weights": {
+          "lightgbm": 1.2599739063307646e-16,
+          "catboost": 1.653165873558471e-16,
+          "xgboost": 2.337699393644282e-16,
+          "extra_trees": 0.8771527841825099,
+          "figs": 0.12284721581748945,
+          "nystroem": 1.7611657758095396e-16,
+          "random_forest": 2.619589722980965e-17
+        }
+      },
+      "weights": {
+        "lightgbm": 1.2599739063307646e-16,
+        "catboost": 1.653165873558471e-16,
+        "xgboost": 2.337699393644282e-16,
+        "extra_trees": 0.8771527841825099,
+        "figs": 0.12284721581748945,
+        "nystroem": 1.7611657758095396e-16,
+        "random_forest": 2.619589722980965e-17
+      },
+      "lgbm_mae": 2.996,
+      "catboost_mae": 3.496,
+      "xgboost_mae": 2.422,
+      "rf_mae": 0.714,
+      "ensemble_mae": 0.436,
+      "ensemble_rmse": 0.821,
+      "ensemble_r2": 0.9518,
+      "ensemble_pearson_r": 0.9829,
+      "ensemble_aqi_acc": 95.0,
+      "weight_lgbm": 0.0,
+      "weight_catboost": 0.0,
+      "weight_xgboost": 0.0,
+      "weight_rf": 0.0
+    },
+    "EXP-2KM-COMBINED": {
+      "experiment": "EXP-2KM-COMBINED",
+      "resolution_km": 2.0,
+      "resolution_name": "2km",
+      "provider": "Combined (Air4Thai + AirGradient)",
+      "is_combined": true,
+      "n_samples": 40,
+      "eval_mode": "Out-Of-Fold CV",
+      "metrics": {
+        "ensemble": {
+          "mae": 0.322,
+          "rmse": 0.75,
+          "mape": 0.78,
+          "r2": 0.99,
+          "pearson_r": 0.9964,
+          "aqi_acc": 100.0,
+          "count": 40
+        },
+        "lightgbm": {
+          "mae": 6.153,
+          "rmse": 7.205,
+          "mape": 16.2,
+          "r2": 0.0741,
+          "pearson_r": 0.5572,
+          "aqi_acc": 60.0,
+          "count": 40
+        },
+        "catboost": {
+          "mae": 6.565,
+          "rmse": 7.532,
+          "mape": 17.02,
+          "r2": -0.0116,
+          "pearson_r": 0.0237,
+          "aqi_acc": 60.0,
+          "count": 40
+        },
+        "xgboost": {
+          "mae": 4.511,
+          "rmse": 5.407,
+          "mape": 11.92,
+          "r2": 0.4786,
+          "pearson_r": 0.9509,
+          "aqi_acc": 75.0,
+          "count": 40
+        },
+        "random_forest": {
+          "mae": 0.975,
+          "rmse": 1.636,
+          "mape": 2.27,
+          "r2": 0.9523,
+          "pearson_r": 0.9782,
+          "aqi_acc": 100.0,
+          "count": 40
+        },
+        "weights": {
+          "lightgbm": 1.023093001477563e-16,
+          "catboost": 5.164785493055608e-18,
+          "xgboost": 0.0,
+          "extra_trees": 0.9999999999999987,
+          "figs": 2.4980018054065993e-16,
+          "nystroem": 0.0,
+          "random_forest": 8.604228440844953e-16
+        }
+      },
+      "weights": {
+        "lightgbm": 1.023093001477563e-16,
+        "catboost": 5.164785493055608e-18,
+        "xgboost": 0.0,
+        "extra_trees": 0.9999999999999987,
+        "figs": 2.4980018054065993e-16,
+        "nystroem": 0.0,
+        "random_forest": 8.604228440844953e-16
+      },
+      "lgbm_mae": 6.153,
+      "catboost_mae": 6.565,
+      "xgboost_mae": 4.511,
+      "rf_mae": 0.975,
+      "ensemble_mae": 0.322,
+      "ensemble_rmse": 0.75,
+      "ensemble_r2": 0.99,
+      "ensemble_pearson_r": 0.9964,
+      "ensemble_aqi_acc": 100.0,
+      "weight_lgbm": 0.0,
+      "weight_catboost": 0.0,
+      "weight_xgboost": 0.0,
+      "weight_rf": 0.0
+    },
+    "EXP-1KM-AIR4THAI": {
+      "experiment": "EXP-1KM-AIR4THAI",
+      "resolution_km": 1.0,
+      "resolution_name": "1km",
+      "provider": "Air4Thai",
+      "is_combined": false,
+      "n_samples": 20,
+      "eval_mode": "Out-Of-Fold CV",
+      "metrics": {
+        "ensemble": {
+          "mae": 0.447,
+          "rmse": 0.84,
+          "mape": 0.95,
+          "r2": 0.9496,
+          "pearson_r": 0.984,
+          "aqi_acc": 100.0,
+          "count": 20
+        },
+        "lightgbm": {
+          "mae": 2.989,
+          "rmse": 3.486,
+          "mape": 6.48,
+          "r2": 0.1316,
+          "pearson_r": 0.6612,
+          "aqi_acc": 100.0,
+          "count": 20
+        },
+        "catboost": {
+          "mae": 3.51,
+          "rmse": 3.965,
+          "mape": 7.51,
+          "r2": -0.1238,
+          "pearson_r": -0.1522,
+          "aqi_acc": 100.0,
+          "count": 20
+        },
+        "xgboost": {
+          "mae": 2.422,
+          "rmse": 2.924,
+          "mape": 5.26,
+          "r2": 0.3889,
+          "pearson_r": 0.9125,
+          "aqi_acc": 100.0,
+          "count": 20
+        },
+        "random_forest": {
+          "mae": 0.64,
+          "rmse": 1.074,
+          "mape": 1.37,
+          "r2": 0.9176,
+          "pearson_r": 0.9728,
+          "aqi_acc": 100.0,
+          "count": 20
+        },
+        "weights": {
+          "lightgbm": 0.0,
+          "catboost": 4.484068912026735e-16,
+          "xgboost": 1.6336029230791867e-17,
+          "extra_trees": 0.8586978886422423,
+          "figs": 0.14130211135775608,
+          "nystroem": 3.34127111502905e-18,
+          "random_forest": 1.0779398919034095e-15
+        }
+      },
+      "weights": {
+        "lightgbm": 0.0,
+        "catboost": 4.484068912026735e-16,
+        "xgboost": 1.6336029230791867e-17,
+        "extra_trees": 0.8586978886422423,
+        "figs": 0.14130211135775608,
+        "nystroem": 3.34127111502905e-18,
+        "random_forest": 1.0779398919034095e-15
+      },
+      "lgbm_mae": 2.989,
+      "catboost_mae": 3.51,
+      "xgboost_mae": 2.422,
+      "rf_mae": 0.64,
+      "ensemble_mae": 0.447,
+      "ensemble_rmse": 0.84,
+      "ensemble_r2": 0.9496,
+      "ensemble_pearson_r": 0.984,
+      "ensemble_aqi_acc": 100.0,
+      "weight_lgbm": 0.0,
+      "weight_catboost": 0.0,
+      "weight_xgboost": 0.0,
+      "weight_rf": 0.0
+    },
+    "EXP-1KM-AIRGRADIENT": {
+      "experiment": "EXP-1KM-AIRGRADIENT",
+      "resolution_km": 1.0,
+      "resolution_name": "1km",
+      "provider": "AirGradient",
+      "is_combined": false,
+      "n_samples": 20,
+      "eval_mode": "Out-Of-Fold CV",
+      "metrics": {
+        "ensemble": {
+          "mae": 0.442,
+          "rmse": 0.805,
+          "mape": 1.31,
+          "r2": 0.9537,
+          "pearson_r": 0.9827,
+          "aqi_acc": 95.0,
+          "count": 20
+        },
+        "lightgbm": {
+          "mae": 2.996,
+          "rmse": 3.488,
+          "mape": 9.08,
+          "r2": 0.1306,
+          "pearson_r": 0.6517,
+          "aqi_acc": 80.0,
+          "count": 20
+        },
+        "catboost": {
+          "mae": 3.496,
+          "rmse": 3.952,
+          "mape": 10.42,
+          "r2": -0.1161,
+          "pearson_r": -0.1525,
+          "aqi_acc": 80.0,
+          "count": 20
+        },
+        "xgboost": {
+          "mae": 2.422,
+          "rmse": 2.924,
+          "mape": 7.37,
+          "r2": 0.3889,
+          "pearson_r": 0.9125,
+          "aqi_acc": 80.0,
+          "count": 20
+        },
+        "random_forest": {
+          "mae": 0.714,
+          "rmse": 0.986,
+          "mape": 2.09,
+          "r2": 0.9305,
+          "pearson_r": 0.9741,
+          "aqi_acc": 85.0,
+          "count": 20
+        },
+        "weights": {
+          "lightgbm": 2.0619970471538832e-17,
+          "catboost": 1.2603161520598847e-16,
+          "xgboost": 1.5409431388751612e-16,
+          "extra_trees": 0.876851491764398,
+          "figs": 0.12314850823560143,
+          "nystroem": 0.0,
+          "random_forest": 1.7103419229599944e-16
+        }
+      },
+      "weights": {
+        "lightgbm": 2.0619970471538832e-17,
+        "catboost": 1.2603161520598847e-16,
+        "xgboost": 1.5409431388751612e-16,
+        "extra_trees": 0.876851491764398,
+        "figs": 0.12314850823560143,
+        "nystroem": 0.0,
+        "random_forest": 1.7103419229599944e-16
+      },
+      "lgbm_mae": 2.996,
+      "catboost_mae": 3.496,
+      "xgboost_mae": 2.422,
+      "rf_mae": 0.714,
+      "ensemble_mae": 0.442,
+      "ensemble_rmse": 0.805,
+      "ensemble_r2": 0.9537,
+      "ensemble_pearson_r": 0.9827,
+      "ensemble_aqi_acc": 95.0,
+      "weight_lgbm": 0.0,
+      "weight_catboost": 0.0,
+      "weight_xgboost": 0.0,
+      "weight_rf": 0.0
+    },
+    "EXP-1KM-COMBINED": {
+      "experiment": "EXP-1KM-COMBINED",
+      "resolution_km": 1.0,
+      "resolution_name": "1km",
+      "provider": "Combined (Air4Thai + AirGradient)",
+      "is_combined": true,
+      "n_samples": 40,
+      "eval_mode": "Out-Of-Fold CV",
+      "metrics": {
+        "ensemble": {
+          "mae": 0.32,
+          "rmse": 0.747,
+          "mape": 0.78,
+          "r2": 0.99,
+          "pearson_r": 0.9965,
+          "aqi_acc": 100.0,
+          "count": 40
+        },
+        "lightgbm": {
+          "mae": 6.153,
+          "rmse": 7.205,
+          "mape": 16.2,
+          "r2": 0.0741,
+          "pearson_r": 0.5572,
+          "aqi_acc": 60.0,
+          "count": 40
+        },
+        "catboost": {
+          "mae": 6.565,
+          "rmse": 7.532,
+          "mape": 17.02,
+          "r2": -0.0116,
+          "pearson_r": 0.0237,
+          "aqi_acc": 60.0,
+          "count": 40
+        },
+        "xgboost": {
+          "mae": 4.511,
+          "rmse": 5.407,
+          "mape": 11.92,
+          "r2": 0.4786,
+          "pearson_r": 0.9509,
+          "aqi_acc": 75.0,
+          "count": 40
+        },
+        "random_forest": {
+          "mae": 0.975,
+          "rmse": 1.636,
+          "mape": 2.27,
+          "r2": 0.9523,
+          "pearson_r": 0.9782,
+          "aqi_acc": 100.0,
+          "count": 40
+        },
+        "weights": {
+          "lightgbm": 6.029568124734145e-16,
+          "catboost": 1.3759085096829814e-16,
+          "xgboost": 9.642706333688682e-16,
+          "extra_trees": 0.9938017359540552,
+          "figs": 0.00619826404594179,
+          "nystroem": 4.45509271522062e-16,
+          "random_forest": 8.196204441616807e-16
+        }
+      },
+      "weights": {
+        "lightgbm": 6.029568124734145e-16,
+        "catboost": 1.3759085096829814e-16,
+        "xgboost": 9.642706333688682e-16,
+        "extra_trees": 0.9938017359540552,
+        "figs": 0.00619826404594179,
+        "nystroem": 4.45509271522062e-16,
+        "random_forest": 8.196204441616807e-16
+      },
+      "lgbm_mae": 6.153,
+      "catboost_mae": 6.565,
+      "xgboost_mae": 4.511,
+      "rf_mae": 0.975,
+      "ensemble_mae": 0.32,
+      "ensemble_rmse": 0.747,
+      "ensemble_r2": 0.99,
+      "ensemble_pearson_r": 0.9965,
+      "ensemble_aqi_acc": 100.0,
+      "weight_lgbm": 0.0,
+      "weight_catboost": 0.0,
+      "weight_xgboost": 0.0,
+      "weight_rf": 0.0
+    }
+  },
+  "trained_ensembles": {
+    "EXP-2KM-AIR4THAI": "<src.models.ensemble_model.DustStackingEnsemble object at 0x000001F44E478080>",
+    "EXP-2KM-AIRGRADIENT": "<src.models.ensemble_model.DustStackingEnsemble object at 0x000001F48E7E75F0>",
+    "EXP-2KM-COMBINED": "<src.models.ensemble_model.DustStackingEnsemble object at 0x000001F44E4788F0>",
+    "EXP-1KM-AIR4THAI": "<src.models.ensemble_model.DustStackingEnsemble object at 0x000001F44E478950>",
+    "EXP-1KM-AIRGRADIENT": "<src.models.ensemble_model.DustStackingEnsemble object at 0x000001F44E49C1D0>",
+    "EXP-1KM-COMBINED": "<src.models.ensemble_model.DustStackingEnsemble object at 0x000001F44E2C6600>"
+  },
+  "summary_table": [
+    {
+      "experiment": "EXP-2KM-AIR4THAI",
+      "resolution_km": 2.0,
+      "resolution_name": "2km",
+      "provider": "Air4Thai",
+      "is_combined": false,
+      "n_samples": 20,
+      "eval_mode": "Out-Of-Fold CV",
+      "metrics": {
+        "ensemble": {
+          "mae": 0.471,
+          "rmse": 0.845,
+          "mape": 1.0,
+          "r2": 0.949,
+          "pearson_r": 0.9846,
+          "aqi_acc": 100.0,
+          "count": 20
+        },
+        "lightgbm": {
+          "mae": 2.989,
+          "rmse": 3.486,
+          "mape": 6.48,
+          "r2": 0.1316,
+          "pearson_r": 0.6612,
+          "aqi_acc": 100.0,
+          "count": 20
+        },
+        "catboost": {
+          "mae": 3.51,
+          "rmse": 3.965,
+          "mape": 7.51,
+          "r2": -0.1238,
+          "pearson_r": -0.1522,
+          "aqi_acc": 100.0,
+          "count": 20
+        },
+        "xgboost": {
+          "mae": 2.422,
+          "rmse": 2.924,
+          "mape": 5.26,
+          "r2": 0.3889,
+          "pearson_r": 0.9125,
+          "aqi_acc": 100.0,
+          "count": 20
+        },
+        "random_forest": {
+          "mae": 0.64,
+          "rmse": 1.074,
+          "mape": 1.37,
+          "r2": 0.9176,
+          "pearson_r": 0.9728,
+          "aqi_acc": 100.0,
+          "count": 20
+        },
+        "weights": {
+          "lightgbm": 3.790184426846583e-16,
+          "catboost": 2.803811485325421e-17,
+          "xgboost": 3.9378050714347764e-16,
+          "extra_trees": 0.859557351712544,
+          "figs": 0.14044264828745498,
+          "nystroem": 2.254400552661938e-16,
+          "random_forest": 5.917937908790277e-17
+        }
+      },
+      "weights": {
+        "lightgbm": 3.790184426846583e-16,
+        "catboost": 2.803811485325421e-17,
+        "xgboost": 3.9378050714347764e-16,
+        "extra_trees": 0.859557351712544,
+        "figs": 0.14044264828745498,
+        "nystroem": 2.254400552661938e-16,
+        "random_forest": 5.917937908790277e-17
+      },
+      "lgbm_mae": 2.989,
+      "catboost_mae": 3.51,
+      "xgboost_mae": 2.422,
+      "rf_mae": 0.64,
+      "ensemble_mae": 0.471,
+      "ensemble_rmse": 0.845,
+      "ensemble_r2": 0.949,
+      "ensemble_pearson_r": 0.9846,
+      "ensemble_aqi_acc": 100.0,
+      "weight_lgbm": 0.0,
+      "weight_catboost": 0.0,
+      "weight_xgboost": 0.0,
+      "weight_rf": 0.0
+    },
+    {
+      "experiment": "EXP-2KM-AIRGRADIENT",
+      "resolution_km": 2.0,
+      "resolution_name": "2km",
+      "provider": "AirGradient",
+      "is_combined": false,
+      "n_samples": 20,
+      "eval_mode": "Out-Of-Fold CV",
+      "metrics": {
+        "ensemble": {
+          "mae": 0.436,
+          "rmse": 0.821,
+          "mape": 1.29,
+          "r2": 0.9518,
+          "pearson_r": 0.9829,
+          "aqi_acc": 95.0,
+          "count": 20
+        },
+        "lightgbm": {
+          "mae": 2.996,
+          "rmse": 3.488,
+          "mape": 9.08,
+          "r2": 0.1306,
+          "pearson_r": 0.6517,
+          "aqi_acc": 80.0,
+          "count": 20
+        },
+        "catboost": {
+          "mae": 3.496,
+          "rmse": 3.952,
+          "mape": 10.42,
+          "r2": -0.1161,
+          "pearson_r": -0.1525,
+          "aqi_acc": 80.0,
+          "count": 20
+        },
+        "xgboost": {
+          "mae": 2.422,
+          "rmse": 2.924,
+          "mape": 7.37,
+          "r2": 0.3889,
+          "pearson_r": 0.9125,
+          "aqi_acc": 80.0,
+          "count": 20
+        },
+        "random_forest": {
+          "mae": 0.714,
+          "rmse": 0.986,
+          "mape": 2.09,
+          "r2": 0.9305,
+          "pearson_r": 0.9741,
+          "aqi_acc": 85.0,
+          "count": 20
+        },
+        "weights": {
+          "lightgbm": 1.2599739063307646e-16,
+          "catboost": 1.653165873558471e-16,
+          "xgboost": 2.337699393644282e-16,
+          "extra_trees": 0.8771527841825099,
+          "figs": 0.12284721581748945,
+          "nystroem": 1.7611657758095396e-16,
+          "random_forest": 2.619589722980965e-17
+        }
+      },
+      "weights": {
+        "lightgbm": 1.2599739063307646e-16,
+        "catboost": 1.653165873558471e-16,
+        "xgboost": 2.337699393644282e-16,
+        "extra_trees": 0.8771527841825099,
+        "figs": 0.12284721581748945,
+        "nystroem": 1.7611657758095396e-16,
+        "random_forest": 2.619589722980965e-17
+      },
+      "lgbm_mae": 2.996,
+      "catboost_mae": 3.496,
+      "xgboost_mae": 2.422,
+      "rf_mae": 0.714,
+      "ensemble_mae": 0.436,
+      "ensemble_rmse": 0.821,
+      "ensemble_r2": 0.9518,
+      "ensemble_pearson_r": 0.9829,
+      "ensemble_aqi_acc": 95.0,
+      "weight_lgbm": 0.0,
+      "weight_catboost": 0.0,
+      "weight_xgboost": 0.0,
+      "weight_rf": 0.0
+    },
+    {
+      "experiment": "EXP-2KM-COMBINED",
+      "resolution_km": 2.0,
+      "resolution_name": "2km",
+      "provider": "Combined (Air4Thai + AirGradient)",
+      "is_combined": true,
+      "n_samples": 40,
+      "eval_mode": "Out-Of-Fold CV",
+      "metrics": {
+        "ensemble": {
+          "mae": 0.322,
+          "rmse": 0.75,
+          "mape": 0.78,
+          "r2": 0.99,
+          "pearson_r": 0.9964,
+          "aqi_acc": 100.0,
+          "count": 40
+        },
+        "lightgbm": {
+          "mae": 6.153,
+          "rmse": 7.205,
+          "mape": 16.2,
+          "r2": 0.0741,
+          "pearson_r": 0.5572,
+          "aqi_acc": 60.0,
+          "count": 40
+        },
+        "catboost": {
+          "mae": 6.565,
+          "rmse": 7.532,
+          "mape": 17.02,
+          "r2": -0.0116,
+          "pearson_r": 0.0237,
+          "aqi_acc": 60.0,
+          "count": 40
+        },
+        "xgboost": {
+          "mae": 4.511,
+          "rmse": 5.407,
+          "mape": 11.92,
+          "r2": 0.4786,
+          "pearson_r": 0.9509,
+          "aqi_acc": 75.0,
+          "count": 40
+        },
+        "random_forest": {
+          "mae": 0.975,
+          "rmse": 1.636,
+          "mape": 2.27,
+          "r2": 0.9523,
+          "pearson_r": 0.9782,
+          "aqi_acc": 100.0,
+          "count": 40
+        },
+        "weights": {
+          "lightgbm": 1.023093001477563e-16,
+          "catboost": 5.164785493055608e-18,
+          "xgboost": 0.0,
+          "extra_trees": 0.9999999999999987,
+          "figs": 2.4980018054065993e-16,
+          "nystroem": 0.0,
+          "random_forest": 8.604228440844953e-16
+        }
+      },
+      "weights": {
+        "lightgbm": 1.023093001477563e-16,
+        "catboost": 5.164785493055608e-18,
+        "xgboost": 0.0,
+        "extra_trees": 0.9999999999999987,
+        "figs": 2.4980018054065993e-16,
+        "nystroem": 0.0,
+        "random_forest": 8.604228440844953e-16
+      },
+      "lgbm_mae": 6.153,
+      "catboost_mae": 6.565,
+      "xgboost_mae": 4.511,
+      "rf_mae": 0.975,
+      "ensemble_mae": 0.322,
+      "ensemble_rmse": 0.75,
+      "ensemble_r2": 0.99,
+      "ensemble_pearson_r": 0.9964,
+      "ensemble_aqi_acc": 100.0,
+      "weight_lgbm": 0.0,
+      "weight_catboost": 0.0,
+      "weight_xgboost": 0.0,
+      "weight_rf": 0.0
+    },
+    {
+      "experiment": "EXP-1KM-AIR4THAI",
+      "resolution_km": 1.0,
+      "resolution_name": "1km",
+      "provider": "Air4Thai",
+      "is_combined": false,
+      "n_samples": 20,
+      "eval_mode": "Out-Of-Fold CV",
+      "metrics": {
+        "ensemble": {
+          "mae": 0.447,
+          "rmse": 0.84,
+          "mape": 0.95,
+          "r2": 0.9496,
+          "pearson_r": 0.984,
+          "aqi_acc": 100.0,
+          "count": 20
+        },
+        "lightgbm": {
+          "mae": 2.989,
+          "rmse": 3.486,
+          "mape": 6.48,
+          "r2": 0.1316,
+          "pearson_r": 0.6612,
+          "aqi_acc": 100.0,
+          "count": 20
+        },
+        "catboost": {
+          "mae": 3.51,
+          "rmse": 3.965,
+          "mape": 7.51,
+          "r2": -0.1238,
+          "pearson_r": -0.1522,
+          "aqi_acc": 100.0,
+          "count": 20
+        },
+        "xgboost": {
+          "mae": 2.422,
+          "rmse": 2.924,
+          "mape": 5.26,
+          "r2": 0.3889,
+          "pearson_r": 0.9125,
+          "aqi_acc": 100.0,
+          "count": 20
+        },
+        "random_forest": {
+          "mae": 0.64,
+          "rmse": 1.074,
+          "mape": 1.37,
+          "r2": 0.9176,
+          "pearson_r": 0.9728,
+          "aqi_acc": 100.0,
+          "count": 20
+        },
+        "weights": {
+          "lightgbm": 0.0,
+          "catboost": 4.484068912026735e-16,
+          "xgboost": 1.6336029230791867e-17,
+          "extra_trees": 0.8586978886422423,
+          "figs": 0.14130211135775608,
+          "nystroem": 3.34127111502905e-18,
+          "random_forest": 1.0779398919034095e-15
+        }
+      },
+      "weights": {
+        "lightgbm": 0.0,
+        "catboost": 4.484068912026735e-16,
+        "xgboost": 1.6336029230791867e-17,
+        "extra_trees": 0.8586978886422423,
+        "figs": 0.14130211135775608,
+        "nystroem": 3.34127111502905e-18,
+        "random_forest": 1.0779398919034095e-15
+      },
+      "lgbm_mae": 2.989,
+      "catboost_mae": 3.51,
+      "xgboost_mae": 2.422,
+      "rf_mae": 0.64,
+      "ensemble_mae": 0.447,
+      "ensemble_rmse": 0.84,
+      "ensemble_r2": 0.9496,
+      "ensemble_pearson_r": 0.984,
+      "ensemble_aqi_acc": 100.0,
+      "weight_lgbm": 0.0,
+      "weight_catboost": 0.0,
+      "weight_xgboost": 0.0,
+      "weight_rf": 0.0
+    },
+    {
+      "experiment": "EXP-1KM-AIRGRADIENT",
+      "resolution_km": 1.0,
+      "resolution_name": "1km",
+      "provider": "AirGradient",
+      "is_combined": false,
+      "n_samples": 20,
+      "eval_mode": "Out-Of-Fold CV",
+      "metrics": {
+        "ensemble": {
+          "mae": 0.442,
+          "rmse": 0.805,
+          "mape": 1.31,
+          "r2": 0.9537,
+          "pearson_r": 0.9827,
+          "aqi_acc": 95.0,
+          "count": 20
+        },
+        "lightgbm": {
+          "mae": 2.996,
+          "rmse": 3.488,
+          "mape": 9.08,
+          "r2": 0.1306,
+          "pearson_r": 0.6517,
+          "aqi_acc": 80.0,
+          "count": 20
+        },
+        "catboost": {
+          "mae": 3.496,
+          "rmse": 3.952,
+          "mape": 10.42,
+          "r2": -0.1161,
+          "pearson_r": -0.1525,
+          "aqi_acc": 80.0,
+          "count": 20
+        },
+        "xgboost": {
+          "mae": 2.422,
+          "rmse": 2.924,
+          "mape": 7.37,
+          "r2": 0.3889,
+          "pearson_r": 0.9125,
+          "aqi_acc": 80.0,
+          "count": 20
+        },
+        "random_forest": {
+          "mae": 0.714,
+          "rmse": 0.986,
+          "mape": 2.09,
+          "r2": 0.9305,
+          "pearson_r": 0.9741,
+          "aqi_acc": 85.0,
+          "count": 20
+        },
+        "weights": {
+          "lightgbm": 2.0619970471538832e-17,
+          "catboost": 1.2603161520598847e-16,
+          "xgboost": 1.5409431388751612e-16,
+          "extra_trees": 0.876851491764398,
+          "figs": 0.12314850823560143,
+          "nystroem": 0.0,
+          "random_forest": 1.7103419229599944e-16
+        }
+      },
+      "weights": {
+        "lightgbm": 2.0619970471538832e-17,
+        "catboost": 1.2603161520598847e-16,
+        "xgboost": 1.5409431388751612e-16,
+        "extra_trees": 0.876851491764398,
+        "figs": 0.12314850823560143,
+        "nystroem": 0.0,
+        "random_forest": 1.7103419229599944e-16
+      },
+      "lgbm_mae": 2.996,
+      "catboost_mae": 3.496,
+      "xgboost_mae": 2.422,
+      "rf_mae": 0.714,
+      "ensemble_mae": 0.442,
+      "ensemble_rmse": 0.805,
+      "ensemble_r2": 0.9537,
+      "ensemble_pearson_r": 0.9827,
+      "ensemble_aqi_acc": 95.0,
+      "weight_lgbm": 0.0,
+      "weight_catboost": 0.0,
+      "weight_xgboost": 0.0,
+      "weight_rf": 0.0
+    },
+    {
+      "experiment": "EXP-1KM-COMBINED",
+      "resolution_km": 1.0,
+      "resolution_name": "1km",
+      "provider": "Combined (Air4Thai + AirGradient)",
+      "is_combined": true,
+      "n_samples": 40,
+      "eval_mode": "Out-Of-Fold CV",
+      "metrics": {
+        "ensemble": {
+          "mae": 0.32,
+          "rmse": 0.747,
+          "mape": 0.78,
+          "r2": 0.99,
+          "pearson_r": 0.9965,
+          "aqi_acc": 100.0,
+          "count": 40
+        },
+        "lightgbm": {
+          "mae": 6.153,
+          "rmse": 7.205,
+          "mape": 16.2,
+          "r2": 0.0741,
+          "pearson_r": 0.5572,
+          "aqi_acc": 60.0,
+          "count": 40
+        },
+        "catboost": {
+          "mae": 6.565,
+          "rmse": 7.532,
+          "mape": 17.02,
+          "r2": -0.0116,
+          "pearson_r": 0.0237,
+          "aqi_acc": 60.0,
+          "count": 40
+        },
+        "xgboost": {
+          "mae": 4.511,
+          "rmse": 5.407,
+          "mape": 11.92,
+          "r2": 0.4786,
+          "pearson_r": 0.9509,
+          "aqi_acc": 75.0,
+          "count": 40
+        },
+        "random_forest": {
+          "mae": 0.975,
+          "rmse": 1.636,
+          "mape": 2.27,
+          "r2": 0.9523,
+          "pearson_r": 0.9782,
+          "aqi_acc": 100.0,
+          "count": 40
+        },
+        "weights": {
+          "lightgbm": 6.029568124734145e-16,
+          "catboost": 1.3759085096829814e-16,
+          "xgboost": 9.642706333688682e-16,
+          "extra_trees": 0.9938017359540552,
+          "figs": 0.00619826404594179,
+          "nystroem": 4.45509271522062e-16,
+          "random_forest": 8.196204441616807e-16
+        }
+      },
+      "weights": {
+        "lightgbm": 6.029568124734145e-16,
+        "catboost": 1.3759085096829814e-16,
+        "xgboost": 9.642706333688682e-16,
+        "extra_trees": 0.9938017359540552,
+        "figs": 0.00619826404594179,
+        "nystroem": 4.45509271522062e-16,
+        "random_forest": 8.196204441616807e-16
+      },
+      "lgbm_mae": 6.153,
+      "catboost_mae": 6.565,
+      "xgboost_mae": 4.511,
+      "rf_mae": 0.975,
+      "ensemble_mae": 0.32,
+      "ensemble_rmse": 0.747,
+      "ensemble_r2": 0.99,
+      "ensemble_pearson_r": 0.9965,
+      "ensemble_aqi_acc": 100.0,
+      "weight_lgbm": 0.0,
+      "weight_catboost": 0.0,
+      "weight_xgboost": 0.0,
+      "weight_rf": 0.0
+    }
+  ]
+}
