@@ -701,4 +701,232 @@ class ModelTrainer:
             f.write("\n".join(md_lines))
         logger.info("Saved Markdown provider benchmark report to: %s", md_path)
 
+    def run_provider_partitioned_training(
+        self,
+        train_matrices_by_res: Dict[float, pd.DataFrame],
+        test_matrices_by_res: Optional[Dict[float, pd.DataFrame]] = None,
+        feature_cols: Optional[List[str]] = None,
+        providers: Optional[List[str]] = None,
+        include_combined: bool = True,
+        min_samples_per_provider: int = 4,
+        cross_provider_eval: bool = True,
+        save_checkpoints: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Production training partitioned by ground-truth provider:
+        1. Trains an isolated ensemble per authorized provider (Air4Thai, AirGradient),
+           persisting each checkpoint, then trains the Combined ensemble (used for
+           production inference). Logging mirrors run_multi_resolution_provider_benchmark.
+        2. Runs a cross-provider generalization benchmark: every trained ensemble is
+           applied to each provider's hold-out, so a model trained on Air4Thai is also
+           scored on AirGradient data and vice versa (train -> predict swap).
+        """
+        test_matrices = test_matrices_by_res or {}
+        providers_to_use = providers or ["Air4Thai", "AirGradient"]
+        norm_providers = [
+            p.strip() for p in providers_to_use
+            if p.strip().lower() not in ("clarity", "airnow", "habitatmap")
+        ]
+
+        res_names = {3.0: "3km", 2.0: "2km", 1.0: "1km", 0.5: "500m"}
+
+        benchmark_results: Dict[str, Any] = {
+            "pollutant": self.pollutant,
+            "target_providers": norm_providers,
+            "include_combined": include_combined,
+            "by_resolution": {},
+            "trained_ensembles": {},
+            "checkpoints": [],
+        }
+        summary_rows: List[Dict[str, Any]] = []
+        cross_rows: List[Dict[str, Any]] = []
+
+        logger.info("=" * 80)
+        logger.info("🧩 PROVIDER-PARTITIONED PRODUCTION TRAINING (%s)", self.pollutant.upper())
+        logger.info("Providers: %s | Combined: %s", ", ".join(norm_providers), include_combined)
+        logger.info("Excluding sparse networks: Clarity, AirNow, HabitatMap")
+        logger.info("=" * 80)
+
+        for res_km, train_df_raw in train_matrices_by_res.items():
+            res_label = res_names.get(res_km, f"{res_km}km")
+            train_df = resolve_dataset_providers(train_df_raw, allowed_providers=tuple(norm_providers))
+            test_df_raw = test_matrices.get(res_km)
+            test_df = (
+                resolve_dataset_providers(test_df_raw, allowed_providers=tuple(norm_providers))
+                if test_df_raw is not None and not test_df_raw.empty
+                else None
+            )
+
+            runs_to_execute = [(p, False) for p in norm_providers]
+            if include_combined and len(norm_providers) > 1:
+                runs_to_execute.append(("Combined", True))
+
+            for prov_name, is_comb in runs_to_execute:
+                if is_comb:
+                    sub_train = train_df[train_df["provider"].isin(norm_providers)].copy()
+                    exp_id = f"EXP-{res_label.upper()}-COMBINED"
+                    prov_display = f"Combined ({' + '.join(norm_providers)})"
+                    log_icon = "🌐"
+                else:
+                    sub_train = train_df[train_df["provider"] == prov_name].copy()
+                    exp_id = f"EXP-{res_label.upper()}-{prov_name.upper()}"
+                    prov_display = prov_name
+                    log_icon = "🏢" if "air4thai" in prov_name.lower() else "📡"
+
+                logger.info("\n" + "-" * 75)
+                logger.info("%s [TRAIN] Resolution: %s | Provider: %s | Samples: N=%d",
+                            log_icon, res_label, prov_display, len(sub_train))
+                logger.info("-" * 75)
+
+                if len(sub_train) < min_samples_per_provider:
+                    logger.warning("⚠️ Insufficient samples for provider '%s' at %s (N=%d < min=%d). Skipping.",
+                                   prov_name, res_label, len(sub_train), min_samples_per_provider)
+                    continue
+
+                cv_splits = min(5, max(2, len(sub_train) // 2))
+                ensemble = self.train_suite(
+                    train_df=sub_train,
+                    cv=cv_splits,
+                    feature_cols=feature_cols,
+                    experiment_id=exp_id,
+                )
+                benchmark_results["trained_ensembles"][exp_id] = ensemble
+
+                exp_clean = exp_id.lower().replace("-", "_")
+                chk_path = self.output_dir / f"{exp_clean}_{self.pollutant}"
+                if save_checkpoints and chk_path.exists():
+                    benchmark_results["checkpoints"].append(str(chk_path))
+                    logger.info("  💾 Checkpoint persisted: %s", chk_path.name)
+
+                ens_m = ensemble.oof_metrics_.get("ensemble", {})
+                logger.info("  • %-26s OOF | MAE: %6.3f | RMSE: %6.3f | R²: %6.4f | Pearson: %6.4f | AQI: %5.2f%%",
+                            prov_display, ens_m.get("mae", 0.0), ens_m.get("rmse", 0.0),
+                            ens_m.get("r2", 0.0), ens_m.get("pearson_r", 0.0), ens_m.get("aqi_acc", 0.0))
+                logger.info("  • Stacking Weights: %s", {k: round(v, 4) for k, v in ensemble.weights.items()})
+
+                summary_rows.append({
+                    "experiment": exp_id,
+                    "resolution_name": res_label,
+                    "resolution_km": res_km,
+                    "provider": prov_display,
+                    "is_combined": is_comb,
+                    "n_samples": len(sub_train),
+                    "ensemble_mae": ens_m.get("mae", 0.0),
+                    "ensemble_rmse": ens_m.get("rmse", 0.0),
+                    "ensemble_r2": ens_m.get("r2", 0.0),
+                    "ensemble_pearson_r": ens_m.get("pearson_r", 0.0),
+                    "ensemble_aqi_acc": ens_m.get("aqi_acc", 0.0),
+                    "weight_lgbm": round(ensemble.weights.get("lightgbm", 0.0), 3),
+                    "weight_catboost": round(ensemble.weights.get("catboost", 0.0), 3),
+                    "weight_xgboost": round(ensemble.weights.get("xgboost", 0.0), 3),
+                    "weight_rf": round(ensemble.weights.get("random_forest", 0.0), 3),
+                })
+
+                # Cross-provider generalization (train on one provider, predict the others)
+                if cross_provider_eval:
+                    has_test = test_df is not None and len(test_df) >= 2
+                    eval_df = test_df if has_test else train_df
+                    split_name = "test" if has_test else "train(in-sample)"
+                    logger.info("  🔀 Cross-Provider Generalization [%s] (%s → each provider, %s):",
+                                res_label, prov_display, split_name)
+                    for target_prov in norm_providers:
+                        sub_eval = eval_df[eval_df["provider"] == target_prov].copy()
+                        if len(sub_eval) == 0:
+                            continue
+                        f_cols = feature_cols or ensemble.feature_names_
+                        try:
+                            X_ev, y_ev, _ = self.prepare_data(sub_eval, f_cols)
+                        except Exception as exc:
+                            logger.warning("    ⚠️ Skipping %s → %s: %s", prov_display, target_prov, exc)
+                            continue
+                        preds = ensemble.predict(X_ev)
+                        m = compute_dust_metrics(y_ev, preds, pollutant=self.pollutant)
+                        cross_rows.append({
+                            "resolution_name": res_label,
+                            "resolution_km": res_km,
+                            "train_provider": prov_display,
+                            "test_provider": target_prov,
+                            "eval_split": split_name,
+                            "n_samples": len(X_ev),
+                            "mae": m.get("mae", 0.0),
+                            "rmse": m.get("rmse", 0.0),
+                            "r2": m.get("r2", 0.0),
+                            "pearson_r": m.get("pearson_r", 0.0),
+                            "aqi_acc": m.get("aqi_acc", 0.0),
+                        })
+                        logger.info("    ↳ %-22s | N=%-6d | MAE: %6.3f | RMSE: %6.3f | R²: %7.4f | AQI: %5.2f%%",
+                                    target_prov, len(X_ev), m.get("mae", 0.0), m.get("rmse", 0.0),
+                                    m.get("r2", 0.0), m.get("aqi_acc", 0.0))
+
+        summary_df = pd.DataFrame(summary_rows)
+        cross_df = pd.DataFrame(cross_rows)
+        benchmark_results["summary_table"] = summary_df.to_dict(orient="records")
+        benchmark_results["cross_provider_table"] = cross_df.to_dict(orient="records")
+        self._write_provider_partitioned_reports(benchmark_results, summary_df, cross_df)
+        return benchmark_results
+
+    def _write_provider_partitioned_reports(
+        self,
+        benchmark_results: Dict[str, Any],
+        summary_df: pd.DataFrame,
+        cross_df: pd.DataFrame,
+    ) -> None:
+        """Writes markdown and JSON reports for provider-partitioned production training."""
+        target_dir = get_reports_dir(self.pollutant)
+        target_dir.mkdir(parents=True, exist_ok=True)
+        suffix = f"_{self.pollutant}"
+        pol_name = self.pollutant.upper()
+
+        json_path = target_dir / f"phase4_provider_partitioned{suffix}.json"
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(benchmark_results, f, indent=2, default=str)
+        logger.info("Saved JSON provider-partitioned training report to: %s", json_path)
+
+        md_lines = [
+            f"# 🧩 Phase 4: Provider-Partitioned Production Training ({pol_name})",
+            "",
+            "> Train isolated ensembles per ground-truth provider, then Combined; cross-provider generalization benchmark",
+            "*(Excluded sparse/non-representative networks: Clarity, AirNow, HabitatMap)*",
+            "",
+            "## 1. Per-Provider Production Training Summary",
+            "",
+            "| Experiment | Resolution | Provider | N | **Ensemble MAE** | RMSE | R² | Pearson r | AQI Acc (%) |",
+            "| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |",
+        ]
+        for _, r in summary_df.iterrows():
+            md_lines.append(
+                f"| **{r['experiment']}** | {r['resolution_name']} | {r['provider']} | {r['n_samples']} | "
+                f"**{r['ensemble_mae']:.2f}** | {r['ensemble_rmse']:.2f} | {r['ensemble_r2']:.3f} | "
+                f"{r['ensemble_pearson_r']:.4f} | {r['ensemble_aqi_acc']:.2f} |"
+            )
+
+        md_lines.append("")
+        md_lines.append("## 2. Cross-Provider Generalization (train → predict swap)")
+        md_lines.append("")
+        if not cross_df.empty:
+            md_lines.append("| Resolution | Trained On | Predicted On | Split | N | MAE | RMSE | R² | Pearson r | AQI Acc (%) |")
+            md_lines.append("| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |")
+            for _, r in cross_df.iterrows():
+                md_lines.append(
+                    f"| {r['resolution_name']} | {r['train_provider']} | {r['test_provider']} | {r['eval_split']} | "
+                    f"{r['n_samples']} | {r['mae']:.2f} | {r['rmse']:.2f} | {r['r2']:.3f} | "
+                    f"{r['pearson_r']:.4f} | {r['aqi_acc']:.2f} |"
+                )
+        else:
+            md_lines.append("_No cross-provider evaluation rows produced._")
+
+        md_lines.append("")
+        md_lines.append("## 3. Persisted Checkpoints")
+        checkpoints = benchmark_results.get("checkpoints", [])
+        if checkpoints:
+            for c in checkpoints:
+                md_lines.append(f"- `{c}`")
+        else:
+            md_lines.append("_No checkpoints persisted._")
+
+        md_path = target_dir / f"phase4_provider_partitioned{suffix}.md"
+        with open(md_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(md_lines))
+        logger.info("Saved Markdown provider-partitioned training report to: %s", md_path)
+
 

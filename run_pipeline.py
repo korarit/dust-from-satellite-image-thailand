@@ -1361,6 +1361,8 @@ def run_phase_4_full(pollutant: str = "pm25", split_date: str = "2026-01-01") ->
         1. Pure Satellite Suite (Maritime / Sea Grid Capable, Zero Ground Stations Needed)
         2. Full Multimodal Suite (Satellite + Topography + Ground Weather Telemetry)
     - Generates multi-resolution benchmark (EXP-3KM, EXP-2KM, EXP-1KM, EXP-500M)
+    - Trains provider-partitioned production ensembles (Air4Thai, AirGradient, Combined):
+      persists every checkpoint and runs a cross-provider generalization benchmark
     - Evaluates Out-of-Time generalization on 2026 Test split and saves all production checkpoints
     """
     pol = pollutant.lower()
@@ -1545,11 +1547,36 @@ def run_phase_4_full(pollutant: str = "pm25", split_date: str = "2026-01-01") ->
         test_matrices_by_res=test_matrices_by_res,
     )
 
+    # --------------------------------------------------------------------------
+    # 3. Provider-Partitioned Production Training: Air4Thai -> AirGradient -> Combined
+    #    (persists every checkpoint; Combined is the production inference model)
+    #    plus cross-provider generalization benchmark (train on one provider,
+    #    predict the other, swapped).
+    # --------------------------------------------------------------------------
+    logger.info("\n" + "=" * 75)
+    logger.info("🧩 PHASE 4 PROVIDER-PARTITIONED PRODUCTION TRAINING (%s)", tgt_name)
+    logger.info("  • [Air4Thai] isolated ensemble checkpoint")
+    logger.info("  • [AirGradient] isolated ensemble checkpoint")
+    logger.info("  • [Combined] Air4Thai + AirGradient production ensemble")
+    logger.info("  • Cross-provider generalization (train → predict swap)")
+    logger.info("=" * 75)
+
+    provider_res = trainer.run_provider_partitioned_training(
+        train_matrices_by_res=train_matrices_by_res,
+        test_matrices_by_res=test_matrices_by_res,
+        providers=["Air4Thai", "AirGradient"],
+        include_combined=True,
+        cross_provider_eval=True,
+        save_checkpoints=True,
+    )
+    benchmark_res["provider_partitioned_training"] = provider_res
+
     run_phase_1b_verification()
     logger.info("\n🎉 PHASE 4 FULL PRODUCTION TRAINING COMPLETED SUCCESSFULLY (%s)!", tgt_name)
     return {
         "ablation_benchmark": ablation_res,
         "multi_resolution_benchmark": benchmark_res,
+        "provider_partitioned_training": provider_res,
     }
 
 

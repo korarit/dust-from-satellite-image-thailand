@@ -558,6 +558,57 @@ def test_multi_resolution_provider_benchmark_execution(deterministic_training_da
     assert any("Combined" in p for p in prov_set)
 
 
+def test_provider_partitioned_training_and_cross_provider(deterministic_training_data, tmp_path):
+    """Verifies provider-partitioned production training persists checkpoints, trains Combined,
+    and produces cross-provider (train -> predict swap) generalization rows."""
+    df, f_cols, target = deterministic_training_data
+    half = len(df) // 2
+    df_prov = df.copy()
+    df_prov["provider"] = ["Air4Thai"] * half + ["AirGradient"] * (len(df) - half)
+
+    trainer = ModelTrainer(output_dir=tmp_path / "models")
+    trainer.config = {
+        "general": {"target_column": target, "random_state": 42, "cv_splits": 2},
+        "models": {
+            "lightgbm": {"n_estimators": 5, "learning_rate": 0.1, "min_child_samples": 2},
+            "catboost": {"iterations": 5, "learning_rate": 0.1, "depth": 2},
+            "xgboost": {"n_estimators": 5, "learning_rate": 0.1, "max_depth": 2},
+            "random_forest": {"n_estimators": 5, "max_depth": 3, "min_samples_split": 2},
+        },
+        "features": {"monotonic_constraints": {}},
+    }
+
+    results = trainer.run_provider_partitioned_training(
+        train_matrices_by_res={2.0: df_prov.copy()},
+        test_matrices_by_res={},
+        feature_cols=f_cols,
+        providers=["Air4Thai", "AirGradient"],
+        include_combined=True,
+        cross_provider_eval=True,
+        save_checkpoints=True,
+    )
+
+    # Per-provider + Combined training summary
+    summary_df = pd.DataFrame(results["summary_table"])
+    prov_set = set(summary_df["provider"].unique())
+    assert "Air4Thai" in prov_set
+    assert "AirGradient" in prov_set
+    assert any("Combined" in p for p in prov_set)
+
+    # Every checkpoint persisted (isolated providers + Combined)
+    chk_names = {Path(c).name for c in results["checkpoints"]}
+    assert "exp_2km_air4thai_pm25" in chk_names
+    assert "exp_2km_airgradient_pm25" in chk_names
+    assert "exp_2km_combined_pm25" in chk_names
+
+    # Cross-provider swap rows exist in both directions
+    cross_df = pd.DataFrame(results["cross_provider_table"])
+    assert not cross_df.empty
+    pairs = set(zip(cross_df["train_provider"], cross_df["test_provider"]))
+    assert ("Air4Thai", "AirGradient") in pairs
+    assert ("AirGradient", "Air4Thai") in pairs
+
+
 def test_evaluation_plotter_provider_graphics(tmp_path):
     """Verifies that EvaluationPlotter generates separate provider comparison plots and parity plots."""
     plotter = EvaluationPlotter(output_dir=tmp_path / "plots", pollutant="pm25")
