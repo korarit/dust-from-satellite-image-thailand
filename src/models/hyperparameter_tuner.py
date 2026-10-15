@@ -220,6 +220,9 @@ def run_optuna_tuning(
     - footer per model: best MAE/R2/elapsed + best-trial number.
     Per-model trial CSVs (``{key}__{model}_trials.csv``) are still written at
     the end of each model — the console log is the realtime channel.
+
+    Crash-safety: best-so-far YAML + ``tuning_summary`` are checkpointed after
+    EVERY model (not once at the end), so a later crash loses nothing.
     """
     try:
         import optuna
@@ -258,6 +261,35 @@ def run_optuna_tuning(
     tuned: Dict[str, Dict[str, Any]] = {}
     summary_rows: List[Dict[str, Any]] = []
     master_history: List[pd.DataFrame] = []
+    summary_csv = reports_dir / f"tuning_summary_{pol}.csv"
+
+    def _write_checkpoint() -> None:
+        """Persists best-so-far YAML + summary immediately (crash-safe).
+
+        Called after EVERY model finishes, so completed models are never lost
+        if a later model crashes the run. Best-effort: never raises.
+        """
+        try:
+            payload = {
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "pollutant": pol,
+                "resolution_km": resolution_km,
+                "subsample_frac": subsample_frac,
+                "trials": trials,
+                "seed": seed,
+                "feature_sets": list(feature_sets.keys()),
+                "providers": providers,
+                "models": models,
+                "completed_models": sum(len(v) for v in tuned.values()),
+                "tuned": _to_native(tuned),
+            }
+            out_yaml.parent.mkdir(parents=True, exist_ok=True)
+            with open(out_yaml, "w", encoding="utf-8") as f:
+                yaml.safe_dump(payload, f, sort_keys=False, allow_unicode=True)
+            if summary_rows:
+                pd.DataFrame(summary_rows).to_csv(summary_csv, index=False)
+        except Exception as exc:  # checkpoint must never break tuning
+            logger.warning("Checkpoint write failed (tuning continues): %s", exc)
 
     for fs_label, fs_cols_all in feature_sets.items():
         fs_cols = [c for c in fs_cols_all if c in df_train.columns]
@@ -359,7 +391,15 @@ def run_optuna_tuning(
                     master_history.append(hist)
                     hist.to_csv(reports_dir / f"{key}__{model_key}_trials.csv", index=False)
 
-                bt = study.best_trial
+                bt = None
+                try:
+                    bt = study.best_trial
+                except Exception:
+                    pass
+                if bt is None or bt.value is None:
+                    logger.warning("  [SKIP] %-13s all %d trials failed; no checkpoint for this model",
+                                   model_key, trials)
+                    continue
                 elapsed_model = time.perf_counter() - t_model_start
                 summary_rows.append({
                     "feature_set": fs_label,
@@ -378,6 +418,10 @@ def run_optuna_tuning(
                 logger.info("  [OK] %-13s best MAE: %6.3f | R2: %6.4f | (trial %d/%d, %ds)",
                             model_key, float(bt.value), float(bt.user_attrs.get("r2", 0.0)),
                             bt.number + 1, trials, int(elapsed_model))
+                # Incremental checkpoint: best-so-far YAML + summary are durable
+                # NOW — a later crash (or Colab preemption) loses nothing.
+                _write_checkpoint()
+                logger.info("  checkpoint saved -> %s", out_yaml)
 
     if save_history and master_history:
         master_df = pd.concat(master_history, ignore_index=True)
@@ -386,25 +430,10 @@ def run_optuna_tuning(
         logger.info("\nSaved full tuning history (%d trials) -> %s", len(master_df), master_csv)
 
     if save_history and summary_rows:
-        summary_csv = reports_dir / f"tuning_summary_{pol}.csv"
-        pd.DataFrame(summary_rows).to_csv(summary_csv, index=False)
+        # Already checkpointed per-model; this is just the final confirmation.
         logger.info("Saved tuning summary -> %s", summary_csv)
 
-    payload = {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "pollutant": pol,
-        "resolution_km": resolution_km,
-        "subsample_frac": subsample_frac,
-        "trials": trials,
-        "seed": seed,
-        "feature_sets": list(feature_sets.keys()),
-        "providers": providers,
-        "models": models,
-        "tuned": _to_native(tuned),
-    }
-    out_yaml.parent.mkdir(parents=True, exist_ok=True)
-    with open(out_yaml, "w", encoding="utf-8") as f:
-        yaml.safe_dump(payload, f, sort_keys=False, allow_unicode=True)
+    _write_checkpoint()
     logger.info("Saved tuned parameters -> %s", out_yaml)
     logger.info("\n🎉 HYPERPARAMETER TUNING COMPLETED (%s)!", pol.upper())
 
