@@ -284,6 +284,40 @@ def run_optuna_tuning(
     master_history: List[pd.DataFrame] = []
     summary_csv = reports_dir / f"tuning_summary_{pol}.csv"
 
+    # --------------------------------------------------------------------------
+    # Resume support: if the checkpoint YAML already contains tuned params for a
+    # (feature_set, provider, model) combo, skip it instead of re-tuning. Only
+    # combos missing from the checkpoint are tuned fresh.
+    # --------------------------------------------------------------------------
+    tuned_prev: Dict[str, Dict[str, Any]] = {}
+    if out_yaml.exists():
+        try:
+            with open(out_yaml, "r", encoding="utf-8") as f:
+                _prev_payload = yaml.safe_load(f) or {}
+            tuned_prev = _prev_payload.get("tuned") or {}
+        except Exception as exc:
+            logger.warning("Could not read existing checkpoint %s (%s); tuning from scratch.", out_yaml, exc)
+            tuned_prev = {}
+        if tuned_prev:
+            _prev_total = sum(len(v) for v in tuned_prev.values())
+            logger.info("⏩ Resume: %d combos already tuned in %s -> will be skipped",
+                        _prev_total, out_yaml)
+    tuned = {k: dict(v) for k, v in tuned_prev.items()}
+    # Preserve summary rows (metrics) of previously completed combos so the CSV
+    # checkpoint stays complete across resumed runs.
+    if summary_csv.exists():
+        try:
+            _prev_summary = pd.read_csv(summary_csv)
+            _prev_bys = {
+                (str(r["feature_set"]), str(r["provider"]), str(r["model"])): dict(r)
+                for _, r in _prev_summary.iterrows()
+            }
+            for (fs_, prov_, mk_), row in _prev_bys.items():
+                if mk_ in tuned_prev.get(f"{fs_}__{prov_.lower()}", {}):
+                    summary_rows.append(row)
+        except Exception as exc:
+            logger.warning("Could not inherit prior tuning summary (%s); it will be rebuilt.", exc)
+
     def _write_checkpoint() -> None:
         """Persists best-so-far YAML + summary immediately (crash-safe).
 
@@ -327,6 +361,12 @@ def run_optuna_tuning(
                 logger.warning("Provider '%s' (%s) has too few rows (N=%d); skipping.", prov, fs_label, len(subset))
                 continue
 
+            key = f"{fs_label}__{prov.lower()}"
+            _remaining = [m for m in models if m not in tuned_prev.get(key, {})]
+            if not _remaining:
+                logger.info("⏩ [%s] all %d models already tuned -> SKIP (resume)", key, len(models))
+                continue
+
             # P0-1 fix: group-aware holdout (station/cell) + P2-2: subsample warning.
             _gcol = next((c for c in ("station_code", "grid_id", "provider") if c in subset.columns), None)
             tr_full, ho = split_holdout(subset, seed, group_col=_gcol)
@@ -341,14 +381,16 @@ def run_optuna_tuning(
             X_tr, y_tr = tr_full[fs_cols], tr_full[tgt_col].astype(float)
             X_ho, y_ho = ho[fs_cols], ho[tgt_col].astype(float)
 
-            key = f"{fs_label}__{prov.lower()}"
-            tuned[key] = {}
+            tuned[key] = tuned.get(key, {})
             logger.info("\n" + "-" * 80)
-            logger.info("▶ [%s] N_train=%d (subsampled) | N_holdout=%d | features=%d",
-                        key, len(X_tr), len(X_ho), len(fs_cols))
+            logger.info("▶ [%s] N_train=%d (subsampled) | N_holdout=%d | features=%d | to tune: %s",
+                        key, len(X_tr), len(X_ho), len(fs_cols), _remaining)
             logger.info("-" * 80)
 
             for mi, model_key in enumerate(models, start=1):
+                if model_key in tuned_prev.get(key, {}):
+                    logger.info("  === [%s|%s] (%d/%d) already tuned -> SKIP", key, model_key, mi, len(models))
+                    continue
                 base_params = dict(base_models_cfg.get(model_key, {}))
                 logger.info("  === [%s|%s] (%d/%d) trials=%d -- start",
                             key, model_key, mi, len(models), trials)
