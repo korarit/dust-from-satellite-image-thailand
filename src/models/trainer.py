@@ -26,6 +26,7 @@ from src.config.paths import (
     get_reports_dir,
     get_evaluation_csv_dir,
     get_tuned_params_path,
+    get_tuned_params_default_path,
     load_yaml_config,
 )
 from src.features.feature_matrix_builder import (
@@ -82,18 +83,25 @@ class ModelTrainer:
         self.tuned_params: Dict[str, Any] = self._load_tuned_params()
 
     def _load_tuned_params(self) -> Dict[str, Any]:
-        """Loads Optuna-tuned hyper-parameters for this pollutant, if available."""
-        path = get_tuned_params_path(self.pollutant)
-        if not path.exists():
-            logger.info("No tuned hyper-parameters at %s — using default model config.", path)
-            return {}
-        try:
-            data = load_yaml_config(path)
-            logger.info("Loaded tuned hyper-parameters from %s", path)
-            return data.get("tuned", {}) or {}
-        except Exception as exc:  # pragma: no cover - defensive
-            logger.warning("Failed to load tuned params from %s: %s", path, exc)
-            return {}
+        """Loads Optuna-tuned hyper-parameters for this pollutant, if available.
+
+        Reads the primary YAML from the OUTPUTS dir; falls back to the bundled
+        default in configs/ when no output copy exists.
+        """
+        for path in (get_tuned_params_path(self.pollutant), get_tuned_params_default_path(self.pollutant)):
+            if not path.exists():
+                continue
+            try:
+                data = load_yaml_config(path)
+                # Only entries that actually contain tuned combos count.
+                if data.get("tuned"):
+                    logger.info("Loaded tuned hyper-parameters from %s", path)
+                    return data.get("tuned", {}) or {}
+                continue
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.warning("Failed to load tuned params from %s: %s", path, exc)
+        logger.info("No tuned hyper-parameters found — using default model config.")
+        return {}
 
     def _tuned_override(self, feature_set: str, provider: str) -> Optional[Dict[str, Dict[str, Any]]]:
         """Returns the tuned model-params dict for a (feature set, provider) key, if present."""

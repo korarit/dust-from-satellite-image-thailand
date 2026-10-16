@@ -1605,8 +1605,9 @@ def run_phase_4_full(
 
     # --------------------------------------------------------------------------
     # 0. [Optional] Optuna hyperparameter tuning on the 2 km reference grid.
-    #    Best params are written to configs/tuned_params_<pol>.yaml and reused by
-    #    every resolution / provider below (the trainer loads them on construction).
+    #    Best params are written to {outputs}/<pol>/tuned_params_<pol>.yaml (persistent
+    #    storage) and reused by every resolution / provider below (the trainer loads
+    #    them on construction; configs/ holds only a bundled default fallback).
     # --------------------------------------------------------------------------
     if tune:
         from src.models.hyperparameter_tuner import run_optuna_tuning, DEFAULT_FEATURE_SETS

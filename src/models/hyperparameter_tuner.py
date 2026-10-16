@@ -6,7 +6,8 @@ Shared, pipeline-callable tuning core:
 - Tunes base learners on the 2 km reference grid per feature set x provider.
 - Objective: hold-out MAE (single seeded 85/15 split -- NO K-Fold).
 - Persists full trial history (params + metrics) as CSV and writes the best
-  parameters to ``configs/tuned_params_<pollutant>.yaml`` for pipeline reuse.
+  parameters to ``{outputs}/<pollutant>/tuned_params_<pollutant>.yaml`` (persistent
+  storage; configs/ holds only a bundled default fallback).
 
 Optuna is imported lazily so the main pipeline keeps working without it
 (unless tuning is explicitly requested).
@@ -26,6 +27,7 @@ import yaml
 from src.config.paths import (
     get_reports_dir,
     get_tuned_params_path,
+    get_tuned_params_default_path,
 )
 from src.features import (
     FULL_MULTIMODAL_COLUMNS,
@@ -230,7 +232,7 @@ def run_optuna_tuning(
 ) -> Dict[str, Any]:
     """
     Tunes base learners on the supplied 2 km training dataframe and writes the best
-    parameters to ``configs/tuned_params_<pollutant>.yaml`` (returned as a dict).
+    parameters to ``{outputs}/<pollutant>/tuned_params_<pollutant>.yaml`` (returned as a dict).
 
     Returns a mapping ``{"<feature_set>__<provider>": {model_key: params}}``.
 
@@ -290,18 +292,22 @@ def run_optuna_tuning(
     # combos missing from the checkpoint are tuned fresh.
     # --------------------------------------------------------------------------
     tuned_prev: Dict[str, Dict[str, Any]] = {}
-    if out_yaml.exists():
+    for _yaml_src in (out_yaml, get_tuned_params_default_path(pol)):
+        if tuned_prev:
+            break
+        if not _yaml_src.exists():
+            continue
         try:
-            with open(out_yaml, "r", encoding="utf-8") as f:
+            with open(_yaml_src, "r", encoding="utf-8") as f:
                 _prev_payload = yaml.safe_load(f) or {}
             tuned_prev = _prev_payload.get("tuned") or {}
+            if tuned_prev:
+                _prev_total = sum(len(v) for v in tuned_prev.values())
+                logger.info("⏩ Resume: %d combos already tuned in %s -> will be skipped",
+                            _prev_total, _yaml_src)
         except Exception as exc:
-            logger.warning("Could not read existing checkpoint %s (%s); tuning from scratch.", out_yaml, exc)
+            logger.warning("Could not read existing checkpoint %s (%s); tuning from scratch.", _yaml_src, exc)
             tuned_prev = {}
-        if tuned_prev:
-            _prev_total = sum(len(v) for v in tuned_prev.values())
-            logger.info("⏩ Resume: %d combos already tuned in %s -> will be skipped",
-                        _prev_total, out_yaml)
     tuned = {k: dict(v) for k, v in tuned_prev.items()}
     # Preserve summary rows (metrics) of previously completed combos so the CSV
     # checkpoint stays complete across resumed runs.

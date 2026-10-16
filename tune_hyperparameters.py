@@ -4,8 +4,8 @@ Thailand Dust Prediction Satellite (Multi-Resolution PM2.5 Nowcasting)
 
 Thin CLI wrapper over ``src.models.hyperparameter_tuner.run_optuna_tuning``:
 loads the unified feature matrix, uses the temporal TRAIN split (2 km reference),
-and writes the best parameters to ``configs/tuned_params_<pollutant>.yaml`` for
-pipeline reuse.
+and writes the best parameters to ``{outputs}/<pollutant>/tuned_params_<pollutant>.yaml``
+for pipeline reuse (configs/ holds only a bundled default fallback).
 
 Usage:
     python tune_hyperparameters.py --pollutant pm25 --trials 30 --subsample-frac 0.3
@@ -73,7 +73,7 @@ def main() -> None:
     parser.add_argument("--trials", type=int, default=25)
     parser.add_argument("--subsample-frac", type=float, default=0.3)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--output", default=None, help="Output YAML path (default: configs/tuned_params_<pollutant>.yaml)")
+    parser.add_argument("--output", default=None, help="Output YAML path (default: {outputs}/<pollutant>/tuned_params_<pollutant>.yaml)")
     args = parser.parse_args()
 
     pol = args.pollutant.lower()
