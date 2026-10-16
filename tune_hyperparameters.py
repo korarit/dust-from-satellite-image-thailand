@@ -35,6 +35,8 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
     handlers=[logging.StreamHandler(sys.stdout)],
 )
+for _noisy in ("interpret", "interpret.utils._native", "interpret.utils._compressed_dataset", "interpret.glassbox._ebm._boost"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
 logger = logging.getLogger("tune_hyperparameters")
 
 
