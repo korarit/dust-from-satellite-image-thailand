@@ -189,12 +189,19 @@ class ModelTrainer:
         # P0-1 fix: derive GroupKFold groups (station/cell/province) from train_df
         # aligned to the filtered X rows. Falls back to None -> row KFold with warning.
         groups = None
+        group_col_used = "auto"
         try:
             from src.features.feature_matrix_builder import get_group_labels
             _valid_idx = train_df[~train_df[self.target_col].isna()].index
-            _grp_all = get_group_labels(train_df.loc[_valid_idx])
+            _sub = train_df.loc[_valid_idx]
+            if "station_code" in _sub.columns:
+                _grp_all = get_group_labels(_sub, group_col="station_code")
+                group_col_used = "station_code"
+            else:
+                _grp_all = get_group_labels(_sub)
+                group_col_used = "auto-fallback"
             groups = _grp_all
-            logger.info("GroupKFold groups: %d unique (col auto-detected).", len(set(groups)))
+            logger.info("GroupKFold groups: %d unique (col=%s).", len(set(groups)), group_col_used)
         except Exception as exc:
             logger.warning("Could not derive GroupKFold groups; using row split: %s", exc)
 
@@ -656,6 +663,7 @@ class ModelTrainer:
         target_providers: Optional[List[str]] = None,
         include_combined: bool = True,
         min_samples_per_provider: int = 4,
+        cv: int = 3,
     ) -> Dict[str, Any]:
         """
         Executes Multi-Resolution Benchmark partitioned by Ground Truth Provider:
@@ -736,10 +744,12 @@ class ModelTrainer:
                                    prov_name, res_label, len(sub_train), min_samples_per_provider)
                     continue
 
-                # Fast direct training (no K-Fold): single 85/15 holdout split
+                # GroupKFold cv=3 (was single 85/15 holdout): tuned hyper-params
+                # from output-dir are still applied via config; only the
+                # validation split changes, no retuning needed.
                 ensemble = self.train_suite(
                     train_df=sub_train,
-                    cv=1,
+                    cv=cv,
                     feature_cols=feature_cols,
                     experiment_id=exp_id,
                 )
@@ -858,6 +868,7 @@ class ModelTrainer:
         min_samples_per_provider: int = 4,
         cross_provider_eval: bool = True,
         save_checkpoints: bool = True,
+        cv: int = 3,
     ) -> Dict[str, Any]:
         """
         Production training partitioned by ground-truth provider, run for every
@@ -950,12 +961,14 @@ class ModelTrainer:
                         continue
 
                     # Reuse 2 km-tuned hyper-parameters for this (feature set, provider)
+                    # (loaded from output-dir; cv change does NOT invalidate them,
+                    # no retuning needed — only the validation split changes).
                     override = self._tuned_override(fs_label, prov_key)
 
-                    # Fast direct training (no K-Fold): single 85/15 holdout split
+                    # GroupKFold cv=3 (was cv=1 single 85/15 holdout)
                     ensemble = self.train_suite(
                         train_df=sub_train,
-                        cv=1,
+                        cv=cv,
                         feature_cols=active_cols,
                         experiment_id=exp_id,
                         model_params_override=override,
@@ -973,6 +986,31 @@ class ModelTrainer:
                                 prov_display, ens_m.get("mae", 0.0), ens_m.get("rmse", 0.0),
                                 ens_m.get("r2", 0.0), ens_m.get("pearson_r", 0.0), ens_m.get("aqi_acc", 0.0))
                     logger.info("  • Stacking Weights: %s", {k: round(v, 4) for k, v in ensemble.weights.items()})
+
+                    # OOT evaluation (2026 hold-out passed via test_matrices_by_res):
+                    # same provider scope as training, never seen during fit/OOF.
+                    oot_m: Dict[str, Any] = {}
+                    oot_n = 0
+                    if test_df is not None and len(test_df) >= 2:
+                        if is_comb:
+                            sub_oot = test_df[test_df["provider"].isin(norm_providers)].copy()
+                        else:
+                            sub_oot = test_df[test_df["provider"] == prov_name].copy()
+                        if len(sub_oot) >= 2:
+                            try:
+                                X_oot, y_oot, _ = self.prepare_data(sub_oot, active_cols)
+                                oot_m = compute_dust_metrics(y_oot, ensemble.predict(X_oot), pollutant=self.pollutant)
+                                oot_n = int(len(X_oot))
+                                logger.info("  • %-26s OOT | MAE: %6.3f | RMSE: %6.3f | R²: %6.4f | Pearson: %6.4f | AQI: %5.2f%% (N=%d)",
+                                            prov_display, oot_m.get("mae", 0.0), oot_m.get("rmse", 0.0),
+                                            oot_m.get("r2", 0.0), oot_m.get("pearson_r", 0.0),
+                                            oot_m.get("aqi_acc", 0.0), oot_n)
+                            except Exception as exc:
+                                logger.warning("    ⚠️ Skipping OOT eval for %s: %s", exp_id, exc)
+                        else:
+                            logger.info("  • %-26s OOT | no matching 2026 rows (N=%d)", prov_display, len(sub_oot))
+                    else:
+                        logger.info("  • %-26s OOT | no test_matrices_by_res passed — OOT skipped", prov_display)
 
                     summary_rows.append({
                         "experiment": exp_id,
@@ -992,6 +1030,12 @@ class ModelTrainer:
                         "weight_catboost": round(ensemble.weights.get("catboost", 0.0), 3),
                         "weight_xgboost": round(ensemble.weights.get("xgboost", 0.0), 3),
                         "weight_rf": round(ensemble.weights.get("random_forest", 0.0), 3),
+                        "oot_n": oot_n,
+                        "oot_mae": oot_m.get("mae", 0.0) if oot_m else 0.0,
+                        "oot_rmse": oot_m.get("rmse", 0.0) if oot_m else 0.0,
+                        "oot_r2": oot_m.get("r2", 0.0) if oot_m else 0.0,
+                        "oot_pearson_r": oot_m.get("pearson_r", 0.0) if oot_m else 0.0,
+                        "oot_aqi_acc": oot_m.get("aqi_acc", 0.0) if oot_m else 0.0,
                     })
 
                     # Cross-provider generalization (train on one provider, predict the others)
@@ -1062,14 +1106,17 @@ class ModelTrainer:
             "",
             "## 1. Per-Provider Production Training Summary",
             "",
-            "| Experiment | Resolution | Feature Set | Provider | N | **Ensemble MAE** | RMSE | R² | Pearson r | AQI Acc (%) |",
+            "> OOF = GroupKFold cv=3 in-period (cross-station). OOT = 2026 hold-out via test_matrices_by_res, same provider scope, never seen in fit.",
+            "> Tuned hyper-params are reused from output-dir as-is; cv change does not require retuning.",
+            "",
+            "| Experiment | Resolution | Feature Set | Provider | N | **OOF MAE** | OOF R² | **OOT MAE** | OOT R² | OOT N |",
             "| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |",
         ]
         for _, r in summary_df.iterrows():
             md_lines.append(
                 f"| **{r['experiment']}** | {r['resolution_name']} | {r['feature_set']} | {r['provider']} | {r['n_samples']} | "
-                f"**{r['ensemble_mae']:.2f}** | {r['ensemble_rmse']:.2f} | {r['ensemble_r2']:.3f} | "
-                f"{r['ensemble_pearson_r']:.4f} | {r['ensemble_aqi_acc']:.2f} |"
+                f"**{r['ensemble_mae']:.2f}** | {r['ensemble_r2']:.3f} | "
+                f"**{r.get('oot_mae', 0.0):.2f}** | {r.get('oot_r2', 0.0):.3f} | {int(r.get('oot_n', 0))} |"
             )
 
         md_lines.append("")
