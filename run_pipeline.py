@@ -1446,6 +1446,7 @@ def run_phase_4_full(
     tune_models: Optional[List[str]] = None,
     tune_providers: Optional[List[str]] = None,
     tune_feature_sets: Optional[List[str]] = None,
+    per_model_checkpoint: bool = False,
 ) -> Dict[str, Any]:
     """
     Executes Phase 4 Full Multi-Year Model Suite & Ensemble Training:
@@ -1671,6 +1672,7 @@ def run_phase_4_full(
         include_combined=True,
         cross_provider_eval=True,
         save_checkpoints=True,
+        per_model_checkpoint=per_model_checkpoint,
     )
 
     # Provider matrix visual diagnostics:
@@ -1819,6 +1821,11 @@ def main():
         help="Cadence in hours for satellite sampling in full mode (default: 3 hours)"
     )
     parser.add_argument(
+        "--checkpoint",
+        action="store_true",
+        help="Save a per-model checkpoint after each base learner finishes (and resume from it on restart). Without it, only the final ensemble is saved per experiment."
+    )
+    parser.add_argument(
         "--audit",
         action="store_true",
         help="Execute Phase 1B provenance and codebase integrity audit"
@@ -1934,6 +1941,7 @@ def main():
                     pollutant=p, split_date=args.split_date,
                     tune=args.tune, tune_trials=args.tune_trials,
                     tune_subsample_frac=args.tune_subsample_frac,
+                    per_model_checkpoint=args.checkpoint,
                 )
         else:
             sample_dt = pd.Timestamp(args.start_date or "2026-10-12 14:00:00", tz="UTC")
@@ -1958,6 +1966,7 @@ def main():
                     pollutant=p, split_date=args.split_date,
                     tune=args.tune, tune_trials=args.tune_trials,
                     tune_subsample_frac=args.tune_subsample_frac,
+                    per_model_checkpoint=args.checkpoint,
                 )
             else:
                 run_phase_4_smoke_test(sample_dt, pollutant=p, cadence_hours=args.cadence_hours)
@@ -1989,6 +1998,7 @@ def main():
                 pollutant=p, split_date=args.split_date,
                 tune=args.tune, tune_trials=args.tune_trials,
                 tune_subsample_frac=args.tune_subsample_frac,
+                per_model_checkpoint=args.checkpoint,
             )
     elif args.start_date and args.end_date:
         start_dt = pd.Timestamp(args.start_date, tz="UTC")

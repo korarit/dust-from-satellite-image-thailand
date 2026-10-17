@@ -126,6 +126,8 @@ class DustStackingEnsemble(BaseDustModel):
         random_state: int = 42,
         benchmark_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
         groups: Optional[Union[pd.Series, np.ndarray, List[str]]] = None,
+        checkpoint_dir: Optional[Union[str, Path]] = None,
+        resume_from_checkpoint: bool = True,
     ) -> "DustStackingEnsemble":
         """
         Fits the ensemble using K-Fold Out-Of-Fold (OOF) stacking:
@@ -139,6 +141,15 @@ class DustStackingEnsemble(BaseDustModel):
         If ``benchmark_callback`` is provided, it is invoked immediately after each
         base learner finishes training, receiving that model's benchmark record
         (metrics, estimator name, fit time) for the current resolution/experiment.
+
+        Per-model checkpoint (Colab crash-safety): pass ``checkpoint_dir`` to save
+        every base learner to ``{model_key}_model_{pollutant}.joblib`` immediately
+        after it finishes training (instead of only saving the whole ensemble at
+        the end). A ``checkpoint_progress_{pollutant}.json`` manifest tracks what
+        is done; with ``resume_from_checkpoint=True`` (default) a restarted run
+        reloads finished models (and the KFold OOF matrix) instead of retraining.
+        Stale checkpoints (different row count / features / hyper-params / cv mode)
+        are ignored and retrained.
         """
         X_arr, f_names = self._prepare_inputs(X, feature_names)
         y_arr = self._prepare_target(y)
@@ -150,6 +161,18 @@ class DustStackingEnsemble(BaseDustModel):
 
         n_samples = len(y_arr)
         effective_cv = min(cv, n_samples)
+        ckpt_mode = "holdout" if effective_cv < 2 else "kfold"
+        ckpt_dir: Optional[Path] = Path(checkpoint_dir) if checkpoint_dir is not None else None
+        ckpt_manifest: Dict[str, Any] = {}
+        if ckpt_dir is not None:
+            ckpt_dir.mkdir(parents=True, exist_ok=True)
+            ckpt_manifest = self._read_ckpt_manifest(self._ckpt_manifest_path(ckpt_dir))
+            if not self._ckpt_matches(ckpt_manifest, n_samples, f_names, ckpt_mode, cv):
+                if ckpt_manifest:
+                    logger.info("Checkpoint manifest mismatch (data/params/mode changed); starting fresh in %s.", ckpt_dir)
+                ckpt_manifest = {"completed_folds": [], "completed_models": []}
+            elif ckpt_manifest.get("status") == "complete":
+                logger.info("Checkpoint %s already complete; resuming still re-validates weights.", ckpt_dir)
         if effective_cv < 2:
             logger.info("Fast Direct Training Mode (No K-Fold): Training Quartet on %d samples...", n_samples)
             # P0-1 fix: group-aware holdout when groups supplied (no station in both sides).
@@ -180,10 +203,30 @@ class DustStackingEnsemble(BaseDustModel):
 
             for m_idx, m_key in enumerate(MODEL_KEYS, 1):
                 model = self.base_models[m_key]
-                logger.info("  [%d/%d] Training %s on %d samples...", m_idx, len(MODEL_KEYS), model.name, len(X_tr))
-                t_start = time.perf_counter()
-                model.fit(X_tr, y_tr, eval_set=(X_vl, y_vl), feature_names=self.feature_names_)
-                t_elapsed = time.perf_counter() - t_start
+                ckpt_hit = (
+                    ckpt_dir is not None and resume_from_checkpoint
+                    and m_key in ckpt_manifest.get("completed_models", [])
+                    and self._ckpt_model_path(ckpt_dir, m_key).exists()
+                )
+                if ckpt_hit:
+                    try:
+                        model = self._load_ckpt_base_model(m_key, self._ckpt_model_path(ckpt_dir, m_key))
+                        self.base_models[m_key] = model
+                        logger.info("  ↩️ [%d/%d] %-14s resumed from checkpoint (no retrain).",
+                                    m_idx, len(MODEL_KEYS), model.name)
+                        t_elapsed = 0.0
+                    except Exception as exc:
+                        logger.warning("  ⚠️ [%d/%d] %-14s checkpoint load failed (%s); retraining.",
+                                        m_idx, len(MODEL_KEYS), model.name, exc)
+                        ckpt_hit = False
+                if not ckpt_hit:
+                    logger.info("  [%d/%d] Training %s on %d samples...", m_idx, len(MODEL_KEYS), model.name, len(X_tr))
+                    t_start = time.perf_counter()
+                    model.fit(X_tr, y_tr, eval_set=(X_vl, y_vl), feature_names=self.feature_names_)
+                    t_elapsed = time.perf_counter() - t_start
+                    if ckpt_dir is not None:
+                        self._save_ckpt_base_model(ckpt_dir, m_key, model, ckpt_manifest,
+                                                   n_samples, f_names, ckpt_mode, cv)
 
                 preds = model.predict(X_vl)
                 val_preds_matrix[:, m_idx - 1] = preds
@@ -261,6 +304,8 @@ class DustStackingEnsemble(BaseDustModel):
                 self.oof_predictions_["observed_pm25"] = y_vl
 
             self.is_fitted_ = True
+            if ckpt_dir is not None:
+                self._mark_ckpt_complete(ckpt_dir, ckpt_manifest, n_samples, f_names, ckpt_mode, cv)
             return self
 
         # ----------------------------------------------------------------------
@@ -281,7 +326,25 @@ class DustStackingEnsemble(BaseDustModel):
             splitter = KFold(n_splits=effective_cv, shuffle=True, random_state=random_state)
             splits = splitter.split(X_arr)
             logger.info("Executing %d-Fold Cross-Validation for OOF Stacking Matrix...", effective_cv)
+        # KFold resume: reload the persisted OOF matrix and skip finished folds.
+        # Splits are deterministic (GroupKFold / seeded KFold) so fold indices align.
+        done_folds = set(ckpt_manifest.get("completed_folds", [])) if ckpt_dir is not None else set()
+        if ckpt_dir is not None and done_folds and resume_from_checkpoint:
+            try:
+                _re = np.load(self._ckpt_oof_path(ckpt_dir))
+                if _re.shape == oof_matrix.shape:
+                    oof_matrix = _re.astype(np.float32)
+                    logger.info("  ↩️ Resuming OOF matrix from checkpoint (folds done: %s).", sorted(done_folds))
+                else:
+                    logger.warning("  ⚠️ OOF checkpoint shape mismatch; recomputing all folds.")
+                    done_folds = set()
+            except Exception as exc:
+                logger.warning("  ⚠️ Could not load OOF checkpoint (%s); recomputing all folds.", exc)
+                done_folds = set()
         for fold_idx, (train_idx, val_idx) in enumerate(splits):
+            if fold_idx in done_folds:
+                logger.info(">>> [Fold %d/%d] Skipped (checkpoint).", fold_idx + 1, effective_cv)
+                continue
             X_tr, y_tr = X_arr[train_idx], y_arr[train_idx]
             X_vl, y_vl = X_arr[val_idx], y_arr[val_idx]
 
@@ -296,6 +359,14 @@ class DustStackingEnsemble(BaseDustModel):
                 oof_matrix[val_idx, m_idx - 1] = fold_model.predict(X_vl)
                 logger.info("  ✓ [Fold %d/%d] [%d/4] %s completed in %.1fs",
                             fold_idx + 1, effective_cv, m_idx, fold_model.name, t_felapsed)
+            if ckpt_dir is not None:
+                try:
+                    np.save(self._ckpt_oof_path(ckpt_dir), oof_matrix)
+                except Exception as exc:
+                    logger.warning("Could not save OOF checkpoint: %s", exc)
+                done_folds.add(fold_idx)
+                ckpt_manifest["completed_folds"] = sorted(done_folds)
+                self._write_ckpt_manifest(ckpt_dir, ckpt_manifest, n_samples, f_names, ckpt_mode, cv)
 
         # Store OOF DataFrame
         self.oof_predictions_ = pd.DataFrame(
@@ -373,11 +444,30 @@ class DustStackingEnsemble(BaseDustModel):
         # ----------------------------------------------------------------------
         logger.info("Training Quartet Base Learners on 100%% of training dataset...")
         for m_idx, (m_key, m) in enumerate(self.base_models.items(), 1):
-            logger.info("  [100%% Fit %d/4] Training %s on %d samples...", m_idx, m.name, len(X_arr))
-            t_mstart = time.perf_counter()
-            m.fit(X_arr, y_arr, eval_set=eval_set, feature_names=self.feature_names_)
-            t_mfit = time.perf_counter() - t_mstart
-            logger.info("  ✓ [100%% Fit %d/4] %s completed in %.1fs", m_idx, m.name, t_mfit)
+            ckpt_hit = (
+                ckpt_dir is not None and resume_from_checkpoint
+                and m_key in ckpt_manifest.get("completed_models", [])
+                and self._ckpt_model_path(ckpt_dir, m_key).exists()
+            )
+            if ckpt_hit:
+                try:
+                    m = self._load_ckpt_base_model(m_key, self._ckpt_model_path(ckpt_dir, m_key))
+                    self.base_models[m_key] = m
+                    logger.info("  ↩️ [100%% Fit %d/4] %s resumed from checkpoint (no retrain).", m_idx, m.name)
+                    t_mfit = 0.0
+                except Exception as exc:
+                    logger.warning("  ⚠️ [100%% Fit %d/4] %s checkpoint load failed (%s); retraining.",
+                                   m_idx, m.name, exc)
+                    ckpt_hit = False
+            if not ckpt_hit:
+                logger.info("  [100%% Fit %d/4] Training %s on %d samples...", m_idx, m.name, len(X_arr))
+                t_mstart = time.perf_counter()
+                m.fit(X_arr, y_arr, eval_set=eval_set, feature_names=self.feature_names_)
+                t_mfit = time.perf_counter() - t_mstart
+                logger.info("  ✓ [100%% Fit %d/4] %s completed in %.1fs", m_idx, m.name, t_mfit)
+                if ckpt_dir is not None:
+                    self._save_ckpt_base_model(ckpt_dir, m_key, m, ckpt_manifest,
+                                               n_samples, f_names, ckpt_mode, cv)
 
             if benchmark_callback is not None:
                 mm = self.oof_metrics_.get(m_key, {})
@@ -397,7 +487,145 @@ class DustStackingEnsemble(BaseDustModel):
                 })
 
         self.is_fitted_ = True
+        if ckpt_dir is not None:
+            self._mark_ckpt_complete(ckpt_dir, ckpt_manifest, n_samples, f_names, ckpt_mode, cv)
         return self
+
+    # ------------------------------------------------------------------
+    # Per-model checkpoint helpers (crash-safe training + resume)
+    # ------------------------------------------------------------------
+    def _ckpt_manifest_path(self, ckpt_dir: Path) -> Path:
+        return ckpt_dir / f"checkpoint_progress_{self.pollutant.lower()}.json"
+
+    def _ckpt_model_path(self, ckpt_dir: Path, model_key: str) -> Path:
+        return ckpt_dir / f"{model_key}_model_{self.pollutant.lower()}.joblib"
+
+    def _ckpt_oof_path(self, ckpt_dir: Path) -> Path:
+        return ckpt_dir / f"oof_matrix_{self.pollutant.lower()}.npy"
+
+    @staticmethod
+    def _read_ckpt_manifest(path: Path) -> Dict[str, Any]:
+        try:
+            if path.exists():
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, dict):
+                    return data
+        except Exception as exc:  # checkpoint must never break training
+            logger.warning("Could not read checkpoint manifest %s: %s", path, exc)
+        return {}
+
+    def _ckpt_fingerprint(self) -> str:
+        """Fingerprint of current hyper-params; stale checkpoints are retrained."""
+        try:
+            parts = {k: (getattr(m, "params", {}) or {}) for k, m in self.base_models.items()}
+            return json.dumps(parts, sort_keys=True, default=str)
+        except Exception:
+            return ""
+
+    def _ckpt_matches(
+        self,
+        manifest: Dict[str, Any],
+        n_rows: int,
+        feature_names: List[str],
+        mode: str,
+        cv: int,
+    ) -> bool:
+        if not manifest:
+            return False
+        try:
+            return (
+                manifest.get("n_train_rows") == int(n_rows)
+                and list(manifest.get("feature_names", [])) == list(feature_names)
+                and manifest.get("mode") == mode
+                and manifest.get("cv") == int(cv)
+                and manifest.get("params_fingerprint", "") == self._ckpt_fingerprint()
+            )
+        except Exception:
+            return False
+
+    def _write_ckpt_manifest(
+        self,
+        ckpt_dir: Path,
+        manifest: Dict[str, Any],
+        n_rows: int,
+        feature_names: List[str],
+        mode: str,
+        cv: int,
+    ) -> None:
+        manifest.update({
+            "experiment": self.name,
+            "pollutant": self.pollutant,
+            "n_train_rows": int(n_rows),
+            "feature_names": list(feature_names),
+            "mode": mode,
+            "cv": int(cv),
+            "params_fingerprint": self._ckpt_fingerprint(),
+        })
+        manifest.setdefault("completed_folds", [])
+        manifest.setdefault("completed_models", [])
+        manifest.setdefault("status", "in_progress")
+        try:
+            tmp = self._ckpt_manifest_path(ckpt_dir).with_suffix(".json.tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(manifest, f, indent=2, default=str)
+            tmp.replace(self._ckpt_manifest_path(ckpt_dir))
+        except Exception as exc:
+            logger.warning("Could not write checkpoint manifest: %s", exc)
+
+    def _save_ckpt_base_model(
+        self,
+        ckpt_dir: Path,
+        model_key: str,
+        model: BaseDustModel,
+        manifest: Dict[str, Any],
+        n_rows: int,
+        feature_names: List[str],
+        mode: str,
+        cv: int,
+    ) -> None:
+        try:
+            model.save(self._ckpt_model_path(ckpt_dir, model_key))
+            logger.info("  💾 [CKPT] saved %-14s -> %s", model_key, ckpt_dir.name)
+        except Exception as exc:
+            logger.warning("Could not save per-model checkpoint for %s: %s", model_key, exc)
+            return
+        done = manifest.get("completed_models", [])
+        if model_key not in done:
+            done.append(model_key)
+        manifest["completed_models"] = done
+        self._write_ckpt_manifest(ckpt_dir, manifest, n_rows, feature_names, mode, cv)
+
+    def _load_ckpt_base_model(self, model_key: str, path: Path) -> BaseDustModel:
+        model_classes = {
+            "lightgbm": LGBMDustModel,
+            "catboost": CatBoostDustModel,
+            "xgboost": XGBoostDustModel,
+            "extra_trees": ExtraTreesDustModel,
+            "figs": FIGSDustModel,
+            "nystroem": NystroemRidgeDustModel,
+            "random_forest": RandomForestDustModel,
+            "hist_gbr": HistGBRDustModel,
+            "ebm": EBMDustModel,
+        }
+        cls_type = model_classes.get(model_key)
+        if cls_type is None:
+            raise ValueError(f"Unknown model key: {model_key}")
+        return cls_type.load(path)
+
+    def _mark_ckpt_complete(
+        self,
+        ckpt_dir: Path,
+        manifest: Dict[str, Any],
+        n_rows: int,
+        feature_names: List[str],
+        mode: str,
+        cv: int,
+    ) -> None:
+        manifest["completed_models"] = [k for k in MODEL_KEYS]
+        manifest["weights"] = {k: float(v) for k, v in self.weights.items()}
+        manifest["status"] = "complete"
+        self._write_ckpt_manifest(ckpt_dir, manifest, n_rows, feature_names, mode, cv)
 
     def predict(self, X: Union[pd.DataFrame, np.ndarray]) -> np.ndarray:
         """

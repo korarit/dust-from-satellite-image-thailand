@@ -172,12 +172,17 @@ class ModelTrainer:
         cv: Optional[int] = None,
         experiment_id: str = "EXP-2KM",
         model_params_override: Optional[Dict[str, Dict[str, Any]]] = None,
+        per_model_checkpoint: bool = False,
     ) -> DustStackingEnsemble:
         """
         Trains the full 4-Model Suite and Stacking Ensemble on training data.
 
         ``model_params_override`` (optional) deep-merges Optuna-tuned parameters
         (mapping model_key -> params) on top of the base ``config['models']``.
+
+        ``per_model_checkpoint`` saves every base learner to the experiment
+        checkpoint dir immediately after it finishes (and resumes from it on
+        restart) instead of only saving the whole ensemble at the end.
         """
         logger.info("=" * 70)
         logger.info("🏋️ TRAINING MODEL SUITE (%s): %s", self.pollutant.upper(), experiment_id)
@@ -235,6 +240,14 @@ class ModelTrainer:
                 rec.get("pearson_r", 0.0), rec.get("aqi_acc", 0.0),
             )
 
+        # Save checkpoint with pollutant suffix: e.g. exp_2km_pm25, exp_2km_pm10
+        exp_clean = experiment_id.lower().replace("-", "_")
+        chk_name = exp_clean if exp_clean.endswith(f"_{self.pollutant}") else f"{exp_clean}_{self.pollutant}"
+        checkpoint_dir = self.output_dir / chk_name
+        if per_model_checkpoint:
+            checkpoint_dir.mkdir(parents=True, exist_ok=True)
+            logger.info("Per-model checkpoint enabled -> %s (resume on restart).", checkpoint_dir)
+
         ensemble.fit(
             X=X,
             y=y,
@@ -243,12 +256,9 @@ class ModelTrainer:
             random_state=self.random_state,
             benchmark_callback=_on_base_model_trained,
             groups=groups,
+            checkpoint_dir=checkpoint_dir if per_model_checkpoint else None,
         )
 
-        # Save checkpoint with pollutant suffix: e.g. exp_2km_pm25, exp_2km_pm10
-        exp_clean = experiment_id.lower().replace("-", "_")
-        chk_name = exp_clean if exp_clean.endswith(f"_{self.pollutant}") else f"{exp_clean}_{self.pollutant}"
-        checkpoint_dir = self.output_dir / chk_name
         ensemble.save(checkpoint_dir)
         logger.info("Model checkpoint successfully saved to: %s", checkpoint_dir)
 
@@ -664,6 +674,7 @@ class ModelTrainer:
         include_combined: bool = True,
         min_samples_per_provider: int = 4,
         cv: int = 3,
+        per_model_checkpoint: bool = False,
     ) -> Dict[str, Any]:
         """
         Executes Multi-Resolution Benchmark partitioned by Ground Truth Provider:
@@ -752,6 +763,7 @@ class ModelTrainer:
                     cv=cv,
                     feature_cols=feature_cols,
                     experiment_id=exp_id,
+                    per_model_checkpoint=per_model_checkpoint,
                 )
                 benchmark_results["trained_ensembles"][exp_id] = ensemble
 
@@ -869,6 +881,7 @@ class ModelTrainer:
         cross_provider_eval: bool = True,
         save_checkpoints: bool = True,
         cv: int = 3,
+        per_model_checkpoint: bool = False,
     ) -> Dict[str, Any]:
         """
         Production training partitioned by ground-truth provider, run for every
@@ -972,6 +985,7 @@ class ModelTrainer:
                         feature_cols=active_cols,
                         experiment_id=exp_id,
                         model_params_override=override,
+                        per_model_checkpoint=per_model_checkpoint,
                     )
                     benchmark_results["trained_ensembles"][exp_id] = ensemble
 

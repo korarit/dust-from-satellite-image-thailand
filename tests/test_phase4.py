@@ -13,6 +13,7 @@ Verifies:
 """
 
 import sys
+import json
 import shutil
 from pathlib import Path
 import numpy as np
@@ -741,6 +742,64 @@ def test_provider_partitioned_training_and_cross_provider(deterministic_training
     pairs = set(zip(cross_df["train_provider"], cross_df["test_provider"]))
     assert ("Air4Thai", "AirGradient") in pairs
     assert ("AirGradient", "Air4Thai") in pairs
+
+
+def test_per_model_checkpoint_and_resume(deterministic_training_data, tmp_path):
+    """Verifies per-model checkpoints are saved after each learner and reused on restart."""
+    df, f_cols, target = deterministic_training_data
+
+    trainer = ModelTrainer(output_dir=tmp_path / "models")
+    trainer.config = {
+        "general": {"target_column": target, "random_state": 42, "cv_splits": 2},
+        "models": {
+            "lightgbm": {"n_estimators": 5, "learning_rate": 0.1, "min_child_samples": 2},
+            "catboost": {"iterations": 5, "learning_rate": 0.1, "depth": 2},
+            "xgboost": {"n_estimators": 5, "learning_rate": 0.1, "max_depth": 2},
+            "random_forest": {"n_estimators": 5, "max_depth": 3, "min_samples_split": 2},
+        },
+        "features": {"monotonic_constraints": {}},
+    }
+
+    ens1 = trainer.train_suite(
+        train_df=df.copy(), feature_cols=f_cols, cv=1,
+        experiment_id="EXP-CKPT", per_model_checkpoint=True,
+    )
+    assert ens1.is_fitted_
+
+    ckpt_dir = tmp_path / "models" / "exp_ckpt_pm25"
+    for m_key in MODEL_KEYS:
+        assert (ckpt_dir / f"{m_key}_model_pm25.joblib").exists(), m_key
+    with open(ckpt_dir / "checkpoint_progress_pm25.json", "r", encoding="utf-8") as f:
+        manifest = json.load(f)
+    assert manifest["status"] == "complete"
+    assert set(manifest["completed_models"]) == set(MODEL_KEYS)
+
+    # Second run with identical data/params must resume (identical predictions).
+    ens2 = trainer.train_suite(
+        train_df=df.copy(), feature_cols=f_cols, cv=1,
+        experiment_id="EXP-CKPT", per_model_checkpoint=True,
+    )
+    assert ens2.is_fitted_
+    # Same checkpoint artifacts reloaded: predictions equal up to
+    # float serialization noise from the joblib round-trip.
+    np.testing.assert_allclose(
+        ens1.predict(df[f_cols]), ens2.predict(df[f_cols]), rtol=1e-9, atol=1e-9,
+    )
+
+    # KFold path also checkpoints per model + the OOF matrix.
+    ens3 = trainer.train_suite(
+        train_df=df.copy(), feature_cols=f_cols, cv=2,
+        experiment_id="EXP-CKPT-KFOLD", per_model_checkpoint=True,
+    )
+    assert ens3.is_fitted_
+    ckpt_kfold = tmp_path / "models" / "exp_ckpt_kfold_pm25"
+    for m_key in MODEL_KEYS:
+        assert (ckpt_kfold / f"{m_key}_model_pm25.joblib").exists(), m_key
+    assert (ckpt_kfold / "oof_matrix_pm25.npy").exists()
+    with open(ckpt_kfold / "checkpoint_progress_pm25.json", "r", encoding="utf-8") as f:
+        manifest_k = json.load(f)
+    assert manifest_k["status"] == "complete"
+    assert manifest_k["mode"] == "kfold"
 
 
 def test_evaluation_plotter_provider_graphics(tmp_path):
