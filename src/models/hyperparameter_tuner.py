@@ -3,7 +3,9 @@ Optuna Hyperparameter Tuning Engine (Phase 4)
 Thailand Dust Prediction Satellite (Multi-Resolution PM2.5 Nowcasting)
 
 Shared, pipeline-callable tuning core:
-- Tunes base learners on the 2 km reference grid per feature set x provider.
+- Tunes base learners ONCE on the 2 km reference grid using a single reference
+  provider (``Air4Thai``) per feature set; that one parameter set is reused for
+  every provider/group downstream (no per-provider tuning).
 - Objective: hold-out MAE (single seeded 85/15 split -- NO K-Fold).
 - Persists full trial history (params + metrics) as CSV and writes the best
   parameters to ``{outputs}/<pollutant>/tuned_params_<pollutant>.yaml`` (persistent
@@ -54,6 +56,12 @@ DEFAULT_FEATURE_SETS: Dict[str, List[str]] = {
 }
 
 AUTHORIZED_PROVIDERS = ["Air4Thai", "AirGradient"]
+
+# Single reference provider: hyper-parameters are tuned ONCE on Air4Thai (the
+# densest, most reliable ground-truth network) and that one parameter set is
+# reused for every provider/group (AirGradient, Combined, cross-provider, ...)
+# instead of tuning each provider separately.
+REFERENCE_PROVIDER = "Air4Thai"
 
 
 def build_model(model_key: str, params: Dict[str, Any], monotonic_constraints: Dict[str, int]):
@@ -257,7 +265,7 @@ def run_optuna_tuning(
     pol = pollutant.lower()
     tgt_col = "observed_pm10" if pol == "pm10" else "observed_pm25"
     feature_sets = feature_sets or DEFAULT_FEATURE_SETS
-    providers = providers or ["Air4Thai", "AirGradient", "Combined"]
+    providers = providers or [REFERENCE_PROVIDER]
     models = models or list(MODEL_KEYS)
     out_yaml = Path(output_yaml) if output_yaml else get_tuned_params_path(pol)
 

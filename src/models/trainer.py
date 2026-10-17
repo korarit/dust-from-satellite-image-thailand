@@ -39,6 +39,7 @@ from src.features.feature_matrix_builder import (
 )
 from src.models.base_model import compute_dust_metrics
 from src.models.ensemble_model import DustStackingEnsemble, MODEL_KEYS
+from src.models.hyperparameter_tuner import REFERENCE_PROVIDER
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +80,8 @@ class ModelTrainer:
         # Accumulates per-base-learner benchmark records across resolutions/experiments
         self.per_model_benchmark_records: List[Dict[str, Any]] = []
 
-        # Optuna-tuned params (2 km reference) reused across resolutions/providers
+        # Optuna-tuned params (2 km Air4Thai reference) reused for every
+        # resolution/provider/group — a single parameter set for all groups.
         self.tuned_params: Dict[str, Any] = self._load_tuned_params()
 
     def _load_tuned_params(self) -> Dict[str, Any]:
@@ -104,9 +106,19 @@ class ModelTrainer:
         return {}
 
     def _tuned_override(self, feature_set: str, provider: str) -> Optional[Dict[str, Dict[str, Any]]]:
-        """Returns the tuned model-params dict for a (feature set, provider) key, if present."""
+        """Returns the tuned model-params dict to reuse for a (feature set, provider) key.
+
+        A SINGLE parameter set is tuned on the reference provider (Air4Thai) and
+        reused for every provider/group (AirGradient, Combined, cross-provider,
+        ...). The reference key is therefore preferred; an exact
+        (feature set, provider) key is only used as a fallback when no reference
+        params exist for that feature set.
+        """
         if not self.tuned_params:
             return None
+        ref_key = f"{feature_set}__{REFERENCE_PROVIDER.lower()}"
+        if ref_key in self.tuned_params:
+            return self.tuned_params[ref_key]
         key = f"{feature_set}__{str(provider).lower()}"
         return self.tuned_params.get(key)
 

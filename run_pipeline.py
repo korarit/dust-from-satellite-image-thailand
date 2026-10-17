@@ -1610,7 +1610,7 @@ def run_phase_4_full(
     #    them on construction; configs/ holds only a bundled default fallback).
     # --------------------------------------------------------------------------
     if tune:
-        from src.models.hyperparameter_tuner import run_optuna_tuning, DEFAULT_FEATURE_SETS
+        from src.models.hyperparameter_tuner import run_optuna_tuning, DEFAULT_FEATURE_SETS, REFERENCE_PROVIDER
 
         logger.info("\n" + "=" * 75)
         logger.info("🎛️ PHASE 4 HYPERPARAMETER TUNING (2 km reference) — %s", tgt_name)
@@ -1625,7 +1625,7 @@ def run_phase_4_full(
             pollutant=pol,
             base_config=_base_cfg,
             feature_sets=_fs,
-            providers=tune_providers or ["Air4Thai", "AirGradient", "Combined"],
+            providers=tune_providers or [REFERENCE_PROVIDER],
             models=tune_models or list(MODEL_KEYS),
             trials=tune_trials,
             subsample_frac=tune_subsample_frac,

@@ -68,7 +68,7 @@ def main() -> None:
     parser.add_argument("--split-date", default="2026-01-01", help="Temporal train/test cutoff (tuning uses TRAIN only).")
     parser.add_argument("--resolution-km", type=float, default=2.0)
     parser.add_argument("--feature-sets", default="full,pure_satellite", help="Comma list: full,pure_satellite")
-    parser.add_argument("--providers", default="Air4Thai,AirGradient,Combined", help="Comma list: Air4Thai,AirGradient,Combined")
+    parser.add_argument("--providers", default="Air4Thai", help="Comma list: Air4Thai,AirGradient,Combined (default: Air4Thai reference only)")
     parser.add_argument("--models", default=",".join(MODEL_KEYS), help=f"Comma list from: {MODEL_KEYS}")
     parser.add_argument("--trials", type=int, default=25)
     parser.add_argument("--subsample-frac", type=float, default=0.3)
