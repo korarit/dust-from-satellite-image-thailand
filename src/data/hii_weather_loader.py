@@ -16,8 +16,10 @@ Features:
 import os
 import io
 import sys
+import time
 import logging
 import urllib.request
+import urllib.error
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -109,10 +111,15 @@ class HIIWeatherLoader:
         year: int,
         month: int,
         station_code: str,
-        timeout: int = 15
+        timeout: int = 15,
+        retries: int = 2,
     ) -> Optional[bytes]:
         """
         Fetches the raw monthly CSV bytes for a station from HII Open Data catalog.
+
+        Retries transient network failures (timeout/connection reset) with
+        backoff; HTTP 404 (no data for this station/month) returns None
+        immediately without retrying.
         """
         if variable not in CATALOG_URLS:
             raise ValueError(f"Unsupported variable: {variable}. Must be 'pressure' or 'humidity'")
@@ -123,13 +130,21 @@ class HIIWeatherLoader:
             url,
             headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) DustPrediction/1.0"}
         )
-        try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                if resp.status == 200:
-                    return resp.read()
-        except Exception:
-            # Data not available for this station/month on HII server
-            return None
+        for attempt in range(retries + 1):
+            try:
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    if resp.status == 200:
+                        return resp.read()
+            except urllib.error.HTTPError as exc:
+                if exc.code == 404:
+                    return None  # No data for this station/month on HII server
+                logger.debug("HTTP %s for %s %s (attempt %d/%d)",
+                             exc.code, station_code, ym, attempt + 1, retries + 1)
+            except Exception as exc:
+                logger.debug("Fetch failed for %s %s (attempt %d/%d): %s",
+                             station_code, ym, attempt + 1, retries + 1, exc)
+            if attempt < retries:
+                time.sleep(1.0 * (attempt + 1))
         return None
 
     def parse_and_clean_csv(
@@ -281,19 +296,56 @@ class HIIWeatherLoader:
         )
         return merged
 
+    def select_stations(
+        self,
+        variable: str,
+        max_stations: Optional[int] = None,
+    ) -> List[str]:
+        """
+        Selects HII stations capable of ``variable`` (``has_pressure`` /
+        ``has_humidity`` flags in master metadata), sorted by station_code for
+        reproducibility. ``max_stations`` caps the list (None = all capable).
+        """
+        meta = self.get_metadata()
+        flag = "has_pressure" if variable == "pressure" else "has_humidity"
+        if flag in meta.columns:
+            capable = meta[meta[flag].fillna(False).astype(bool)]
+            if capable.empty:
+                logger.warning("No stations flagged %s; falling back to all %d metadata stations.",
+                               flag, len(meta))
+                capable = meta
+        else:
+            capable = meta
+        codes = sorted(capable["station_code"].astype(str).unique().tolist())
+        if max_stations is not None:
+            codes = codes[:max_stations]
+        logger.info("HII %s: selected %d/%d stations%s.", variable, len(codes), len(meta),
+                    f" (capped at {max_stations})" if max_stations is not None else "")
+        return codes
+
+    def _month_checkpoint_path(self, variable: str, year: int, month: int) -> Path:
+        return self.hii_dir / f"hii_{variable}_{year}_{month:02d}.parquet"
+
     def fetch_date_range(
         self,
         variable: str,
         start_date: pd.Timestamp,
         end_date: pd.Timestamp,
         station_codes: Optional[List[str]] = None,
-        max_workers: int = 8
+        max_workers: int = 8,
+        resume: bool = True,
     ) -> pd.DataFrame:
         """
         Fetches HII records across a date range (spanning multiple months/years).
+
+        With ``resume=True`` (default) each successfully fetched month is
+        checkpointed to ``hii_{variable}_{YYYY}_{MM}.parquet`` and skipped on
+        restart, so a Colab timeout does not lose completed months. Months
+        with zero records are NOT checkpointed as parquet (empty files are
+        ambiguous); they are re-attempted on the next run.
         """
         meta = self.get_metadata()
-        stations = station_codes or meta["station_code"].tolist()
+        stations = station_codes or self.select_stations(variable)
         
         start_dt = pd.to_datetime(start_date)
         end_dt = pd.to_datetime(end_date)
@@ -305,6 +357,18 @@ class HIIWeatherLoader:
 
         month_dfs = []
         for period in period_index:
+            ckpt = self._month_checkpoint_path(variable, period.year, period.month)
+            if resume and ckpt.exists() and ckpt.stat().st_size > 0:
+                try:
+                    cached = pd.read_parquet(ckpt)
+                    if not cached.empty:
+                        month_dfs.append(cached)
+                        logger.info("HII %s %s: resumed %d cached rows (skipped fetch).",
+                                    variable, f"{period.year}-{period.month:02d}", len(cached))
+                        continue
+                except Exception as exc:
+                    logger.warning("HII %s %s: unreadable checkpoint (%s); refetching.",
+                                   variable, f"{period.year}-{period.month:02d}", exc)
             df_m = self.fetch_and_harmonize(
                 variable=variable,
                 station_codes=stations,
@@ -314,6 +378,12 @@ class HIIWeatherLoader:
             )
             if not df_m.empty:
                 month_dfs.append(df_m)
+                if resume:
+                    try:
+                        df_m.to_parquet(ckpt, index=False)
+                    except Exception as exc:
+                        logger.warning("HII %s %s: checkpoint write failed (%s).",
+                                       variable, f"{period.year}-{period.month:02d}", exc)
 
         if not month_dfs:
             return pd.DataFrame()

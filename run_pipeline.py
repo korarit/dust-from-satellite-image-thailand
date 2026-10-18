@@ -990,6 +990,56 @@ def run_phase_5_smoke_test(target_dt: pd.Timestamp, pollutant: str = "pm25", cad
         sys.exit(1)
 
 
+def ingest_hii_full(
+    start_date: pd.Timestamp,
+    end_date: pd.Timestamp,
+    split_date: str = "2026-01-01",
+    stations: Optional[List[str]] = None,
+    hii_max_stations: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    Standalone HII ground weather ingestion (pressure & humidity):
+    full capable-station coverage, per-month resume checkpoints, and
+    train/test split. Used by ``run_phase_1_full`` and by ``--phase hii``.
+    """
+    ensure_directories()
+    hii_loader = HIIWeatherLoader(hii_dir=HII_DIR)
+    saved: Dict[str, str] = {}
+    try:
+        # Full capable-station coverage by default (was head(20), which yielded
+        # ~7 live stations). `stations` overrides; `hii_max_stations` caps.
+        if stations is not None:
+            query_stations = stations
+            hum_stations = stations
+        else:
+            query_stations = hii_loader.select_stations("pressure", max_stations=hii_max_stations)
+            hum_stations = hii_loader.select_stations("humidity", max_stations=hii_max_stations)
+
+        for var in ["pressure", "humidity"]:
+            logger.info("Fetching HII %s (%s to %s)...", var, start_date.date(), end_date.date())
+            hii_var_df = hii_loader.fetch_date_range(
+                variable=var,
+                start_date=start_date,
+                end_date=end_date,
+                station_codes=(query_stations if var == "pressure" else hum_stations)
+            )
+            if not hii_var_df.empty:
+                train_hii, test_hii = HIIWeatherLoader.split_train_test(hii_var_df, split_date=split_date)
+                logger.info("HII %s Split Summary:", var)
+                logger.info("  • Train (2024-2025): %d records", len(train_hii))
+                logger.info("  • Test  (2026)     : %d records", len(test_hii))
+
+                if not train_hii.empty:
+                    p = hii_loader.save_to_parquet(train_hii, var, f"hii_{var}_train_2024_2025.parquet")
+                    saved[f"{var}_train"] = str(p)
+                if not test_hii.empty:
+                    p = hii_loader.save_to_parquet(test_hii, var, f"hii_{var}_test_2026.parquet")
+                    saved[f"{var}_test"] = str(p)
+    except Exception as e:
+        logger.error("Error during HII telemetry ingestion: %s", e, exc_info=True)
+    return saved
+
+
 def run_phase_1_full(
     start_date: pd.Timestamp,
     end_date: pd.Timestamp,
@@ -1004,6 +1054,7 @@ def run_phase_1_full(
     provider: str = "all",
     train_segments: Optional[List[int]] = None,
     test_segments: Optional[List[int]] = None,
+    hii_max_stations: Optional[int] = None,
 ) -> None:
     """
     Executes Phase 1 Full Multi-Year Data Ingestion & Audit (2024 - 2026):
@@ -1087,30 +1138,13 @@ def run_phase_1_full(
     # 2. HII Ground Weather Telemetry & Temporal Split
     # ---------------------------------------------------------
     logger.info("--- Step 2: Ingesting HII Weather Telemetry (Pressure & Humidity) ---")
-    try:
-        meta = hii_loader.get_metadata()
-        query_stations = stations or meta["station_code"].head(20).tolist()  # Benchmark set or full
-
-        for var in ["pressure", "humidity"]:
-            logger.info("Fetching HII %s (%s to %s)...", var, start_date.date(), end_date.date())
-            hii_var_df = hii_loader.fetch_date_range(
-                variable=var,
-                start_date=start_date,
-                end_date=end_date,
-                station_codes=query_stations
-            )
-            if not hii_var_df.empty:
-                train_hii, test_hii = HIIWeatherLoader.split_train_test(hii_var_df, split_date=split_date)
-                logger.info("HII %s Split Summary:", var)
-                logger.info("  • Train (2024-2025): %d records", len(train_hii))
-                logger.info("  • Test  (2026)     : %d records", len(test_hii))
-
-                if not train_hii.empty:
-                    hii_loader.save_to_parquet(train_hii, var, f"hii_{var}_train_2024_2025.parquet")
-                if not test_hii.empty:
-                    hii_loader.save_to_parquet(test_hii, var, f"hii_{var}_test_2026.parquet")
-    except Exception as e:
-        logger.error("Error during Step 2 HII telemetry ingestion: %s", e, exc_info=True)
+    ingest_hii_full(
+        start_date=start_date,
+        end_date=end_date,
+        split_date=split_date,
+        stations=stations,
+        hii_max_stations=hii_max_stations,
+    )
 
     # ---------------------------------------------------------
     # 3. Himawari Satellite IR Bands Ingestion (5 Core Bands, Station-Centric)
@@ -1739,8 +1773,8 @@ def main():
         "--phase",
         type=str,
         default="1",
-        choices=["1", "1b", "2", "3", "4", "5", "all"],
-        help="Pipeline phase to execute (1: Acquisition & Audit, 1b: Gate only, 2: Spatial & Features, 3: Unified Matrix, 4: Model Suite & Ensemble, 5: Evaluation & Nowcast Maps, all: End-to-end)"
+        choices=["1", "1b", "2", "3", "4", "5", "hii", "all"],
+        help="Pipeline phase to execute (1: Acquisition & Audit, 1b: Gate only, 2: Spatial & Features, 3: Unified Matrix, 4: Model Suite & Ensemble, 5: Evaluation & Nowcast Maps, hii: HII weather ingestion only, all: End-to-end)"
     )
     parser.add_argument(
         "--pollutant",
@@ -1859,6 +1893,13 @@ def main():
         help="Maximum number of historical OpenAQ ground stations to query (e.g. 10, 20, 50)"
     )
     parser.add_argument(
+        "--hii-max-stations",
+        type=int,
+        default=None,
+        dest="hii_max_stations",
+        help="Cap on HII weather stations (default: all capable stations; e.g. 20 reproduces the old benchmark set)"
+    )
+    parser.add_argument(
         "--location-ids", "--locations",
         type=str,
         default=None,
@@ -1914,6 +1955,20 @@ def main():
     if args.audit or args.phase == "1b":
         success = run_phase_1b_verification()
         sys.exit(0 if success else 1)
+
+    if args.phase == "hii":
+        # HII-only ingestion: reloads pressure & humidity for all capable
+        # stations with per-month resume (safe to re-run after timeout).
+        start_dt = pd.Timestamp(args.start_date or "2024-01-01 00:00:00", tz="UTC")
+        end_dt = pd.Timestamp(args.end_date or "2026-09-30 23:59:59", tz="UTC")
+        saved = ingest_hii_full(
+            start_date=start_dt,
+            end_date=end_dt,
+            split_date=args.split_date,
+            hii_max_stations=args.hii_max_stations,
+        )
+        logger.info("HII ingestion complete: %s", saved)
+        sys.exit(0)
 
     pollutants = ["pm25", "pm10"] if args.pollutant == "all" else [args.pollutant]
 
@@ -1993,6 +2048,7 @@ def main():
                 provider=args.provider,
                 train_segments=train_segs,
                 test_segments=test_segs,
+                hii_max_stations=args.hii_max_stations,
             )
             run_phase_4_full(
                 pollutant=p, split_date=args.split_date,
@@ -2016,6 +2072,7 @@ def main():
                 provider=args.provider,
                 train_segments=train_segs,
                 test_segments=test_segs,
+                hii_max_stations=args.hii_max_stations,
             )
     else:
         # Default or smoke-test
