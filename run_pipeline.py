@@ -27,6 +27,7 @@ Examples:
 import os
 import sys
 import argparse
+import gc
 import logging
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Tuple
@@ -719,6 +720,10 @@ def run_phase_4_smoke_test(target_dt: pd.Timestamp, pollutant: str = "pm25", cad
     )
     benchmark_res["provider_benchmark"] = provider_res
 
+    # Memory hygiene: release resolution matrix copies before plotting/exit.
+    del train_matrices_by_res
+    gc.collect()
+
     # Generate Provider Evaluation Visualizations (Separate Grouped Bar & Parity Scatter Plots)
     eval_dir = get_evaluation_dir(pol)
     plotter = EvaluationPlotter(output_dir=eval_dir, pollutant=pol)
@@ -1273,35 +1278,6 @@ def run_phase_1_full(
         sys.exit(1)
 
 
-def run_phase_4_full(pollutant: str = "pm25", split_date: str = "2026-01-01") -> Dict[str, Any]:
-    """
-    Executes Phase 4 Full Multi-Year Model Suite & Ensemble Training:
-    - Loads historical training ground truth (2024-2025) and test ground truth (2026)
-    - Prepares unified feature matrices for training and testing
-    - Trains 4-Model Quartet (LightGBM, CatBoost, XGBoost, Random Forest)
-    - Optimizes Non-Negative Least Squares Stacking Ensemble
-    - Evaluates Out-of-Time generalization on 2026 Test split
-    - Generates multi-resolution benchmarks and saves production checkpoints
-    """
-    pol = pollutant.lower()
-    tgt_col = "observed_pm10" if pol == "pm10" else "observed_pm25"
-    tgt_name = pol.upper()
-    logger.info("=" * 75)
-    logger.info("🏋️ EXECUTING PHASE 4 FULL PRODUCTION MODEL TRAINING (%s)", tgt_name)
-    logger.info("Train / Test Split Date: %s", split_date)
-    logger.info("=" * 75)
-
-    ensure_directories()
-    models_dir = get_models_dir(pol)
-    suffix = f"_{pol}" if pol == "pm10" else ""
-
-    # 1. Load multi-year ground truth
-    p_train = TARGET_DIR / f"ground_truth_train{suffix}_2024_2025.parquet"
-    p_test = TARGET_DIR / f"ground_truth_test{suffix}_2026.parquet"
-
-    train_gt = pd.read_parquet(p_train) if p_train.exists() else pd.DataFrame()
-    test_gt = pd.read_parquet(p_test) if p_test.exists() else pd.DataFrame()
-
 def _enrich_multi_year_matrix(
     df: pd.DataFrame,
     join_key: str = "station_code",
@@ -1681,6 +1657,11 @@ def run_phase_4_full(
         for res in [3.0, 2.0, 1.0, 0.5]
     } if not test_df.empty else {}
 
+    # Memory hygiene: release the pre-split matrix; train_df/test_df are still
+    # needed by the weather-ablation step below.
+    del unified_df
+    gc.collect()
+
     # --------------------------------------------------------------------------
     # 1. Provider-Partitioned Production Training (FIRST):
     #    Air4Thai -> AirGradient -> Combined (persists every checkpoint; Combined
@@ -1755,6 +1736,12 @@ def run_phase_4_full(
         test_matrices_by_res=test_matrices_by_res,
     )
     benchmark_res["provider_partitioned_training"] = provider_res
+
+    # Memory hygiene: all training work is done — release every remaining
+    # large frame before the verification gate / return (main() keeps the
+    # result dicts alive until interpreter exit).
+    del train_matrices_by_res, test_matrices_by_res, train_df, test_df
+    gc.collect()
 
     run_phase_1b_verification()
     logger.info("\n🎉 PHASE 4 FULL PRODUCTION TRAINING COMPLETED SUCCESSFULLY (%s)!", tgt_name)

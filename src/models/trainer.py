@@ -11,6 +11,7 @@ Orchestrates:
 """
 
 import copy
+import gc
 import json
 import logging
 from pathlib import Path
@@ -262,6 +263,11 @@ class ModelTrainer:
         ensemble.save(checkpoint_dir)
         logger.info("Model checkpoint successfully saved to: %s", checkpoint_dir)
 
+        # Memory hygiene: release the training matrix before returning
+        # (the caller only needs the fitted ensemble).
+        del X, y, groups
+        gc.collect()
+
         # Persist the accumulating per-base-learner benchmark (log + CSV + md/json)
         self._write_per_model_benchmark_reports()
 
@@ -427,6 +433,9 @@ class ModelTrainer:
                 "weight_xgboost": round(ensemble.weights.get("xgboost", 0.0), 3),
                 "weight_rf": round(ensemble.weights.get("random_forest", 0.0), 3),
             })
+
+            del ensemble
+            gc.collect()
 
         summary_df = pd.DataFrame(summary_rows)
         benchmark_results["summary_table"] = summary_df.to_dict(orient="records")
@@ -610,6 +619,10 @@ class ModelTrainer:
             "ensemble_weights_no_weather": dict(ensemble_no_weather.weights),
         }
 
+        # Memory hygiene: results hold metrics only — release the fitted models.
+        del ensemble_full, ensemble_no_weather
+        gc.collect()
+
         # Write reports
         self._write_weather_ablation_reports(ablation_results, comparison_df)
         return ablation_results
@@ -705,7 +718,6 @@ class ModelTrainer:
             "target_providers": norm_providers,
             "include_combined": include_combined,
             "by_resolution": {},
-            "trained_ensembles": {},
         }
         summary_rows: List[Dict[str, Any]] = []
 
@@ -733,14 +745,14 @@ class ModelTrainer:
 
             for prov_name, is_comb in runs_to_execute:
                 if is_comb:
-                    sub_train = train_df[train_df["provider"].isin(norm_providers)].copy()
-                    sub_test = test_df[test_df["provider"].isin(norm_providers)].copy() if test_df is not None else None
+                    sub_train = train_df[train_df["provider"].isin(norm_providers)]
+                    sub_test = test_df[test_df["provider"].isin(norm_providers)] if test_df is not None else None
                     exp_id = f"EXP-{res_label.upper()}-COMBINED"
                     prov_display = f"Combined ({' + '.join(norm_providers)})"
                     log_icon = "🌐"
                 else:
-                    sub_train = train_df[train_df["provider"] == prov_name].copy()
-                    sub_test = test_df[test_df["provider"] == prov_name].copy() if test_df is not None else None
+                    sub_train = train_df[train_df["provider"] == prov_name]
+                    sub_test = test_df[test_df["provider"] == prov_name] if test_df is not None else None
                     exp_id = f"EXP-{res_label.upper()}-{prov_name.upper()}"
                     prov_display = prov_name
                     log_icon = "🏢" if "air4thai" in prov_name.lower() else "📡"
@@ -765,8 +777,6 @@ class ModelTrainer:
                     experiment_id=exp_id,
                     per_model_checkpoint=per_model_checkpoint,
                 )
-                benchmark_results["trained_ensembles"][exp_id] = ensemble
-
                 # Evaluate suite
                 if sub_test is not None and len(sub_test) >= 2:
                     eval_stats = self.evaluate_suite(ensemble, sub_test, feature_cols)
@@ -818,6 +828,14 @@ class ModelTrainer:
 
                 benchmark_results["by_resolution"][exp_id] = res_entry
                 summary_rows.append(res_entry)
+
+                # Memory hygiene: keep only metrics in results — the fitted ensemble
+                # is persisted to the checkpoint dir; holding every experiment's
+                # models in RAM would accumulate until the function returns.
+                del ensemble, sub_train
+                if sub_test is not None:
+                    del sub_test
+                gc.collect()
 
         summary_df = pd.DataFrame(summary_rows)
         benchmark_results["summary_table"] = summary_df.to_dict(orient="records")
@@ -915,7 +933,6 @@ class ModelTrainer:
             "feature_sets": list(feature_sets.keys()),
             "include_combined": include_combined,
             "by_resolution": {},
-            "trained_ensembles": {},
             "checkpoints": [],
         }
         summary_rows: List[Dict[str, Any]] = []
@@ -951,12 +968,12 @@ class ModelTrainer:
 
                 for prov_name, is_comb in runs_to_execute:
                     if is_comb:
-                        sub_train = train_df[train_df["provider"].isin(norm_providers)].copy()
+                        sub_train = train_df[train_df["provider"].isin(norm_providers)]
                         prov_key = "COMBINED"
                         prov_display = f"Combined ({' + '.join(norm_providers)})"
                         log_icon = "🌐"
                     else:
-                        sub_train = train_df[train_df["provider"] == prov_name].copy()
+                        sub_train = train_df[train_df["provider"] == prov_name]
                         prov_key = prov_name.upper()
                         prov_display = prov_name
                         log_icon = "🏢" if "air4thai" in prov_name.lower() else "📡"
@@ -987,8 +1004,9 @@ class ModelTrainer:
                         model_params_override=override,
                         per_model_checkpoint=per_model_checkpoint,
                     )
-                    benchmark_results["trained_ensembles"][exp_id] = ensemble
-
+                    # Memory hygiene: keep only metrics in results — the fitted
+                    # ensemble is persisted to the checkpoint dir; holding it in
+                    # results would accumulate every experiment's models in RAM.
                     exp_clean = exp_id.lower().replace("-", "_")
                     chk_path = self.output_dir / f"{exp_clean}_{self.pollutant}"
                     if save_checkpoints and chk_path.exists():
@@ -1007,9 +1025,9 @@ class ModelTrainer:
                     oot_n = 0
                     if test_df is not None and len(test_df) >= 2:
                         if is_comb:
-                            sub_oot = test_df[test_df["provider"].isin(norm_providers)].copy()
+                            sub_oot = test_df[test_df["provider"].isin(norm_providers)]
                         else:
-                            sub_oot = test_df[test_df["provider"] == prov_name].copy()
+                            sub_oot = test_df[test_df["provider"] == prov_name]
                         if len(sub_oot) >= 2:
                             try:
                                 X_oot, y_oot, _ = self.prepare_data(sub_oot, active_cols)
@@ -1060,7 +1078,7 @@ class ModelTrainer:
                         logger.info("  🔀 Cross-Provider Generalization [%s | %s] (%s → each provider, %s):",
                                     res_label, fs_label, prov_display, split_name)
                         for target_prov in norm_providers:
-                            sub_eval = eval_df[eval_df["provider"] == target_prov].copy()
+                            sub_eval = eval_df[eval_df["provider"] == target_prov]
                             if len(sub_eval) == 0:
                                 continue
                             try:
@@ -1087,6 +1105,11 @@ class ModelTrainer:
                             logger.info("    ↳ %-22s | N=%-6d | MAE: %6.3f | RMSE: %6.3f | R²: %7.4f | AQI: %5.2f%%",
                                         target_prov, len(X_ev), m.get("mae", 0.0), m.get("rmse", 0.0),
                                         m.get("r2", 0.0), m.get("aqi_acc", 0.0))
+
+                    # Free this experiment's models before the next run — without
+                    # this, all ensembles stay referenced until the function returns.
+                    del ensemble, sub_train
+                    gc.collect()
 
         summary_df = pd.DataFrame(summary_rows)
         cross_df = pd.DataFrame(cross_rows)
