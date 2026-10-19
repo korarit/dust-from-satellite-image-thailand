@@ -246,6 +246,7 @@ def main() -> None:
     before_h = col_stats(mat["humidity_mean_surround"]) if "humidity_mean_surround" in mat.columns else None
     n_over_p = n_over_h = 0
     match_info = {}
+    matched_idx: dict = {}
     maps = {"pressure": map_p, "humidity": map_h}
     for kind, vals, col in (("pressure", p_vals, "pressure_mean_surround"),
                             ("humidity", h_vals, "humidity_mean_surround")):
@@ -315,12 +316,32 @@ def main() -> None:
         if col not in mat.columns:
             mat[col] = np.nan
         idx = merged.loc[hit, "_row"].to_numpy()
-        mat.loc[mat.index[idx], col] = merged.loc[hit, "hii_value"].to_numpy(dtype=float)
+        vals_to_write = merged.loc[hit, "hii_value"].to_numpy(dtype=np.float32)
+        mat.loc[mat.index[idx], col] = vals_to_write
         if kind == "pressure":
             n_over_p = int(hit.sum())
         else:
             n_over_h = int(hit.sum())
+        if col not in matched_idx:
+            matched_idx[col] = set()
+        matched_idx[col].update(idx.tolist())
     mat = mat.drop(columns=["_hii_station"], errors="ignore")
+    # Unmatched cells keep STALE values (never NaN), so the imputer cannot see
+    # them. NaN them out explicitly -> train-median imputation + imputed_flag=1
+    # (honest "no observation" instead of silently trusted junk). Only applies
+    # where a merge actually ran (vals present); without HII files at all we
+    # leave existing values untouched.
+    n_nanned = {}
+    for col, idx_set in matched_idx.items():
+        if col not in mat.columns:
+            continue
+        idx_arr = np.array(sorted(idx_set), dtype=np.int64)
+        keep = np.zeros(len(mat), dtype=bool)
+        keep[idx_arr[idx_arr < len(mat)]] = True
+        n_new_nan = int((~keep).sum())
+        mat.loc[~keep, col] = np.nan
+        n_nanned[col] = n_new_nan
+        print(f"  {col}: {n_new_nan} unmatched cells set to NaN for re-imputation.")
     audit["match"] = match_info
     for kind in ("pressure", "humidity"):
         info = match_info.get(kind, {})
@@ -331,7 +352,8 @@ def main() -> None:
     print(f"  overall HII pressure coverage: {total_over}/{len(mat)} rows "
           f"({total_over / max(len(mat), 1):.3f})")
     audit["overwritten_cells"] = {"pressure_mean_surround": n_over_p,
-                                  "humidity_mean_surround": n_over_h}
+                                   "humidity_mean_surround": n_over_h}
+    audit["naned_for_reimpute"] = n_nanned
     if before_p:
         audit["pressure_mean_surround_before"] = before_p
         audit["pressure_mean_surround_after"] = col_stats(mat["pressure_mean_surround"])
@@ -442,6 +464,7 @@ def main() -> None:
         f"{audit['mapping']['matrix_stations']} matrix stations within "
         f"{args.max_match_km} km",
         f"- Overwritten cells: pressure={n_over_p}, humidity={n_over_h}",
+        f"- NaNed for re-impute (stale values, imputed_flag=1): {n_nanned}",
         f"- Topo: {topo_note}",
         "",
         "## Match rates (fail-loud gate)",

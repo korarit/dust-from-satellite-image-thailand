@@ -96,6 +96,25 @@ def test_repair_merges_overwrites_and_topo(monkeypatch, tmp_path):
     # TPI/relief attached from terrain (vary around S1 grid).
     assert "tpi_index" in rep.columns and "relief_m" in rep.columns
     assert float(rep["tpi_index"].std()) > 0 or float(rep["relief_m"].std()) > 0
+    # Unmatched cells were NaNed then re-imputed + flagged ...
+    s2 = rep[rep["station_code"] == "S2"]
+    assert (s2["imputed_flag"] == 1).all()
+    # pressure: train median scaled by barometric elevation factor (elev=10m);
+    # humidity: plain train median.
+    import numpy as _np
+    f_baro = (1.0 - (0.0065 * 10.0) / 288.15) ** 5.25588
+    _np.testing.assert_allclose(
+        s2["pressure_mean_surround"].to_numpy(), 1002.0 * f_baro, rtol=1e-5)
+    assert (s2["humidity_mean_surround"] == 62.0).all()  # median of 60..64
+    # ... while matched cells keep real values (bogus 999 gone).
+    # NOTE: imputed_flag is 1 for every fixture row because the tiny fixture
+    # lacks most schema columns (imputer flags those globally); the NaN->impute
+    # behavior itself is proven by the S2 value assertions above.
+    assert (s1_in["pressure_mean_surround"] != 999.0).all()
+    assert (audit_dir / "repair_audit.json").exists()
+    import json as _ja
+    assert _ja.loads((audit_dir / "repair_audit.json").read_text())["naned_for_reimpute"][
+        "pressure_mean_surround"] == 8  # 6x S2 + S1 05:00 + S1 out-of-range
     # Audit artifacts exist with match info.
     import json
     audit = json.loads((audit_dir / "repair_audit.json").read_text(encoding="utf-8"))
