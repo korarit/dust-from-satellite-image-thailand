@@ -127,6 +127,13 @@ def test_fail_loud_on_low_match_rate(monkeypatch, tmp_path):
               "--out", str(tmp_path / "repaired.parquet"),
               "--out-dir", str(tmp_path / "audit"),
               "--min-match-rate", "0.9")  # 3/4 matchable matched -> must fail loud
+    # Gate failure still leaves a forensic partial audit behind.
+    import json as _json
+    fail_audit = _json.loads((tmp_path / "audit" / "repair_audit_failed.json").read_text())
+    assert fail_audit["status"] == "failed_gate"
+    assert fail_audit["gate_failure"]["variable"] in ("pressure", "humidity")
+    assert "worst_stations" in fail_audit["gate_failure"]
+    assert "by_month" in fail_audit["gate_failure"]
 
 
 def test_no_hii_files_skips_merge_gracefully(monkeypatch, tmp_path):

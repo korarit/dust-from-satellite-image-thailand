@@ -248,6 +248,38 @@ def main() -> None:
             }
             print(f"  HII {kind}: matched {hit.sum()}/{len(merged)} (rate={match_rate:.3f})")
             if match_rate < args.min_match_rate:
+                # Miss-pattern forensics to stdout + partial audit file, then fail.
+                rep = {"variable": kind, "match_rate": round(match_rate, 4),
+                       "threshold": args.min_match_rate,
+                       "matchable_rows": int(len(merged)),
+                       "matched_rows": int(hit.sum())}
+                try:
+                    m_all = merged.copy()
+                    m_all["_hit"] = hit.to_numpy()
+                    m_all["_month"] = m_all["_ts_hour"].dt.to_period("M").astype(str)
+                    by_stn = (m_all.groupby("_hii_station")["_hit"]
+                              .agg(["mean", "size"]).sort_values("mean"))
+                    rep["worst_stations"] = [
+                        {"hii_station": str(i), "match_rate": round(float(r["mean"]), 3),
+                         "matchable": int(r["size"])}
+                        for i, r in by_stn.head(20).iterrows()]
+                    by_mo = (m_all.groupby("_month")["_hit"]
+                             .agg(["mean", "size"]).sort_values("_month"))
+                    rep["by_month"] = [
+                        {"month": str(i), "match_rate": round(float(r["mean"]), 3),
+                         "matchable": int(r["size"])}
+                        for i, r in by_mo.iterrows()]
+                except Exception as exc:
+                    rep["breakdown_error"] = str(exc)
+                audit["match"] = match_info
+                audit["gate_failure"] = rep
+                audit["status"] = "failed_gate"
+                fail_path = out_dir / "repair_audit_failed.json"
+                with open(fail_path, "w", encoding="utf-8") as f:
+                    json.dump(audit, f, indent=2, default=str)
+                print(f"  worst stations (lowest match): {rep.get('worst_stations', [])[:5]}")
+                print(f"  by month: {rep.get('by_month', [])}")
+                print(f"  partial audit -> {fail_path}")
                 raise SystemExit(
                     f"FAIL-LOUD: HII {kind} match rate {match_rate:.3f} < "
                     f"--min-match-rate {args.min_match_rate}. Refusing to write a "
