@@ -135,7 +135,38 @@ def load_hii_series(hii_dir: Path, kind: str):
     df = df.dropna(subset=["ts_hour"]).drop_duplicates(["station_code", "ts_hour"])
     vals = df[["station_code", "ts_hour", vcol]].rename(
         columns={"station_code": "hii_station", vcol: "hii_value"})
+    if stations is not None and not vals.empty:
+        # Dead stations (coords known but zero valid hourly rows) must not
+        # receive matrix stations in the mapping step.
+        live = set(vals["hii_station"].astype(str).unique().tolist())
+        stations = stations[stations["hii_station"].astype(str).isin(live)].copy()
     return vals, stations, vals["ts_hour"].min(), vals["ts_hour"].max()
+
+
+def build_station_mapping(stn_coords: pd.DataFrame, skey: str,
+                          mlat_c: str, mlon_c: str,
+                          hii_stations, max_km: float) -> pd.DataFrame:
+    """Nearest-HII-station map per matrix station (coordinate based).
+
+    Only live HII stations (with >= 1 valid hourly row) are candidates;
+    the caller passes one variable's station table at a time.
+    """
+    mapping = []
+    if hii_stations is not None and len(hii_stations):
+        m_lat = stn_coords[mlat_c].to_numpy(dtype=float)
+        m_lon = stn_coords[mlon_c].to_numpy(dtype=float)
+        for _, hrow in hii_stations.iterrows():
+            d = haversine_km(m_lat, m_lon, float(hrow["hii_lat"]), float(hrow["hii_lon"]))
+            j = int(np.argmin(d))
+            mapping.append({
+                "matrix_station": str(stn_coords[skey].iloc[j]),
+                "hii_station": str(hrow["hii_station"]),
+                "distance_km": round(float(d[j]), 3),
+            })
+    map_df = pd.DataFrame(mapping)
+    if not map_df.empty:
+        map_df = map_df[map_df["distance_km"] <= max_km].copy()
+    return map_df
 
 
 def col_stats(s: pd.Series) -> dict:
@@ -196,26 +227,18 @@ def main() -> None:
 
     mat["_ts_hour"] = norm_hour(mat[ts_col])
     stn_coords = mat.groupby(skey)[[mlat_c, mlon_c]].median().reset_index()
-    mapping = []
-    if p_stn is not None and len(p_stn):
-        m_lat = stn_coords[mlat_c].to_numpy(dtype=float)
-        m_lon = stn_coords[mlon_c].to_numpy(dtype=float)
-        for _, hrow in p_stn.iterrows():
-            d = haversine_km(m_lat, m_lon, float(hrow["hii_lat"]), float(hrow["hii_lon"]))
-            j = int(np.argmin(d))
-            mapping.append({
-                "matrix_station": str(stn_coords[skey].iloc[j]),
-                "hii_station": str(hrow["hii_station"]),
-                "distance_km": round(float(d[j]), 3),
-            })
-    map_df = pd.DataFrame(mapping)
-    if not map_df.empty:
-        map_df = map_df[map_df["distance_km"] <= args.max_match_km].copy()
+    # Per-variable mapping: a station live for pressure may be dead for
+    # humidity and vice versa.
+    map_p = build_station_mapping(stn_coords, skey, mlat_c, mlon_c, p_stn, args.max_match_km)
+    map_h = build_station_mapping(stn_coords, skey, mlat_c, mlon_c, h_stn, args.max_match_km)
     audit["mapping"] = {
         "matrix_stations": int(stn_coords[skey].nunique()),
-        "mapped_within_km": int(map_df["matrix_station"].nunique()) if not map_df.empty else 0,
+        "mapped_pressure_within_km": int(map_p["matrix_station"].nunique()) if not map_p.empty else 0,
+        "mapped_humidity_within_km": int(map_h["matrix_station"].nunique()) if not map_h.empty else 0,
     }
-    print(f"  HII->matrix mapped: {audit['mapping']['mapped_within_km']}/"
+    print(f"  HII->matrix mapped (pressure): {audit['mapping']['mapped_pressure_within_km']}/"
+          f"{audit['mapping']['matrix_stations']} within {args.max_match_km} km")
+    print(f"  HII->matrix mapped (humidity): {audit['mapping']['mapped_humidity_within_km']}/"
           f"{audit['mapping']['matrix_stations']} within {args.max_match_km} km")
 
     # ---- Step 2: merge (overwrite matched cells with real HII values) ----
@@ -223,80 +246,90 @@ def main() -> None:
     before_h = col_stats(mat["humidity_mean_surround"]) if "humidity_mean_surround" in mat.columns else None
     n_over_p = n_over_h = 0
     match_info = {}
-    if not map_df.empty:
+    maps = {"pressure": map_p, "humidity": map_h}
+    for kind, vals, col in (("pressure", p_vals, "pressure_mean_surround"),
+                            ("humidity", h_vals, "humidity_mean_surround")):
+        map_df = maps[kind]
+        if vals is None:
+            match_info[kind] = {"status": "no_hii_files"}
+            continue
+        if map_df.empty:
+            match_info[kind] = {"status": "no stations within max_match_km; HII merge skipped"}
+            print(f"  WARNING: HII {kind}: no stations within max_match_km; merge skipped.")
+            continue
         mat["_hii_station"] = mat[skey].astype(str).map(
             dict(zip(map_df["matrix_station"], map_df["hii_station"])))
         in_radius = mat["_hii_station"].notna()
         # matchable = in radius AND timestamp inside HII coverage
-        for kind, vals, col in (("pressure", p_vals, "pressure_mean_surround"),
-                                ("humidity", h_vals, "humidity_mean_surround")):
-            if vals is None:
-                match_info[kind] = {"status": "no_hii_files"}
-                continue
-            cov = in_radius & mat["_ts_hour"].notna() & \
-                (mat["_ts_hour"] >= vals["ts_hour"].min()) & (mat["_ts_hour"] <= vals["ts_hour"].max())
-            key = mat.loc[cov, ["_hii_station", "_ts_hour"]].copy()
-            key["_row"] = np.arange(len(mat))[cov.to_numpy()]
-            merged = key.merge(vals, left_on=["_hii_station", "_ts_hour"],
-                               right_on=["hii_station", "ts_hour"], how="left")
-            hit = merged["hii_value"].notna()
-            match_rate = float(hit.mean()) if len(merged) else 0.0
-            match_info[kind] = {
-                "matchable_rows": int(len(merged)),
-                "matched_rows": int(hit.sum()),
-                "match_rate": round(match_rate, 4),
-            }
-            print(f"  HII {kind}: matched {hit.sum()}/{len(merged)} (rate={match_rate:.3f})")
-            if match_rate < args.min_match_rate:
-                # Miss-pattern forensics to stdout + partial audit file, then fail.
-                rep = {"variable": kind, "match_rate": round(match_rate, 4),
-                       "threshold": args.min_match_rate,
-                       "matchable_rows": int(len(merged)),
-                       "matched_rows": int(hit.sum())}
-                try:
-                    m_all = merged.copy()
-                    m_all["_hit"] = hit.to_numpy()
-                    m_all["_month"] = m_all["_ts_hour"].dt.to_period("M").astype(str)
-                    by_stn = (m_all.groupby("_hii_station")["_hit"]
-                              .agg(["mean", "size"]).sort_values("mean"))
-                    rep["worst_stations"] = [
-                        {"hii_station": str(i), "match_rate": round(float(r["mean"]), 3),
-                         "matchable": int(r["size"])}
-                        for i, r in by_stn.head(20).iterrows()]
-                    by_mo = (m_all.groupby("_month")["_hit"]
-                             .agg(["mean", "size"]).sort_values("_month"))
-                    rep["by_month"] = [
-                        {"month": str(i), "match_rate": round(float(r["mean"]), 3),
-                         "matchable": int(r["size"])}
-                        for i, r in by_mo.iterrows()]
-                except Exception as exc:
-                    rep["breakdown_error"] = str(exc)
-                audit["match"] = match_info
-                audit["gate_failure"] = rep
-                audit["status"] = "failed_gate"
-                fail_path = out_dir / "repair_audit_failed.json"
-                with open(fail_path, "w", encoding="utf-8") as f:
-                    json.dump(audit, f, indent=2, default=str)
-                print(f"  worst stations (lowest match): {rep.get('worst_stations', [])[:5]}")
-                print(f"  by month: {rep.get('by_month', [])}")
-                print(f"  partial audit -> {fail_path}")
-                raise SystemExit(
-                    f"FAIL-LOUD: HII {kind} match rate {match_rate:.3f} < "
-                    f"--min-match-rate {args.min_match_rate}. Refusing to write a "
-                    f"half-repaired matrix. Inspect keys/coverage and retry.")
-            if col not in mat.columns:
-                mat[col] = np.nan
-            idx = merged.loc[hit, "_row"].to_numpy()
-            mat.loc[mat.index[idx], col] = merged.loc[hit, "hii_value"].to_numpy(dtype=float)
-            if kind == "pressure":
-                n_over_p = int(hit.sum())
-            else:
-                n_over_h = int(hit.sum())
-        mat = mat.drop(columns=["_hii_station"])
-    else:
-        match_info = {"status": "no stations within max_match_km; HII merge skipped"}
-        print("  WARNING: no stations within max_match_km; HII merge skipped.")
+        cov = in_radius & mat["_ts_hour"].notna() & \
+            (mat["_ts_hour"] >= vals["ts_hour"].min()) & (mat["_ts_hour"] <= vals["ts_hour"].max())
+        key = mat.loc[cov, ["_hii_station", "_ts_hour"]].copy()
+        key["_row"] = np.arange(len(mat))[cov.to_numpy()]
+        merged = key.merge(vals, left_on=["_hii_station", "_ts_hour"],
+                           right_on=["hii_station", "ts_hour"], how="left")
+        hit = merged["hii_value"].notna()
+        match_rate = float(hit.mean()) if len(merged) else 0.0
+        match_info[kind] = {
+            "matchable_rows": int(len(merged)),
+            "matched_rows": int(hit.sum()),
+            "match_rate": round(match_rate, 4),
+        }
+        print(f"  HII {kind}: matched {hit.sum()}/{len(merged)} (rate={match_rate:.3f})")
+        if match_rate < args.min_match_rate:
+            # Miss-pattern forensics to stdout + partial audit file, then fail.
+            rep = {"variable": kind, "match_rate": round(match_rate, 4),
+                   "threshold": args.min_match_rate,
+                   "matchable_rows": int(len(merged)),
+                   "matched_rows": int(hit.sum())}
+            try:
+                m_all = merged.copy()
+                m_all["_hit"] = hit.to_numpy()
+                m_all["_month"] = m_all["_ts_hour"].dt.to_period("M").astype(str)
+                by_stn = (m_all.groupby("_hii_station")["_hit"]
+                          .agg(["mean", "size"]).sort_values("mean"))
+                rep["worst_stations"] = [
+                    {"hii_station": str(i), "match_rate": round(float(r["mean"]), 3),
+                     "matchable": int(r["size"])}
+                    for i, r in by_stn.head(20).iterrows()]
+                by_mo = (m_all.groupby("_month")["_hit"]
+                         .agg(["mean", "size"]).sort_values("_month"))
+                rep["by_month"] = [
+                    {"month": str(i), "match_rate": round(float(r["mean"]), 3),
+                     "matchable": int(r["size"])}
+                    for i, r in by_mo.iterrows()]
+            except Exception as exc:
+                rep["breakdown_error"] = str(exc)
+            audit["match"] = match_info
+            audit["gate_failure"] = rep
+            audit["status"] = "failed_gate"
+            fail_path = out_dir / "repair_audit_failed.json"
+            with open(fail_path, "w", encoding="utf-8") as f:
+                json.dump(audit, f, indent=2, default=str)
+            print(f"  worst stations (lowest match): {rep.get('worst_stations', [])[:5]}")
+            print(f"  by month: {rep.get('by_month', [])}")
+            print(f"  partial audit -> {fail_path}")
+            raise SystemExit(
+                f"FAIL-LOUD: HII {kind} match rate {match_rate:.3f} < "
+                f"--min-match-rate {args.min_match_rate}. Refusing to write a "
+                f"half-repaired matrix. Inspect keys/coverage and retry.")
+        if col not in mat.columns:
+            mat[col] = np.nan
+        idx = merged.loc[hit, "_row"].to_numpy()
+        mat.loc[mat.index[idx], col] = merged.loc[hit, "hii_value"].to_numpy(dtype=float)
+        if kind == "pressure":
+            n_over_p = int(hit.sum())
+        else:
+            n_over_h = int(hit.sum())
+    mat = mat.drop(columns=["_hii_station"], errors="ignore")
     audit["match"] = match_info
+    for kind in ("pressure", "humidity"):
+        info = match_info.get(kind, {})
+        if isinstance(info, dict) and "matched_rows" in info:
+            info["coverage_of_all_rows"] = round(info["matched_rows"] / max(len(mat), 1), 4)
+    total_over = (match_info.get("pressure", {}).get("matched_rows", 0)
+                  if isinstance(match_info.get("pressure"), dict) else 0)
+    print(f"  overall HII pressure coverage: {total_over}/{len(mat)} rows "
+          f"({total_over / max(len(mat), 1):.3f})")
     audit["overwritten_cells"] = {"pressure_mean_surround": n_over_p,
                                   "humidity_mean_surround": n_over_h}
     if before_p:
@@ -402,7 +435,10 @@ def main() -> None:
         f"({audit['hii']['pressure_rows']} rows), "
         f"{audit['hii']['humidity_stations']} humidity stations "
         f"({audit['hii']['humidity_rows']} rows)",
-        f"- Mapping: {audit['mapping']['mapped_within_km']}/"
+        f"- Mapping pressure: {audit['mapping']['mapped_pressure_within_km']}/"
+        f"{audit['mapping']['matrix_stations']} matrix stations within "
+        f"{args.max_match_km} km",
+        f"- Mapping humidity: {audit['mapping']['mapped_humidity_within_km']}/"
         f"{audit['mapping']['matrix_stations']} matrix stations within "
         f"{args.max_match_km} km",
         f"- Overwritten cells: pressure={n_over_p}, humidity={n_over_h}",
@@ -421,18 +457,19 @@ def main() -> None:
     ]
     for c, s in audit["columns_after"].items():
         md.append(f"| `{c}` | {s['nan_rate']} | {s['nunique']} | {s['mean']} |")
-    if not map_df.empty:
-        md += ["", "## Station mapping (matrix -> HII)",
-               "", "| Matrix station | HII station | km |",
-               "| :--- | :--- | :---: |"]
-        for _, r in map_df.iterrows():
-            md.append(f"| `{r['matrix_station']}` | `{r['hii_station']}` | {r['distance_km']} |")
+    for _tag, _map in (("pressure", map_p), ("humidity", map_h)):
+        if not _map.empty:
+            md += ["", f"## Station mapping (matrix -> HII, {_tag})",
+                   "", "| Matrix station | HII station | km |",
+                   "| :--- | :--- | :---: |"]
+            for _, r in _map.iterrows():
+                md.append(f"| `{r['matrix_station']}` | `{r['hii_station']}` | {r['distance_km']} |")
     md += ["",
            "## Still dead by design (see Step-B elimination, NOT fabricated here)",
            "",
            "- `p_north/south/east/west`, `delta_p_*`, `pressure_grad_mag`, "
-           "`humidity_std/grad`: 7 HII stations cannot drive directional "
-           "quadrants; left untouched for schema elimination.",
+           "`humidity_std/grad`: sparse HII stations cannot drive directional "
+           "quadrants nationwide; left untouched for schema elimination.",
            ""]
     md_path = out_dir / "repair_audit.md"
     md_path.write_text("\n".join(md), encoding="utf-8")

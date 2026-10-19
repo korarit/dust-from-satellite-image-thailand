@@ -99,9 +99,45 @@ def test_repair_merges_overwrites_and_topo(monkeypatch, tmp_path):
     # Audit artifacts exist with match info.
     import json
     audit = json.loads((audit_dir / "repair_audit.json").read_text(encoding="utf-8"))
-    assert audit["mapping"]["mapped_within_km"] == 1
+    assert audit["mapping"]["mapped_pressure_within_km"] == 1
     assert audit["match"]["pressure"]["matched_rows"] > 0
     assert (audit_dir / "repair_audit.md").exists()
+
+
+def test_dead_station_excluded_from_mapping(monkeypatch, tmp_path):
+    """A station with coords but zero valid hourly rows must not receive mapping."""
+    import json as _json
+
+    hii_dir = tmp_path / "hii_dead"
+    hii_dir.mkdir(parents=True, exist_ok=True)
+    good_ts = pd.date_range("2024-01-01", periods=3, freq="h")
+    good_str = [ts.strftime("%Y-%m-%d %H:%M:%S") for ts in good_ts]
+    _write(hii_dir / "hii_pressure_t.parquet", pd.DataFrame(
+        [{"station_code": "H-DEAD", "timestamp_utc": "not-a-time",
+          "variable": "pressure", "value": 1000.0,
+          "latitude": 15.0, "longitude": 100.0}] +
+        [{"station_code": "H-FAR", "timestamp_utc": ts,
+          "variable": "pressure", "value": 1000.0,
+          "latitude": 60.0, "longitude": 60.0} for ts in good_str]))
+    _write(hii_dir / "hii_humidity_t.parquet", pd.DataFrame([
+        {"station_code": "H-FAR", "timestamp_utc": ts, "variable": "humidity",
+         "value": 60.0, "latitude": 60.0, "longitude": 60.0} for ts in good_str]))
+    mat_path = tmp_path / "m3.parquet"
+    _write(mat_path, pd.DataFrame([
+        {"station_code": "SX", "timestamp_utc": ts, "lat": 15.0, "lon": 100.0,
+         "elevation_m": 10.0, "pressure_mean_surround": 999.0,
+         "humidity_mean_surround": 70.0, "bt_b13": 280.0, "observed_pm25": 20.0}
+        for ts in good_ts]))
+    _run(monkeypatch,
+          "--matrix", str(mat_path), "--hii-dir", str(hii_dir),
+          "--out", str(tmp_path / "repaired3.parquet"),
+          "--out-dir", str(tmp_path / "audit3"),
+          "--min-match-rate", "0.0")
+    audit = _json.loads((tmp_path / "audit3" / "repair_audit.json").read_text())
+    # H-DEAD has no valid rows -> excluded; H-FAR is >50km away -> no mapping.
+    assert audit["mapping"]["mapped_pressure_within_km"] == 0
+    rep = pd.read_parquet(tmp_path / "repaired3.parquet")
+    assert float(rep["pressure_mean_surround"].isna().mean()) == 0.0
 
 
 def test_fail_loud_on_low_match_rate(monkeypatch, tmp_path):
