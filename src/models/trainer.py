@@ -174,6 +174,7 @@ class ModelTrainer:
         experiment_id: str = "EXP-2KM",
         model_params_override: Optional[Dict[str, Dict[str, Any]]] = None,
         per_model_checkpoint: bool = False,
+        report_tag: Optional[str] = None,
     ) -> DustStackingEnsemble:
         """
         Trains the full 4-Model Suite and Stacking Ensemble on training data.
@@ -269,11 +270,11 @@ class ModelTrainer:
         gc.collect()
 
         # Persist the accumulating per-base-learner benchmark (log + CSV + md/json)
-        self._write_per_model_benchmark_reports()
+        self._write_per_model_benchmark_reports(report_tag=report_tag)
 
         return ensemble
 
-    def _write_per_model_benchmark_reports(self) -> None:
+    def _write_per_model_benchmark_reports(self, report_tag: Optional[str] = None) -> None:
         """
         Persists the accumulating per-base-learner benchmark (each learner is benchmarked
         immediately after it finishes training, scoped to the current resolution/experiment):
@@ -284,17 +285,18 @@ class ModelTrainer:
 
         df = pd.DataFrame(self.per_model_benchmark_records)
         suffix = f"_{self.pollutant}"
+        tag = f"_{report_tag}" if report_tag else ""
         pol_name = self.pollutant.upper()
 
         csv_dir = get_evaluation_csv_dir(self.pollutant)
         csv_dir.mkdir(parents=True, exist_ok=True)
-        csv_path = csv_dir / f"phase4_per_model_benchmark{suffix}.csv"
+        csv_path = csv_dir / f"phase4_per_model_benchmark{suffix}{tag}.csv"
         df.to_csv(csv_path, index=False)
         logger.info("Saved per-model benchmark CSV (%d rows) -> %s", len(df), csv_path)
 
         target_dir = get_reports_dir(self.pollutant)
         target_dir.mkdir(parents=True, exist_ok=True)
-        json_path = target_dir / f"phase4_per_model_benchmark{suffix}.json"
+        json_path = target_dir / f"phase4_per_model_benchmark{suffix}{tag}.json"
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(self.per_model_benchmark_records, f, indent=2, default=str)
 
@@ -318,7 +320,7 @@ class ModelTrainer:
                 )
             md_lines.append("")
 
-        md_path = target_dir / f"phase4_per_model_benchmark{suffix}.md"
+        md_path = target_dir / f"phase4_per_model_benchmark{suffix}{tag}.md"
         with open(md_path, "w", encoding="utf-8") as f:
             f.write("\n".join(md_lines))
         logger.info("Saved per-model benchmark report -> %s", md_path)
@@ -371,6 +373,7 @@ class ModelTrainer:
         train_matrices_by_res: Dict[float, pd.DataFrame],
         test_matrices_by_res: Dict[float, pd.DataFrame],
         feature_cols: Optional[List[str]] = None,
+        report_tag: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Executes the full 4 Models x 4 Grid Resolutions Benchmark Matrix:
@@ -395,6 +398,7 @@ class ModelTrainer:
                 feature_cols=feature_cols,
                 experiment_id=exp_id,
                 model_params_override=self._tuned_override("full", "Combined"),
+                report_tag=report_tag,
             )
 
             test_df = test_matrices_by_res.get(res_km)
@@ -441,29 +445,34 @@ class ModelTrainer:
         benchmark_results["summary_table"] = summary_df.to_dict(orient="records")
 
         # Write reports
-        self._write_benchmark_reports(benchmark_results, summary_df)
+        self._write_benchmark_reports(benchmark_results, summary_df, report_tag=report_tag)
         return benchmark_results
 
     def _write_benchmark_reports(
         self,
         benchmark_results: Dict[str, Any],
         summary_df: pd.DataFrame,
+        report_tag: Optional[str] = None,
     ) -> None:
         """Writes markdown and JSON reports for Phase 4."""
         target_dir = get_reports_dir(self.pollutant)
         target_dir.mkdir(parents=True, exist_ok=True)
         suffix = f"_{self.pollutant}"
+        tag = f"_{report_tag}" if report_tag else ""
         pol_name = self.pollutant.upper()
 
         # JSON Report (Suffixed primary + legacy alias)
-        json_path = target_dir / f"phase4_model_suite_benchmark{suffix}.json"
+        # NOTE: legacy alias is only written for the full-year run (report_tag=None)
+        # so seasonal runs never overwrite legacy reports.
+        json_path = target_dir / f"phase4_model_suite_benchmark{suffix}{tag}.json"
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(benchmark_results, f, indent=2, default=str)
         logger.info("Saved JSON benchmark report to: %s", json_path)
 
-        json_legacy_path = target_dir / "phase4_model_suite_benchmark.json"
-        with open(json_legacy_path, "w", encoding="utf-8") as f:
-            json.dump(benchmark_results, f, indent=2, default=str)
+        if not report_tag:
+            json_legacy_path = target_dir / "phase4_model_suite_benchmark.json"
+            with open(json_legacy_path, "w", encoding="utf-8") as f:
+                json.dump(benchmark_results, f, indent=2, default=str)
 
         # Markdown Report
         md_lines = [
@@ -491,14 +500,15 @@ class ModelTrainer:
         md_lines.append("- **Directional Invariance**: CatBoost effectively utilizes 4-directional atmospheric pressure gradients.")
         md_lines.append("- **Monotonic Compliance**: XGBoost enforces physical laws on calm air (||∇P||) and split-window BTD.")
 
-        md_path = target_dir / f"phase4_model_suite_benchmark{suffix}.md"
+        md_path = target_dir / f"phase4_model_suite_benchmark{suffix}{tag}.md"
         with open(md_path, "w", encoding="utf-8") as f:
             f.write("\n".join(md_lines))
         logger.info("Saved Markdown benchmark report to: %s", md_path)
 
-        md_legacy_path = target_dir / "phase4_model_suite_benchmark.md"
-        with open(md_legacy_path, "w", encoding="utf-8") as f:
-            f.write("\n".join(md_lines))
+        if not report_tag:
+            md_legacy_path = target_dir / "phase4_model_suite_benchmark.md"
+            with open(md_legacy_path, "w", encoding="utf-8") as f:
+                f.write("\n".join(md_lines))
 
     def run_weather_ablation_benchmark(
         self,
@@ -506,6 +516,7 @@ class ModelTrainer:
         test_df: Optional[pd.DataFrame] = None,
         cv: Optional[int] = None,
         experiment_id: str = "EXP-2KM",
+        report_tag: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Executes scientific Weather Ablation Study:
@@ -543,6 +554,7 @@ class ModelTrainer:
             cv=cv,
             experiment_id=f"{experiment_id}-FULL-WEATHER",
             model_params_override=self._tuned_override("full", "Combined"),
+            report_tag=report_tag,
         )
 
         # 3. Train Suite B: Satellite-Only (No Ground Weather - Sea / Maritime Mode)
@@ -553,6 +565,7 @@ class ModelTrainer:
             cv=cv,
             experiment_id=f"{experiment_id}-NO-WEATHER",
             model_params_override=self._tuned_override("pure_satellite", "Combined"),
+            report_tag=report_tag,
         )
 
         # 4. Evaluate both suites
@@ -624,18 +637,22 @@ class ModelTrainer:
         gc.collect()
 
         # Write reports
-        self._write_weather_ablation_reports(ablation_results, comparison_df)
+        self._write_weather_ablation_reports(
+            ablation_results, comparison_df, report_tag=report_tag
+        )
         return ablation_results
 
     def _write_weather_ablation_reports(
         self,
         ablation_results: Dict[str, Any],
         comparison_df: pd.DataFrame,
+        report_tag: Optional[str] = None,
     ) -> None:
         """Writes markdown and JSON reports for Weather Ablation Study."""
         REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
-        json_path = REPORTS_DIR / "weather_ablation_benchmark.json"
+        tag = f"_{report_tag}" if report_tag else ""
+        json_path = REPORTS_DIR / f"weather_ablation_benchmark{tag}.json"
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(ablation_results, f, indent=2, default=str)
         logger.info("Saved JSON weather ablation report to: %s", json_path)
@@ -673,7 +690,7 @@ class ModelTrainer:
         md_lines.append("- **Minimal Degradation**: Satellite-only models achieve comparable predictive power, enabling continuous 2D nationwide nowcasting without false stagnation or missing-station boundary artifacts.")
         md_lines.append("- **Dual-Mode Deployment**: For land cells near stations, the full multimodal ensemble provides high precision synoptic wind guidance; for maritime cells (dist_coast_km < 0 or offshore), the Satellite-Only mode delivers robust inference without reliance on distant land stations.")
 
-        md_path = REPORTS_DIR / "weather_ablation_benchmark.md"
+        md_path = REPORTS_DIR / f"weather_ablation_benchmark{tag}.md"
         with open(md_path, "w", encoding="utf-8") as f:
             f.write("\n".join(md_lines))
         logger.info("Saved Markdown weather ablation report to: %s", md_path)
@@ -688,6 +705,7 @@ class ModelTrainer:
         min_samples_per_provider: int = 4,
         cv: int = 3,
         per_model_checkpoint: bool = False,
+        report_tag: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Executes Multi-Resolution Benchmark partitioned by Ground Truth Provider:
@@ -776,6 +794,7 @@ class ModelTrainer:
                     feature_cols=feature_cols,
                     experiment_id=exp_id,
                     per_model_checkpoint=per_model_checkpoint,
+                    report_tag=report_tag,
                 )
                 # Evaluate suite
                 if sub_test is not None and len(sub_test) >= 2:
@@ -900,6 +919,7 @@ class ModelTrainer:
         save_checkpoints: bool = True,
         cv: int = 3,
         per_model_checkpoint: bool = False,
+        report_tag: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Production training partitioned by ground-truth provider, run for every
@@ -1003,6 +1023,7 @@ class ModelTrainer:
                         experiment_id=exp_id,
                         model_params_override=override,
                         per_model_checkpoint=per_model_checkpoint,
+                        report_tag=report_tag,
                     )
                     # Memory hygiene: keep only metrics in results — the fitted
                     # ensemble is persisted to the checkpoint dir; holding it in
@@ -1115,7 +1136,9 @@ class ModelTrainer:
         cross_df = pd.DataFrame(cross_rows)
         benchmark_results["summary_table"] = summary_df.to_dict(orient="records")
         benchmark_results["cross_provider_table"] = cross_df.to_dict(orient="records")
-        self._write_provider_partitioned_reports(benchmark_results, summary_df, cross_df)
+        self._write_provider_partitioned_reports(
+            benchmark_results, summary_df, cross_df, report_tag=report_tag
+        )
         return benchmark_results
 
     def _write_provider_partitioned_reports(
@@ -1123,14 +1146,16 @@ class ModelTrainer:
         benchmark_results: Dict[str, Any],
         summary_df: pd.DataFrame,
         cross_df: pd.DataFrame,
+        report_tag: Optional[str] = None,
     ) -> None:
         """Writes markdown and JSON reports for provider-partitioned production training."""
         target_dir = get_reports_dir(self.pollutant)
         target_dir.mkdir(parents=True, exist_ok=True)
         suffix = f"_{self.pollutant}"
+        tag = f"_{report_tag}" if report_tag else ""
         pol_name = self.pollutant.upper()
 
-        json_path = target_dir / f"phase4_provider_partitioned{suffix}.json"
+        json_path = target_dir / f"phase4_provider_partitioned{suffix}{tag}.json"
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(benchmark_results, f, indent=2, default=str)
         logger.info("Saved JSON provider-partitioned training report to: %s", json_path)
@@ -1180,7 +1205,7 @@ class ModelTrainer:
         else:
             md_lines.append("_No checkpoints persisted._")
 
-        md_path = target_dir / f"phase4_provider_partitioned{suffix}.md"
+        md_path = target_dir / f"phase4_provider_partitioned{suffix}{tag}.md"
         with open(md_path, "w", encoding="utf-8") as f:
             f.write("\n".join(md_lines))
         logger.info("Saved Markdown provider-partitioned training report to: %s", md_path)
@@ -1189,11 +1214,11 @@ class ModelTrainer:
         csv_dir = get_evaluation_csv_dir(self.pollutant)
         csv_dir.mkdir(parents=True, exist_ok=True)
         if not summary_df.empty:
-            s_csv = csv_dir / f"provider_partitioned_summary{suffix}.csv"
+            s_csv = csv_dir / f"provider_partitioned_summary{suffix}{tag}.csv"
             summary_df.to_csv(s_csv, index=False)
             logger.info("Saved provider-partitioned summary CSV -> %s", s_csv)
         if not cross_df.empty:
-            c_csv = csv_dir / f"provider_partitioned_cross_provider{suffix}.csv"
+            c_csv = csv_dir / f"provider_partitioned_cross_provider{suffix}{tag}.csv"
             cross_df.to_csv(c_csv, index=False)
             logger.info("Saved provider-partitioned cross-provider CSV -> %s", c_csv)
 

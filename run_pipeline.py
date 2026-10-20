@@ -1447,6 +1447,155 @@ def _enrich_multi_year_matrix(
     return out_df
 
 
+# --------------------------------------------------------------------------
+# Seasonal (S1/S2) suite: built-in, no CLI flag. Legacy full-year suite above
+# is frozen; this block trains the SAME pipeline per season with isolated
+# checkpoints (models/<pol>/seasonal/<S>) and tagged reports (*_S1/_S2).
+# S-train months: S1 = 1-6, S2 = 7-12. Sparse seasons are skipped, never crash.
+# --------------------------------------------------------------------------
+SEASON_GROUPS: Dict[str, List[int]] = {
+    "S1": [1, 2, 3, 4, 5, 6],
+    "S2": [7, 8, 9, 10, 11, 12],
+}
+MIN_SEASON_TRAIN_SAMPLES = 50
+MIN_SEASON_TEST_SAMPLES = 2
+
+
+def _filter_by_months(df: pd.DataFrame, months: List[int]) -> pd.DataFrame:
+    """Filter rows by observation month (timestamp/timestamp_utc). Empty-safe."""
+    if df is None or df.empty:
+        return pd.DataFrame()
+    ts_col = "timestamp" if "timestamp" in df.columns else (
+        "timestamp_utc" if "timestamp_utc" in df.columns else None
+    )
+    if ts_col is None:
+        return df.copy()
+    months_set = set(months)
+    m = pd.to_datetime(df[ts_col], utc=True, errors="coerce").dt.month
+    return df[m.isin(months_set)].copy().reset_index(drop=True)
+
+
+def _run_seasonal_phase4_suite(
+    pollutant: str,
+    target_col: str,
+    train_df: pd.DataFrame,
+    test_df: pd.DataFrame,
+    res_engine: Any,
+    per_model_checkpoint: bool,
+) -> Dict[str, Any]:
+    """Train full matrix (provider x feature x resolution) per season.
+
+    Uses ONE shared tuned-param set (no per-season retuning), GroupKFold by
+    station (inside ModelTrainer.train_suite), and strict OOT (same-season
+    months of 2026). Checkpoints go to models/<pol>/seasonal/<S*>/ and every
+    report carries the season tag so legacy full-year files are never touched.
+    """
+    pol = pollutant.lower()
+    seasonal_all: Dict[str, Any] = {}
+    for season_tag, months in SEASON_GROUPS.items():
+        tr_s = _filter_by_months(train_df, months)
+        te_s = _filter_by_months(test_df, months)
+        n_groups = 0
+        try:
+            if "station_code" in tr_s.columns:
+                n_groups = int(tr_s["station_code"].nunique())
+            elif "grid_id" in tr_s.columns:
+                n_groups = int(tr_s["grid_id"].nunique())
+        except Exception:
+            n_groups = 0
+        logger.info(
+            "[SEASON %s] months=%s train_N=%d (groups=%d) test_N=%d",
+            season_tag, months, len(tr_s), n_groups, len(te_s),
+        )
+        if len(tr_s) < MIN_SEASON_TRAIN_SAMPLES:
+            logger.warning(
+                "[SEASON %s] skipped: train N=%d < min=%d (no data for these months yet).",
+                season_tag, len(tr_s), MIN_SEASON_TRAIN_SAMPLES,
+            )
+            seasonal_all[season_tag] = {
+                "status": "skipped-sparse",
+                "train_months": months,
+                "n_train": int(len(tr_s)),
+                "n_test": int(len(te_s)),
+            }
+            continue
+
+        s_trainer = ModelTrainer(
+            config_path=MODEL_CONFIG_PATH,
+            output_dir=get_models_dir(pol) / "seasonal" / season_tag,
+            pollutant=pol,
+            target_col=target_col,
+        )
+        s_trainer.output_dir.mkdir(parents=True, exist_ok=True)
+        train_by_res = {
+            r: res_engine.adapt_feature_matrix_for_resolution(tr_s, r)
+            for r in (3.0, 2.0, 1.0, 0.5)
+        }
+        test_by_res = (
+            {r: res_engine.adapt_feature_matrix_for_resolution(te_s, r) for r in (3.0, 2.0, 1.0, 0.5)}
+            if len(te_s) >= MIN_SEASON_TEST_SAMPLES else {}
+        )
+        provider_res_s = s_trainer.run_provider_partitioned_training(
+            train_matrices_by_res=train_by_res,
+            test_matrices_by_res=test_by_res,
+            providers=["Air4Thai", "AirGradient"],
+            feature_sets={
+                "full": list(FULL_MULTIMODAL_COLUMNS),
+                "pure_satellite": list(NO_WEATHER_FEATURE_COLUMNS),
+            },
+            include_combined=True,
+            cross_provider_eval=True,
+            save_checkpoints=True,
+            per_model_checkpoint=per_model_checkpoint,
+            report_tag=season_tag,
+        )
+        ablation_res_s = s_trainer.run_weather_ablation_benchmark(
+            train_df=tr_s,
+            test_df=te_s if len(te_s) >= MIN_SEASON_TEST_SAMPLES else None,
+            cv=None,
+            experiment_id=f"EXP-2KM-{pol.upper()}-{season_tag}",
+            report_tag=season_tag,
+        )
+        benchmark_res_s = s_trainer.run_multi_resolution_benchmark(
+            train_matrices_by_res=train_by_res,
+            test_matrices_by_res=test_by_res,
+            report_tag=season_tag,
+        )
+        benchmark_res_s["provider_partitioned_training"] = provider_res_s
+        seasonal_all[season_tag] = {
+            "status": "trained",
+            "train_months": months,
+            "n_train": int(len(tr_s)),
+            "n_test": int(len(te_s)),
+            "n_groups": n_groups,
+            "provider_partitioned_training": provider_res_s,
+            "ablation_benchmark": ablation_res_s,
+            "multi_resolution_benchmark": benchmark_res_s,
+        }
+        del train_by_res, test_by_res, provider_res_s, ablation_res_s, benchmark_res_s
+        gc.collect()
+
+    # Combined seasonal summary (for weighted S1+S2 vs full-year comparison).
+    try:
+        summary_path = get_reports_dir(pol) / f"seasonal_summary_{pol}.json"
+        with open(summary_path, "w", encoding="utf-8") as f:
+            import json as _json
+            _json.dump(
+                {
+                    season: {
+                        k: v for k, v in payload.items()
+                        if k in ("status", "train_months", "n_train", "n_test", "n_groups")
+                    }
+                    for season, payload in seasonal_all.items()
+                },
+                f, indent=2, default=str,
+            )
+        logger.info("Seasonal summary -> %s", summary_path)
+    except Exception as exc:
+        logger.warning("Could not write seasonal summary: %s", exc)
+    return seasonal_all
+
+
 def run_phase_4_full(
     pollutant: str = "pm25",
     split_date: str = "2026-01-01",
@@ -1737,6 +1886,23 @@ def run_phase_4_full(
     )
     benchmark_res["provider_partitioned_training"] = provider_res
 
+    # --------------------------------------------------------------------------
+    # 4. Seasonal suite S1 (Jan-Jun) / S2 (Jul-Dec): same pipeline per season.
+    #    Legacy results above are untouched; seasonal checkpoints/reports are
+    #    isolated (models/<pol>/seasonal/<S*>/, *_S1/*_S2). No CLI flag needed.
+    # --------------------------------------------------------------------------
+    logger.info("\n" + "=" * 75)
+    logger.info("🗓️ PHASE 4 SEASONAL SUITE S1/S2 (%s) — same matrix per season", tgt_name)
+    logger.info("=" * 75)
+    seasonal_res = _run_seasonal_phase4_suite(
+        pollutant=pol,
+        target_col=tgt_col,
+        train_df=train_df,
+        test_df=test_df,
+        res_engine=res_engine,
+        per_model_checkpoint=per_model_checkpoint,
+    )
+
     # Memory hygiene: all training work is done — release every remaining
     # large frame before the verification gate / return (main() keeps the
     # result dicts alive until interpreter exit).
@@ -1749,6 +1915,7 @@ def run_phase_4_full(
         "ablation_benchmark": ablation_res,
         "multi_resolution_benchmark": benchmark_res,
         "provider_partitioned_training": provider_res,
+        "seasonal_suite": seasonal_res,
     }
 
 
