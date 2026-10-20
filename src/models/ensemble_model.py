@@ -150,6 +150,11 @@ class DustStackingEnsemble(BaseDustModel):
         reloads finished models (and the KFold OOF matrix) instead of retraining.
         Stale checkpoints (different row count / features / hyper-params / cv mode)
         are ignored and retrained.
+
+        In K-Fold mode, EVERY base learner is additionally checkpointed per fold
+        (``{model_key}_fold{n}_model_{pollutant}.joblib`` + its OOF predictions in
+        ``oof_{model_key}_fold{n}_{pollutant}.npz``) right after it finishes, so a
+        crash mid-fold only loses that single model, not the entire fold.
         """
         X_arr, f_names = self._prepare_inputs(X, feature_names)
         y_arr = self._prepare_target(y)
@@ -329,6 +334,7 @@ class DustStackingEnsemble(BaseDustModel):
         # KFold resume: reload the persisted OOF matrix and skip finished folds.
         # Splits are deterministic (GroupKFold / seeded KFold) so fold indices align.
         done_folds = set(ckpt_manifest.get("completed_folds", [])) if ckpt_dir is not None else set()
+        done_cells = set(ckpt_manifest.get("completed_fold_models", [])) if ckpt_dir is not None else set()
         if ckpt_dir is not None and done_folds and resume_from_checkpoint:
             try:
                 _re = np.load(self._ckpt_oof_path(ckpt_dir))
@@ -352,6 +358,31 @@ class DustStackingEnsemble(BaseDustModel):
                         fold_idx + 1, effective_cv, len(X_tr), len(X_vl))
             for m_idx, m_key in enumerate(MODEL_KEYS, 1):
                 fold_model = self._create_base_model_instance(m_key)
+                cell_key = f"{m_key}|{fold_idx}"
+                vec_path = self._ckpt_cell_oof_path(ckpt_dir, m_key, fold_idx) if ckpt_dir is not None else None
+                # Per-(model, fold) checkpoint resume: reload the persisted OOF
+                # predictions instead of retraining this model in this fold.
+                if (
+                    ckpt_dir is not None
+                    and resume_from_checkpoint
+                    and cell_key in done_cells
+                ):
+                    if vec_path.exists():
+                        try:
+                            _cell = np.load(vec_path)
+                            if np.array_equal(_cell["val_idx"].astype(val_idx.dtype), val_idx):
+                                oof_matrix[val_idx, m_idx - 1] = _cell["preds"].astype(np.float32)
+                                logger.info("  ↩️ [Fold %d/%d] [%d/4] %s OOF resumed from checkpoint (no retrain).",
+                                            fold_idx + 1, effective_cv, m_idx, fold_model.name)
+                                continue
+                            logger.warning("  ⚠️ [Fold %d/%d] [%d/4] %s OOF cell stale (split changed); retraining.",
+                                           fold_idx + 1, effective_cv, m_idx, fold_model.name)
+                        except Exception as exc:
+                            logger.warning("  ⚠️ [Fold %d/%d] [%d/4] %s OOF cell load failed (%s); retraining.",
+                                           fold_idx + 1, effective_cv, m_idx, fold_model.name, exc)
+                    else:
+                        logger.warning("  ⚠️ [Fold %d/%d] [%d/4] %s OOF cell file missing; retraining.",
+                                       fold_idx + 1, effective_cv, m_idx, fold_model.name)
                 logger.info("  [Fold %d/%d] [%d/4] Training %s...", fold_idx + 1, effective_cv, m_idx, fold_model.name)
                 t_fstart = time.perf_counter()
                 fold_model.fit(X_tr, y_tr, eval_set=(X_vl, y_vl), feature_names=self.feature_names_)
@@ -359,6 +390,23 @@ class DustStackingEnsemble(BaseDustModel):
                 oof_matrix[val_idx, m_idx - 1] = fold_model.predict(X_vl)
                 logger.info("  ✓ [Fold %d/%d] [%d/4] %s completed in %.1fs",
                             fold_idx + 1, effective_cv, m_idx, fold_model.name, t_felapsed)
+                # Crash-safety: persist fold model + OOF predictions IMMEDIATELY
+                # after each base learner finishes (not only at fold completion).
+                if ckpt_dir is not None:
+                    try:
+                        np.savez(
+                            vec_path,
+                            preds=oof_matrix[val_idx, m_idx - 1].astype(np.float32),
+                            val_idx=val_idx.astype(np.int64),
+                        )
+                        fold_model.save(self._ckpt_cell_model_path(ckpt_dir, m_key, fold_idx))
+                        ckpt_manifest.setdefault("completed_fold_models", [])
+                        if cell_key not in ckpt_manifest["completed_fold_models"]:
+                            ckpt_manifest["completed_fold_models"].append(cell_key)
+                        self._write_ckpt_manifest(ckpt_dir, ckpt_manifest, n_samples, f_names, ckpt_mode, cv)
+                        logger.info("  💾 [CKPT] %s (fold %d) -> %s", m_key, fold_idx + 1, ckpt_dir.name)
+                    except Exception as exc:
+                        logger.warning("Could not save fold checkpoint for %s: %s", m_key, exc)
             if ckpt_dir is not None:
                 try:
                     np.save(self._ckpt_oof_path(ckpt_dir), oof_matrix)
@@ -502,6 +550,12 @@ class DustStackingEnsemble(BaseDustModel):
 
     def _ckpt_oof_path(self, ckpt_dir: Path) -> Path:
         return ckpt_dir / f"oof_matrix_{self.pollutant.lower()}.npy"
+
+    def _ckpt_cell_model_path(self, ckpt_dir: Path, model_key: str, fold_idx: int) -> Path:
+        return ckpt_dir / f"{model_key}_fold{fold_idx + 1}_model_{self.pollutant.lower()}.joblib"
+
+    def _ckpt_cell_oof_path(self, ckpt_dir: Path, model_key: str, fold_idx: int) -> Path:
+        return ckpt_dir / f"oof_{model_key}_fold{fold_idx + 1}_{self.pollutant.lower()}.npz"
 
     @staticmethod
     def _read_ckpt_manifest(path: Path) -> Dict[str, Any]:
