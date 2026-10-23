@@ -1482,6 +1482,7 @@ def _run_seasonal_phase4_suite(
     test_df: pd.DataFrame,
     res_engine: Any,
     per_model_checkpoint: bool,
+    seasons: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """Train full matrix (provider x feature x resolution) per season.
 
@@ -1489,10 +1490,17 @@ def _run_seasonal_phase4_suite(
     station (inside ModelTrainer.train_suite), and strict OOT (same-season
     months of 2026). Checkpoints go to models/<pol>/seasonal/<S*>/ and every
     report carries the season tag so legacy full-year files are never touched.
+
+    ``seasons`` optionally restricts to a subset (e.g. ["S1"]) to save compute
+    when experimenting with a single season.
     """
     pol = pollutant.lower()
     seasonal_all: Dict[str, Any] = {}
+    wanted = {s.upper() for s in seasons} if seasons else set(SEASON_GROUPS)
     for season_tag, months in SEASON_GROUPS.items():
+        if season_tag.upper() not in wanted:
+            logger.info("[SEASON %s] skipped via --seasons filter.", season_tag)
+            continue
         tr_s = _filter_by_months(train_df, months)
         te_s = _filter_by_months(test_df, months)
         n_groups = 0
@@ -1606,6 +1614,11 @@ def run_phase_4_full(
     tune_providers: Optional[List[str]] = None,
     tune_feature_sets: Optional[List[str]] = None,
     per_model_checkpoint: bool = False,
+    skip_provider: bool = False,
+    skip_ablation: bool = False,
+    skip_multires: bool = False,
+    seasonal_only: bool = False,
+    seasons: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
     Executes Phase 4 Full Multi-Year Model Suite & Ensemble Training:
@@ -1811,85 +1824,103 @@ def run_phase_4_full(
     del unified_df
     gc.collect()
 
+    if seasonal_only:
+        skip_provider = skip_ablation = skip_multires = True
+        logger.info("Seasonal-only mode: skipping provider/ablation/multi-res full-year training.")
+
+    provider_res: Dict[str, Any] = {}
+    ablation_res: Dict[str, Any] = {}
+    benchmark_res: Dict[str, Any] = {}
+
     # --------------------------------------------------------------------------
     # 1. Provider-Partitioned Production Training (FIRST):
     #    Air4Thai -> AirGradient -> Combined (persists every checkpoint; Combined
     #    is the production inference model) plus cross-provider generalization
     #    benchmark (train on one provider, predict the other, swapped).
     # --------------------------------------------------------------------------
-    logger.info("\n" + "=" * 75)
-    logger.info("🧩 PHASE 4 PROVIDER-PARTITIONED PRODUCTION TRAINING (%s)", tgt_name)
-    logger.info("  • Feature sets: Full Multimodal + Pure Satellite, at every resolution")
-    logger.info("  • Providers: Air4Thai, AirGradient, Combined (per feature set × resolution)")
-    logger.info("  • [Combined] Air4Thai + AirGradient production ensemble")
-    logger.info("  • Cross-provider generalization (train → predict swap)")
-    logger.info("=" * 75)
+    if not skip_provider:
+        logger.info("\n" + "=" * 75)
+        logger.info("🧩 PHASE 4 PROVIDER-PARTITIONED PRODUCTION TRAINING (%s)", tgt_name)
+        logger.info("  • Feature sets: Full Multimodal + Pure Satellite, at every resolution")
+        logger.info("  • Providers: Air4Thai, AirGradient, Combined (per feature set × resolution)")
+        logger.info("  • [Combined] Air4Thai + AirGradient production ensemble")
+        logger.info("  • Cross-provider generalization (train → predict swap)")
+        logger.info("=" * 75)
 
-    provider_res = trainer.run_provider_partitioned_training(
-        train_matrices_by_res=train_matrices_by_res,
-        test_matrices_by_res=test_matrices_by_res,
-        providers=["Air4Thai", "AirGradient"],
-        feature_sets={
-            "full": list(FULL_MULTIMODAL_COLUMNS),
-            "pure_satellite": list(NO_WEATHER_FEATURE_COLUMNS),
-        },
-        include_combined=True,
-        cross_provider_eval=True,
-        save_checkpoints=True,
-        per_model_checkpoint=per_model_checkpoint,
-    )
+        provider_res = trainer.run_provider_partitioned_training(
+            train_matrices_by_res=train_matrices_by_res,
+            test_matrices_by_res=test_matrices_by_res,
+            providers=["Air4Thai", "AirGradient"],
+            feature_sets={
+                "full": list(FULL_MULTIMODAL_COLUMNS),
+                "pure_satellite": list(NO_WEATHER_FEATURE_COLUMNS),
+            },
+            include_combined=True,
+            cross_provider_eval=True,
+            save_checkpoints=True,
+            per_model_checkpoint=per_model_checkpoint,
+        )
 
-    # Provider matrix visual diagnostics:
-    #   • Feature Set × Resolution × Provider benchmark (grouped bars) + CSV
-    #   • Cross-provider generalization heatmaps (train on provider → predict across) + CSV
-    eval_dir = get_evaluation_dir(pol)
-    provider_plotter = EvaluationPlotter(output_dir=eval_dir, pollutant=pol)
-    if provider_res.get("summary_table"):
-        provider_plotter.plot_provider_feature_resolution_benchmark(
-            provider_res["summary_table"], pollutant=pol
-        )
-    if provider_res.get("cross_provider_table"):
-        provider_plotter.plot_cross_provider_matrix(
-            provider_res["cross_provider_table"], metric="mae", pollutant=pol
-        )
-        provider_plotter.plot_cross_provider_matrix(
-            provider_res["cross_provider_table"], metric="r2", pollutant=pol
-        )
+        # Provider matrix visual diagnostics:
+        #   • Feature Set × Resolution × Provider benchmark (grouped bars) + CSV
+        #   • Cross-provider generalization heatmaps (train on provider → predict across) + CSV
+        eval_dir = get_evaluation_dir(pol)
+        provider_plotter = EvaluationPlotter(output_dir=eval_dir, pollutant=pol)
+        if provider_res.get("summary_table"):
+            provider_plotter.plot_provider_feature_resolution_benchmark(
+                provider_res["summary_table"], pollutant=pol
+            )
+        if provider_res.get("cross_provider_table"):
+            provider_plotter.plot_cross_provider_matrix(
+                provider_res["cross_provider_table"], metric="mae", pollutant=pol
+            )
+            provider_plotter.plot_cross_provider_matrix(
+                provider_res["cross_provider_table"], metric="r2", pollutant=pol
+            )
+    else:
+        logger.info("⏭️ Skipping provider-partitioned full-year training (--skip-provider).")
 
     # --------------------------------------------------------------------------
     # 2. Scientific Weather Ablation: Model 1 (Pure Satellite) vs Model 2 (Multimodal)
     # --------------------------------------------------------------------------
-    logger.info("\n" + "=" * 75)
-    logger.info("🔬 PHASE 4 DUAL MODEL ARCHITECTURES (%s)", tgt_name)
-    logger.info("  • [Model 1] Pure Satellite Suite (Maritime/Sea Grid Ready, No Ground Stations)")
-    logger.info("  • [Model 2] Full Multimodal Suite (Satellite + Topography + Ground Weather)")
-    logger.info("=" * 75)
+    if not skip_ablation:
+        logger.info("\n" + "=" * 75)
+        logger.info("🔬 PHASE 4 DUAL MODEL ARCHITECTURES (%s)", tgt_name)
+        logger.info("  • [Model 1] Pure Satellite Suite (Maritime/Sea Grid Ready, No Ground Stations)")
+        logger.info("  • [Model 2] Full Multimodal Suite (Satellite + Topography + Ground Weather)")
+        logger.info("=" * 75)
 
-    ablation_res = trainer.run_weather_ablation_benchmark(
-        train_df=train_df,
-        test_df=test_df if not test_df.empty else None,
-        cv=None,
-        experiment_id=f"EXP-2KM-{tgt_name}",
-    )
+        ablation_res = trainer.run_weather_ablation_benchmark(
+            train_df=train_df,
+            test_df=test_df if not test_df.empty else None,
+            cv=None,
+            experiment_id=f"EXP-2KM-{tgt_name}",
+        )
+    else:
+        logger.info("⏭️ Skipping weather ablation full-year benchmark (--skip-ablation).")
 
     # --------------------------------------------------------------------------
     # 3. Multi-Resolution Benchmark: 3.0km, 2.0km, 1.0km, 0.5km
     # --------------------------------------------------------------------------
-    logger.info("\n" + "=" * 75)
-    logger.info("🗺️ PHASE 4 MULTI-RESOLUTION BENCHMARK MATRIX (%s)", tgt_name)
-    logger.info("  • Resolutions: 3.0 km (EXP-3KM), 2.0 km (EXP-2KM), 1.0 km (EXP-1KM), 0.5 km (EXP-500M)")
-    logger.info("=" * 75)
+    if not skip_multires:
+        logger.info("\n" + "=" * 75)
+        logger.info("🗺️ PHASE 4 MULTI-RESOLUTION BENCHMARK MATRIX (%s)", tgt_name)
+        logger.info("  • Resolutions: 3.0 km (EXP-3KM), 2.0 km (EXP-2KM), 1.0 km (EXP-1KM), 0.5 km (EXP-500M)")
+        logger.info("=" * 75)
 
-    benchmark_res = trainer.run_multi_resolution_benchmark(
-        train_matrices_by_res=train_matrices_by_res,
-        test_matrices_by_res=test_matrices_by_res,
-    )
-    benchmark_res["provider_partitioned_training"] = provider_res
+        benchmark_res = trainer.run_multi_resolution_benchmark(
+            train_matrices_by_res=train_matrices_by_res,
+            test_matrices_by_res=test_matrices_by_res,
+        )
+        if provider_res:
+            benchmark_res["provider_partitioned_training"] = provider_res
+    else:
+        logger.info("⏭️ Skipping multi-resolution full-year benchmark (--skip-multires).")
 
     # --------------------------------------------------------------------------
     # 4. Seasonal suite S1 (Jan-Jun) / S2 (Jul-Dec): same pipeline per season.
     #    Legacy results above are untouched; seasonal checkpoints/reports are
-    #    isolated (models/<pol>/seasonal/<S*>/, *_S1/*_S2). No CLI flag needed.
+    #    isolated (models/<pol>/seasonal/<S*>/, *_S1/*_S2).
     # --------------------------------------------------------------------------
     logger.info("\n" + "=" * 75)
     logger.info("🗓️ PHASE 4 SEASONAL SUITE S1/S2 (%s) — same matrix per season", tgt_name)
@@ -1901,6 +1932,7 @@ def run_phase_4_full(
         test_df=test_df,
         res_engine=res_engine,
         per_model_checkpoint=per_model_checkpoint,
+        seasons=seasons,
     )
 
     # Memory hygiene: all training work is done — release every remaining
@@ -2014,6 +2046,32 @@ def main():
         help="Save a per-model checkpoint after each base learner finishes (and resume from it on restart). Without it, only the final ensemble is saved per experiment."
     )
     parser.add_argument(
+        "--skip-provider",
+        action="store_true",
+        help="Skip full-year provider-partitioned training (saves ~24 ensembles). Useful with --seasonal-only."
+    )
+    parser.add_argument(
+        "--skip-ablation",
+        action="store_true",
+        help="Skip full-year weather ablation benchmark (saves 2 ensembles: FULL-WEATHER + NO-WEATHER)."
+    )
+    parser.add_argument(
+        "--skip-multires",
+        action="store_true",
+        help="Skip full-year multi-resolution benchmark (saves 4 ensembles: 3km/2km/1km/500m)."
+    )
+    parser.add_argument(
+        "--seasonal-only",
+        action="store_true",
+        help="Train seasonal suite S1/S2 only; implies --skip-provider --skip-ablation --skip-multires."
+    )
+    parser.add_argument(
+        "--seasons",
+        type=str,
+        default=None,
+        help="Restrict seasonal suite to a subset, e.g. 'S1' or 'S1,S2' (default: both). Saves ~50%% per season skipped."
+    )
+    parser.add_argument(
         "--audit",
         action="store_true",
         help="Execute Phase 1B provenance and codebase integrity audit"
@@ -2096,6 +2154,10 @@ def main():
 
     train_segs = parse_segs(args.satellite_segments or args.train_segments, [4])
     test_segs = parse_segs(args.satellite_segments or args.test_segments, [3, 4, 5])
+    seasons_filter = (
+        [s.strip().upper() for s in args.seasons.split(",") if s.strip()]
+        if args.seasons else None
+    )
 
     if args.dir_data or args.dir_output:
         configure_paths(data_dir=args.dir_data, outputs_dir=args.dir_output)
@@ -2151,6 +2213,11 @@ def main():
                     tune=args.tune, tune_trials=args.tune_trials,
                     tune_subsample_frac=args.tune_subsample_frac,
                     per_model_checkpoint=args.checkpoint,
+                    skip_provider=args.skip_provider,
+                    skip_ablation=args.skip_ablation,
+                    skip_multires=args.skip_multires,
+                    seasonal_only=args.seasonal_only,
+                    seasons=seasons_filter,
                 )
         else:
             sample_dt = pd.Timestamp(args.start_date or "2026-10-12 14:00:00", tz="UTC")
@@ -2176,6 +2243,11 @@ def main():
                     tune=args.tune, tune_trials=args.tune_trials,
                     tune_subsample_frac=args.tune_subsample_frac,
                     per_model_checkpoint=args.checkpoint,
+                    skip_provider=args.skip_provider,
+                    skip_ablation=args.skip_ablation,
+                    skip_multires=args.skip_multires,
+                    seasonal_only=args.seasonal_only,
+                    seasons=seasons_filter,
                 )
             else:
                 run_phase_4_smoke_test(sample_dt, pollutant=p, cadence_hours=args.cadence_hours)
@@ -2209,6 +2281,11 @@ def main():
                 tune=args.tune, tune_trials=args.tune_trials,
                 tune_subsample_frac=args.tune_subsample_frac,
                 per_model_checkpoint=args.checkpoint,
+                skip_provider=args.skip_provider,
+                skip_ablation=args.skip_ablation,
+                skip_multires=args.skip_multires,
+                seasonal_only=args.seasonal_only,
+                seasons=seasons_filter,
             )
     elif args.start_date and args.end_date:
         start_dt = pd.Timestamp(args.start_date, tz="UTC")
